@@ -56,6 +56,8 @@ Owner's order: **UI first, then Thetanuts core logic, then DB and socials.** Con
 
 Parallel track (teammate): AI companion, once the thesis data shape from step 2/4 is agreed.
 
+Shared contract with the teammate: `docs/PRD.md` §10.2 defines `ThesisAiContext`; the core side (us) builds and validates it and provides a fixture plus server function. Neither side changes it without telling the other and updating the PRD (PRD §15).
+
 ## How work is done here (owner rules, verbatim where it matters)
 
 - **"NEVER TRUST YOURSELF, DON'T FUCKED UP."** Every claim, number, name and file path is verified at the source before it is used or said. A sol's output and Claude's own output are invalid until re-measured. Load the `verify-first` skill before claims and the `fable-method` skill before hard tasks.
@@ -63,6 +65,7 @@ Parallel track (teammate): AI companion, once the thesis data shape from step 2/
 - Parallel writers get separate git worktrees. Never two agents in one mutable tree.
 - **Bun only.** Never npm, npx, yarn, pnpm. Registry lookups via `bun pm view`. shadcn via `bunx shadcn@latest add <name> -c packages/ui`.
 - Never push without an explicit owner command. Never `--no-verify`. Local commits are fine.
+- **Pull from GitHub whenever the team has pushed** (owner rule 2026-09-05): `git fetch origin` at the start of every work block and before every commit or worker launch; merge `origin/main` if it is ahead; re-read changed guidance (`CLAUDE.md`, `docs/PRD.md`) before acting; pin worker base commits to hashes on the merged main.
 - The repo will be public: no credential-shaped values in tracked files. `apps/web/.env` is the only env file and is gitignored; it holds the local `DATABASE_URL` and the production Supabase password (project ref still needed to form the prod URL).
 
 ## Commands

@@ -22,6 +22,21 @@ Wallet addresses are normalized to lowercase before persistence. Database checks
 
 Constraint triggers fence every referenced creator position to the same thesis and creator, creator role, Base mainnet, a confirmed lifecycle status, and a non-null confirmation timestamp. Raw SQL writers must explicitly maintain `users.updated_at`; Drizzle updates apply its `$onUpdate` callback.
 
+The position wallet must also equal the creator user's wallet. A deferred user-wallet trigger rejects a changed wallet while that user has an open, expired, or settled thesis (same-value updates are allowed). This is the simpler rejection policy requested in round 3, rather than reassigning historic positions.
+
+`positions.chain_id` and `auth_challenges.chain_id` must be 8453. Confirmed, indexed, expired, and settled positions require a non-null `fill_event` with version 1; write it through `encodeFillEventSnapshot`. SQL NULL, a missing version, and JSON null cannot satisfy the check.
+
+Contracts must be positive integers. All decimals columns must be non-negative. Each nullable base-unit quantity requires its decimals when the quantity is present. Round 3 covers these columns:
+
+- `positions`: `contracts`; `budget_decimals`, `contract_decimals`, `premium_decimals`, `fee_decimals`, `collateral_decimals`, `break_even_price_decimals`; `maximum_loss` / `maximum_loss_decimals`, `maximum_payout` / `maximum_payout_decimals`, `estimated_pnl` / `estimated_pnl_decimals`, `settlement_price` / `settlement_price_decimals`, `payout` / `payout_decimals`, `final_pnl` / `final_pnl_decimals`; `break_even_prices`.
+- `theses`: `strike_decimals`, `collateral_decimals`, `strikes`.
+
+Strikes and base-unit break-even arrays reject null elements, multidimensional arrays, fractional elements, and negative elements. Strikes must be non-empty; an empty break-even array remains valid. The dimension guard uses `CASE` so PostgreSQL never calls the one-dimensional `array_position` function on a multidimensional input.
+
+`BEFORE UPDATE` triggers reject changes to `theses.creator_order_snapshot` and `positions.order_snapshot` using `IS DISTINCT FROM`; identical JSON values and updates to other columns are allowed. New trigger functions use qualified `public` table references and pin `search_path = pg_catalog, public`.
+
+Activity must reference a thesis or position. Follow-up: activity lifecycle validation against confirmed domain events remains the application writer's responsibility; lifecycle triggers are outside round 3's scope.
+
 ## Migrations
 
 Generate migrations from this package:
@@ -29,6 +44,7 @@ Generate migrations from this package:
 ```bash
 cd packages/db
 bunx drizzle-kit generate
+bunx drizzle-kit check
 ```
 
 Apply migrations to the local database by providing its URL:
@@ -44,6 +60,10 @@ Apply to production only with the intended production URL explicitly supplied. G
 cd packages/db
 DATABASE_URL='<production-postgres-url>' bunx drizzle-kit migrate
 ```
+
+Migrations `0004_boring_gorilla_man` (generated checks) and `0005_wallet-and-snapshot-invariants` (hand-written functions/triggers) follow round 2's `0003`; both are recorded in `src/migrations/meta/_journal.json`. Existing rows must satisfy the new checks before migration can succeed. No backfill values are invented here.
+
+After applying migrations, run `DATABASE_URL='<intended-test-postgres-url>' bun test test/schema.integration.test.ts`. Each integration case seeds its own transaction and rolls it back. Without `DATABASE_URL`, the file emits one skipped test. The isolated trigger tests temporarily drop the overlapping Base CHECK or creator-position FK inside their rollback transaction to prove the trigger itself rejects the invalid relationship. Use a test database whose role owns these tables.
 
 ## AI teammate handoff
 

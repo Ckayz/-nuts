@@ -25,7 +25,7 @@ export const expiredThesisAiContext: ThesisAiContext = {
 
 export const settledThesisAiContext: ThesisAiContext = {
   ...openThesisAiContext,
-  thesis: { ...openThesisAiContext.thesis, id: "eth-2500-friday", headline: "ETH prints 2,500 by Friday close. Funding reset, shorts are crowded.", rationale: null, direction: "bull", status: "settled" },
+  thesis: { ...openThesisAiContext.thesis, id: "eth-2500-friday", headline: "ETH prints 2,500 by Friday close. Funding reset, shorts are crowded.", rationale: null, direction: "bull", status: "settled", createdAt: "2026-09-03T01:42:00.000Z" },
   creator: { walletAddress: "0x7c4a00000000000000000000000000000000e10b", displayName: "delta_vega" },
   market: { ...openThesisAiContext.market, underlyingAsset: "ETH", currentSpotPriceUsd: "2450.21", expiryAt: "2026-09-04T08:00:00.000Z" },
   structure: { productType: "call spread", isCall: true, isLong: true, strikesUsd: ["2400", "2500"], collateralSymbol: "USDC", contracts: "0.0126" },

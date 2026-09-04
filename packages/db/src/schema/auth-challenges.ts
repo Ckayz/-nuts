@@ -13,6 +13,7 @@ export const authChallenges = pgTable(
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
   },
   (table) => [
+    check("auth_challenges_base_chain", sql`${table.chainId} = 8453`),
     uniqueIndex("auth_challenges_nonce_unique").on(table.nonce),
     check("auth_challenges_wallet_address_lowercase", sql`${table.walletAddress} = lower(${table.walletAddress})`),
   ],

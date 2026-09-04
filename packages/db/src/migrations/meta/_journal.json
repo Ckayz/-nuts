@@ -29,6 +29,20 @@
       "when": 1788553777046,
       "tag": "0003_public-thesis-invariant",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788555903803,
+      "tag": "0004_boring_gorilla_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788556070707,
+      "tag": "0005_wallet-and-snapshot-invariants",
+      "breakpoints": true
     }
   ]
 }

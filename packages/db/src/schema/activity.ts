@@ -1,5 +1,5 @@
-import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
+import { check, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { positions } from "./positions";
 import { theses } from "./theses";
 import { users } from "./users";
@@ -13,7 +13,7 @@ export const activity = pgTable("activity", {
   positionId: uuid("position_id").references(() => positions.id),
   eventType: text("event_type").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [check("activity_domain_reference_required", sql`${table.thesisId} is not null or ${table.positionId} is not null`)]);
 
 export const activityRelations = relations(activity, ({ one }) => ({
   user: one(users, { fields: [activity.userId], references: [users.id] }),

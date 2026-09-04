@@ -39,6 +39,8 @@ export const theses = pgTable(
     settledAt: timestamp("settled_at", { withTimezone: true }),
   },
   (table) => [
+    check("theses_strike_decimals_nonnegative", sql`${table.strikeDecimals} >= 0`),
+    check("theses_collateral_decimals_nonnegative", sql`${table.collateralDecimals} >= 0`),
     // Invariant: a public thesis has exactly one confirmed creator position. The unique
     // reference and presence for public lifecycle states are database-enforced here;
     // status/role/ownership confirmation is enforced transactionally when publishing
@@ -50,7 +52,7 @@ export const theses = pgTable(
       "theses_public_creator_position_required",
       sql`${table.status} not in ('open', 'expired', 'settled') or ${table.creatorPositionId} is not null`,
     ),
-    check("theses_strikes_integral_nonnegative", sql`cardinality(${table.strikes}) > 0 and array_to_string(${table.strikes}, ',') ~ '^[0-9]+(,[0-9]+)*$'`),
+    check("theses_strikes_integral_nonnegative", sql`case when array_ndims(${table.strikes}) = 1 then array_position(${table.strikes}, NULL) is null and cardinality(${table.strikes}) > 0 and array_to_string(${table.strikes}, ',') ~ '^[0-9]+(,[0-9]+)*$' else false end`),
   ],
 );
 

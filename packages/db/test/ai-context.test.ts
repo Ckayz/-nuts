@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { buildThesisAiContext, buildThesisAiContextOrUnavailable, ThesisAiContextError, thesisAiContextSchema, type ThesisAiContext } from "../src/ai-context";
 import { thesisAiContextExamples } from "../src/fixtures/thesis-ai-context.example";
 import type { Position, Thesis, User } from "../src/schema";
+import { canonicalFillEvent } from "./fixtures/fill-event";
 
 function baseUnits(value: string, decimals: number): string {
   const negative = value.startsWith("-");
@@ -60,7 +61,7 @@ function rowsFromExample(example: ThesisAiContext): { thesis: Thesis; creator: U
     orderId: "example-order",
     orderHash: null,
     orderSnapshot,
-    fillEvent: null,
+    fillEvent: canonicalFillEvent,
     indexerPositionId: null,
     txHash: example.verification.transactionHash ?? "",
     optionAddress: example.verification.optionAddress,
@@ -149,10 +150,33 @@ describe("ThesisAiContext", () => {
     expect(buildThesisAiContextOrUnavailable({ thesis: rows.thesis, creator: rows.creator, creatorPosition: rows.position, dataAsOf: thesisAiContextExamples[0].market.dataAsOf })).toMatchObject({ available: true });
   });
 
-  test("rejects unrelated or invalid creator positions with typed codes", () => {
-    const rows = rowsFromExample(thesisAiContextExamples[0]);
-    try { buildThesisAiContext({ thesis: rows.thesis, creator: rows.creator, creatorPosition: { ...rows.position, chainId: 1 }, dataAsOf: new Date() }); throw new Error("expected rejection"); }
-    catch (error) { expect(error).toBeInstanceOf(ThesisAiContextError); expect((error as ThesisAiContextError).code).toBe("INVALID_POSITION"); }
+  const guards: [string, (rows: ReturnType<typeof rowsFromExample>) => void, string][] = [
+    ["thesisId", (rows) => { rows.position.thesisId = "other"; }, "POSITION_MISMATCH"],
+    ["userId", (rows) => { rows.position.userId = "other"; }, "POSITION_MISMATCH"],
+    ["creatorPositionId", (rows) => { rows.position.id = "other"; }, "POSITION_MISMATCH"],
+    ["wallet", (rows) => { rows.creator.walletAddress = rows.creator.walletAddress.toLowerCase(); rows.position.walletAddress = "0xdef"; }, "POSITION_MISMATCH"],
+    ["creatorUserId", (rows) => { rows.thesis.creatorUserId = "other"; }, "POSITION_MISMATCH"],
+    ["role", (rows) => { rows.position.role = "participant"; }, "INVALID_POSITION"],
+    ["chainId", (rows) => { rows.position.chainId = 1; }, "INVALID_POSITION"],
+    ["status", (rows) => { rows.position.status = "failed"; }, "INVALID_POSITION"],
+    ["confirmedAt", (rows) => { rows.position.confirmedAt = null; }, "INVALID_POSITION"],
+  ];
+  for (const [name, mutate, code] of guards) {
+    test(`guard ${name} rejects with ${code}`, () => {
+      const rows = rowsFromExample(thesisAiContextExamples[0]);
+      mutate(rows);
+      let caught: unknown;
+      try { buildThesisAiContext({ thesis: rows.thesis, creator: rows.creator, creatorPosition: rows.position, dataAsOf: thesisAiContextExamples[0].market.dataAsOf }); }
+      catch (error) { caught = error; }
+      expect(caught).toBeInstanceOf(ThesisAiContextError);
+      expect(caught).toMatchObject({ code });
+    });
+  }
+
+  test("positive contracts retain subnormal decimal exactness", () => {
+    const example = thesisAiContextExamples[0];
+    const contracts = "0." + "0".repeat(400) + "1";
+    expect(thesisAiContextSchema.parse({ ...example, structure: { ...example.structure, contracts } }).structure.contracts).toBe(contracts);
   });
 
   test("fixtures are lifecycle coherent and transaction hashes are unique", () => {
@@ -161,7 +185,10 @@ describe("ThesisAiContext", () => {
     for (const value of thesisAiContextExamples) {
       expect(value.verification.transactionHash).toMatch(/^0x[0-9a-f]{64}$/);
       expect(value.verification.confirmedOnchain).toBe(true);
-      if (value.thesis.status === "expired") expect(Date.parse(value.market.expiryAt)).toBeLessThan(Date.parse(value.market.dataAsOf));
+      if (value.thesis.status === "expired" || value.thesis.status === "settled") {
+        expect(Date.parse(value.thesis.createdAt)).toBeLessThan(Date.parse(value.market.expiryAt));
+        expect(Date.parse(value.market.expiryAt)).toBeLessThanOrEqual(Date.parse(value.market.dataAsOf));
+      }
       if (value.thesis.status === "settled") { expect(value.economics.settlementPriceUsd).not.toBeNull(); expect(value.economics.finalPnlUsd).not.toBeNull(); }
       if (value.thesis.status === "pending") { expect(value.market.currentSpotPriceUsd).toBeNull(); expect(value.economics.estimatedPnlUsd).toBeNull(); }
     }

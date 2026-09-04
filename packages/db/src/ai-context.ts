@@ -57,7 +57,7 @@ export interface ThesisAiContext {
 
 const signedDecimal = z.string().regex(/^-?\d+(?:\.\d+)?$/);
 const nonnegativeDecimal = z.string().regex(/^\d+(?:\.\d+)?$/);
-const positiveDecimal = nonnegativeDecimal.refine((value) => Number(value) > 0, "must be positive");
+const positiveDecimal = nonnegativeDecimal.refine((value) => /[1-9]/.test(value), "must be positive");
 const nullableNonnegativeDecimal = nonnegativeDecimal.nullable();
 const nullableSignedDecimal = signedDecimal.nullable();
 const isoTimestamp = z.string().datetime({ offset: false });
@@ -155,7 +155,7 @@ export function buildThesisAiContext(input: BuildThesisAiContextInput): ThesisAi
   if (position === null) {
     throw new ThesisAiContextError("NO_CREATOR_POSITION", "Cannot build ThesisAiContext without creator position: structure.contracts is required by PRD §10.2");
   }
-  const mismatch = position.thesisId !== input.thesis.id || position.userId !== input.creator.id || position.id !== input.thesis.creatorPositionId || position.walletAddress.toLowerCase() !== input.creator.walletAddress.toLowerCase();
+  const mismatch = input.thesis.creatorUserId !== input.creator.id || position.thesisId !== input.thesis.id || position.userId !== input.creator.id || position.id !== input.thesis.creatorPositionId || position.walletAddress.toLowerCase() !== input.creator.walletAddress.toLowerCase();
   if (mismatch) throw new ThesisAiContextError("POSITION_MISMATCH", "Creator position does not belong to the thesis creator");
   if (position.role !== "creator" || position.chainId !== 8453 || !confirmedStatuses.has(position.status) || position.confirmedAt === null) {
     throw new ThesisAiContextError("INVALID_POSITION", "Creator position is not a confirmed Base creator position");

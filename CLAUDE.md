@@ -4,6 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `AGENTS.md` at the repo root is a symlink to this file so Codex and other agents read the same guidance. Edit this file only.
 
+## Product source of truth
+
+`docs/PRD.md` is the source of truth for product scope, user journeys, team ownership, shared interfaces, safety rules, and acceptance criteria. This file remains the source of truth for repository conventions and implementation guidance. If the two conflict on product behavior, follow the PRD.
+
 ## What this repo is
 
 **Thesis.fun** for the Thetanuts hackathon: a pump.fun / FOMO-style social feed where each "launch" is a real options position on Thetanuts, executed on **Base mainnet**. Users post a thesis, take a bull or bear side with their own budget via a real Thetanuts OptionBook fill, and everyone's P&L is verifiable onchain.

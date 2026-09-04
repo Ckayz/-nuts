@@ -1,0 +1,3 @@
+{
+  "extends": "@nuts/config/tsconfig.base.json",
+}

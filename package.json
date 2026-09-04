@@ -1,0 +1,57 @@
+{
+  "name": "nuts",
+  "private": true,
+  "type": "module",
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "dotenv": "^17.4.2",
+      "zod": "^4.4.3",
+      "typescript": "^6.0.3",
+      "@types/node": "^26.2.0",
+      "lucide-react": "^1.27.0",
+      "next-themes": "^0.4.6",
+      "react": "^19.2.8",
+      "react-dom": "^19.2.8",
+      "sonner": "^2.0.7",
+      "@tailwindcss/postcss": "^4.3.3",
+      "@types/react": "^19.2.17",
+      "@types/react-dom": "^19.2.3",
+      "tailwindcss": "^4.3.3"
+    }
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "check-types": "turbo run check-types",
+    "dev:web": "turbo run dev -F web --",
+    "db:push": "turbo run db:push -F @nuts/db --",
+    "db:studio": "turbo run db:studio -F @nuts/db --",
+    "db:generate": "turbo run db:generate -F @nuts/db --",
+    "db:migrate": "turbo run db:migrate -F @nuts/db --",
+    "deploy:setup": "vercel link",
+    "dev:vercel": "vercel dev -L",
+    "env:preview": "tsx scripts/sync-vercel-env.ts preview",
+    "env:production": "tsx scripts/sync-vercel-env.ts production",
+    "deploy": "vercel deploy",
+    "deploy:prod": "vercel deploy --prod",
+    "deploy:check": "vercel deploy --dry"
+  },
+  "packageManager": "bun@1.3.13",
+  "dependencies": {
+    "dotenv": "catalog:",
+    "zod": "catalog:",
+    "@nuts/env": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:",
+    "@nuts/config": "workspace:*",
+    "tsx": "^4.23.1",
+    "vercel": "^58.1.0",
+    "turbo": "^2.10.12"
+  }
+}

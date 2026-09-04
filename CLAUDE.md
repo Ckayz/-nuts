@@ -61,6 +61,7 @@ Shared contract with the teammate: `docs/PRD.md` §10.2 defines `ThesisAiContext
 ## How work is done here (owner rules, verbatim where it matters)
 
 - **"NEVER TRUST YOURSELF, DON'T FUCKED UP."** Every claim, number, name and file path is verified at the source before it is used or said. A sol's output and Claude's own output are invalid until re-measured. Load the `verify-first` skill before claims and the `fable-method` skill before hard tasks.
+- **Zero confidence in everyone, including yourself** (owner, verbatim: "none of yall should trust yourselves or the other. zero confidence in everyone's responses and findings"). Every brief carries this clause; every claim in a report is pasted measurement or it is not a claim; the orchestrator re-measures every headline number and every finding before folding or relaying it.
 - **Writer and reviewers are different agents.** Code is written by a codex sol (`codex exec -s workspace-write -m gpt-5.6-sol -c model_reasoning_effort="low"`) or an Opus worker from a pinned brief carrying the no-product-decisions block. Review is two legs: Claude (hands-on, adversarial, not the author) and a codex sol at high reasoning with a digest-pinned diff and a mandatory `Reviewed <path> SHA-256 <digest>` opener. Fold until both are GREEN. Briefs and transcripts live in gitignored `.research/`.
 - Parallel writers get separate git worktrees. Never two agents in one mutable tree.
 - **Bun only.** Never npm, npx, yarn, pnpm. Registry lookups via `bun pm view`. shadcn via `bunx shadcn@latest add <name> -c packages/ui`.

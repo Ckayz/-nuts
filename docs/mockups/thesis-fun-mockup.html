@@ -1,0 +1,547 @@
+<title>Thesis.fun</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,800&family=Archivo:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --g:#0e0e11; --s:#15151a; --s2:#1c1c22; --k:#f4f4f5; --m:#a1a1aa; --dim:#6b6b76; --l:#26262e; --l2:#33333d;
+    --acc:#F5C542; --acc-soft:rgba(245,197,66,.16); --acc-ink:#1a1400;
+    --bull:#5ee39a; --bear:#ff7a8a; --bull-fill:#22c55e; --bear-fill:#f43f5e; --bull-soft:rgba(34,197,94,.14); --bear-soft:rgba(244,63,94,.14);
+    --disp:"Bricolage Grotesque","Archivo",system-ui,sans-serif; --sans:"Archivo",system-ui,-apple-system,sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--g);color:var(--k);font-family:var(--sans);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .mono,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .mut{color:var(--m)} .dim{color:var(--dim)}
+  .bull{color:var(--bull)} .bear{color:var(--bear)} .acc{color:var(--acc)}
+  .lbl{font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--m)}
+  [hidden]{display:none!important}
+  .todo{display:inline-block;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;color:#ff6fb5;border:1px dashed #ff6fb5;border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:middle}
+  .note{font-size:11.5px;color:var(--m);line-height:1.4}
+
+  /* ===== shell: icon rail + header + ticker + 3 columns + footer ===== */
+  .app{min-height:100vh;display:grid;grid-template-columns:64px 1fr;grid-template-rows:56px 38px 1fr 30px}
+  .nav{grid-row:1/5;border-right:1px solid var(--l);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:6px;background:var(--g)}
+  .nav .logo{width:32px;height:32px;border-radius:9px;background:var(--acc);display:grid;place-items:center;margin-bottom:10px}
+  .nav .logo i{width:13px;height:13px;border-radius:3px;background:var(--acc-ink);transform:rotate(45deg)}
+  .nav button{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;color:var(--m)}
+  .nav button[aria-current="page"]{background:var(--s2);color:var(--k)}
+  .nav button:hover{color:var(--k)}
+  .nav svg{width:19px;height:19px}
+  .nav .create{margin-top:8px;width:40px;height:40px;background:var(--acc);color:var(--acc-ink);border-radius:10px;display:grid;place-items:center}
+  .nav .create svg{width:20px;height:20px}
+  .nav .spacer{flex:1}
+  .nav .me{width:30px;height:30px;border-radius:50%;background:var(--s2);border:1px solid var(--l2);display:grid;place-items:center;font-size:10px;font-weight:600;color:var(--m)}
+  .hdr{display:grid;grid-template-columns:1fr auto;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--l)}
+  .search{display:flex;align-items:center;gap:10px;max-width:520px;background:var(--s);border:1px solid var(--l);border-radius:10px;padding:8px 12px;color:var(--m)}
+  .search svg{width:15px;height:15px}
+  .search kbd{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--l2);border-radius:4px;padding:1px 5px}
+  .hdr .r{display:flex;align-items:center;gap:10px}
+  .ex{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--dim)}
+  .wallet{display:flex;align-items:center;gap:8px;border:1px solid var(--l);border-radius:999px;padding:5px 11px 5px 7px;font-family:var(--mono);font-size:12px}
+  .wallet .dot{width:8px;height:8px;border-radius:50%;background:var(--bull)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:9px 14px;border-radius:9px;border:1px solid var(--l2);font-weight:600;white-space:nowrap;line-height:1;background:var(--s2)}
+  .btn.primary{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+  .btn.block{width:100%;padding:12px 14px;font-size:14px}
+  .btn.sm{padding:6px 11px;font-size:12px}
+  .btn:hover{border-color:var(--m)} .btn.primary:hover{filter:brightness(1.08)}
+  .ttape{display:flex;align-items:center;gap:22px;padding:0 18px;border-bottom:1px solid var(--l);overflow:hidden;white-space:nowrap;font-size:12px}
+  .ttape .lbl{flex:none}
+  .ttape .t{display:inline-flex;align-items:center;gap:6px}
+  .ttape .t .av{width:18px;height:18px;font-size:8px}
+  .ttape .t b{font-weight:600}
+  .ttape .t .num{font-weight:400;font-size:12px}
+  .work{display:grid;grid-template-columns:300px minmax(0,1fr) 320px;min-height:0}
+  .col{overflow:auto;padding:16px 16px;display:flex;flex-direction:column;gap:16px;min-width:0}
+  .col.l{border-right:1px solid var(--l)} .col.r{border-left:1px solid var(--l)}
+  .sec{display:flex;flex-direction:column;gap:8px}
+  .sec-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .h2{font-family:var(--disp);font-weight:800;font-size:18px;letter-spacing:-.01em;margin:0}
+  .h2 .alt{color:var(--m);font-weight:600;margin-left:12px}
+  .foot{grid-column:2;display:flex;align-items:center;gap:24px;padding:0 18px;border-top:1px solid var(--l);font-family:var(--mono);font-size:11px;color:var(--m);white-space:nowrap;overflow:hidden}
+  .foot b{color:var(--k);font-weight:500} .foot .src{margin-left:auto;color:var(--dim)}
+
+  /* ===== lists ===== */
+  .av{width:28px;height:28px;border-radius:50%;background:var(--s2);border:1px solid var(--l2);display:grid;place-items:center;font-size:10px;font-weight:600;color:var(--m);flex:none}
+  .av.s{width:20px;height:20px;font-size:9px}
+  .av.lg{width:36px;height:36px;font-size:12px}
+  .lb{display:flex;flex-direction:column}
+  .lb .row{display:grid;grid-template-columns:18px 28px 1fr auto;align-items:center;gap:8px;padding:8px 2px;border-bottom:1px solid var(--l)}
+  .lb .row .num{font-size:12.5px;font-weight:500}
+  .lb .row:last-child{border-bottom:0}
+  .lb .rank{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .lb .rank.top{color:var(--acc)}
+  .who{display:flex;flex-direction:column;line-height:1.2;min-width:0}
+  .who .n{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .who .h{font-size:12px;color:var(--m);font-family:var(--mono)}
+  .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--l2);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--m);font-weight:600}
+  .pill.on{background:var(--s2);color:var(--k)}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--l)}
+  .tabs button{padding:8px 12px;color:var(--m);font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs button[aria-selected="true"]{color:var(--k);border-bottom-color:var(--acc)}
+  .tabs .count{font-family:var(--mono);font-size:11px;color:var(--dim);margin-left:6px;font-weight:400}
+
+  /* ===== callout post ===== */
+  .newbar{display:flex;align-items:center;justify-content:center;gap:10px;background:var(--s);border:1px solid var(--l);border-radius:10px;padding:8px 12px;font-size:12px;color:var(--m);cursor:pointer}
+  .newbar .st{display:flex} .newbar .st .av{margin-left:-7px;border:2px solid var(--s)} .newbar .st .av:first-child{margin-left:0}
+  .newbar b{color:var(--k)}
+  .post{display:grid;grid-template-columns:36px minmax(0,1fr);gap:12px;padding:14px 0;border-bottom:1px solid var(--l)}
+  .post .thread{position:relative}
+  .post .thread::after{content:"";position:absolute;left:17px;top:42px;bottom:-14px;width:1px;background:var(--l)}
+  .post:last-child .thread::after{display:none}
+  .post .bd{display:flex;flex-direction:column;gap:9px;min-width:0}
+  .post .who2{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--m)}
+  .post .who2 b{color:var(--k);font-weight:600;font-size:13px}
+  .post .who2 .live{margin-left:auto}
+  .live{display:inline-flex;align-items:center;gap:6px;background:var(--acc);color:var(--acc-ink);border-radius:999px;padding:3px 9px;font-size:10.5px;font-weight:700;letter-spacing:.05em;font-family:var(--sans)}
+  .live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--acc-ink)}
+  .live.ending{background:var(--bear-fill);color:#fff} .live.ending::before{background:#fff}
+  .live.settled{background:var(--s2);color:var(--m);border:1px solid var(--l2)} .live.settled::before{background:var(--m)}
+  .h{font-family:var(--disp);font-weight:800;font-size:22px;line-height:1.1;letter-spacing:-.02em;margin:0;text-wrap:balance}
+  .post p.t{margin:0;font-size:13.5px;line-height:1.5}
+  .poscard{background:var(--s);border:1px solid var(--l);border-radius:12px;padding:12px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px 18px;align-items:center}
+  .poscard .nm{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .poscard .nm .a{display:flex;align-items:center;gap:8px;font-weight:600}
+  .poscard .nm .a .chip{display:inline-flex;border:1px solid var(--l2);border-radius:999px;padding:1px 8px;font-family:var(--mono);font-size:10.5px;color:var(--k);font-weight:400}
+  .poscard .nm .d{font-family:var(--mono);font-size:12px;color:var(--m)}
+  .poscard .kv2{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+  .poscard .kv2 .l{font-size:10.5px;color:var(--m);letter-spacing:.06em;text-transform:uppercase;font-weight:600}
+  .poscard .kv2 .v{font-family:var(--mono);font-size:15px;font-weight:600}
+  .poscard .sent{grid-column:1/-1;display:flex;flex-direction:column;gap:5px;padding-top:8px;border-top:1px solid var(--l)}
+  .sent .row2{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;font-weight:500;color:var(--k)}
+  .sent .row2 .bull,.sent .row2 .bear{color:var(--k)} .sent .row2 .bull::before{content:"";display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--bull-fill);margin-right:7px;vertical-align:middle} .sent .row2 .bear::before{content:"";display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--l2);margin-right:7px;vertical-align:middle}
+  .bar{height:5px;border-radius:3px;display:flex;overflow:hidden;background:var(--l2)}
+  .bar i{background:var(--bull-fill);display:block;border-radius:3px}
+  .post.settled .bar i{background:var(--m)}
+  .acts{display:flex;align-items:center;gap:18px;font-family:var(--mono);font-size:12px;color:var(--m)}
+  .acts button{display:inline-flex;align-items:center;gap:5px;color:var(--m)} .acts button:hover{color:var(--k)}
+  .acts svg{width:14px;height:14px}
+  .acts .sides{display:flex;gap:6px;margin-left:auto}
+  .acts .sides button{border:1px solid var(--l2);border-radius:999px;padding:4px 11px;font-weight:700;font-family:var(--sans);font-size:12px}
+  .acts .sides button{color:var(--k)} .acts .sides .b1:hover{background:var(--bull-soft);border-color:var(--bull-fill);color:var(--bull)}
+  .acts .sides .b2:hover{background:var(--bear-soft);border-color:var(--bear-fill);color:var(--bear)}
+  .acts .ai{border:1px solid var(--l2);border-radius:999px;padding:3px 9px;font-family:var(--sans);font-weight:600}
+  .acts .ai:hover{border-color:var(--acc);background:var(--acc-soft);color:var(--k)}
+  .earn{font-family:var(--mono);font-size:11px;color:var(--m)}
+  .earn b{color:var(--k);font-weight:500} .earn::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--acc);margin-right:6px;vertical-align:middle}
+
+  /* ===== right rail: theses list ===== */
+  .tl{display:flex;flex-direction:column}
+  .tl .it{display:grid;grid-template-columns:44px 1fr;gap:10px;padding:9px 0;border-bottom:1px solid var(--l);align-items:start}
+  .tl .it:last-child{border-bottom:0}
+  .tl .thumb{width:44px;height:44px;border-radius:10px;background:var(--s2);border:1px solid var(--l2);display:grid;place-items:center;font-family:var(--disp);font-weight:800;font-size:12px}
+  .tl .thumb.btc{color:#f7931a} .tl .thumb.eth{color:#8aa4ff} .tl .thumb.sol{color:#9be0a5}
+  .tl .b{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .tl .b .n{font-family:var(--disp);font-weight:700;font-size:13.5px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tl .b .d{font-family:var(--mono);font-size:11px;color:var(--m);display:flex;gap:10px}
+  .tl .bar{height:4px}
+
+  /* ===== side panels (thesis page) ===== */
+  .panel{background:var(--s);border:1px solid var(--l);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:11px}
+  .panel h3{margin:0;font-family:var(--disp);font-weight:800;font-size:16px;letter-spacing:-.01em}
+  .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .seg button{border:1px solid var(--l2);background:transparent;color:var(--m);padding:10px 6px;border-radius:9px;font-weight:700;font-size:13px}
+  .seg button.bull[aria-selected="true"]{background:var(--bull-fill);border-color:var(--bull-fill);color:#04130a}
+  .seg button.bear[aria-selected="true"]{background:var(--bear-fill);border-color:var(--bear-fill);color:#fff}
+  .field{display:flex;flex-direction:column;gap:6px}
+  .inp{display:flex;align-items:center;gap:8px;background:var(--g);border:1px solid var(--l2);border-radius:9px;padding:9px 12px;font-family:var(--mono);font-size:17px;font-weight:500}
+  .inp .u{color:var(--m);font-size:11px;margin-left:auto;font-weight:400}
+  .presets{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+  .presets button{border:1px solid var(--l2);border-radius:7px;padding:6px 0;font-family:var(--mono);font-size:12px;color:var(--m)}
+  .presets button:hover{color:var(--k);border-color:var(--m)}
+  .kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:12px;margin:0}
+  .kv dt{color:var(--m);margin:0} .kv dd{margin:0;text-align:right;font-family:var(--mono);color:var(--k)}
+  .kv .big{font-size:16px;font-weight:600}
+  .share{border:1px solid var(--l2);background:var(--g);border-radius:10px;padding:12px}
+
+  /* ===== thesis page ===== */
+  .hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:end;padding-bottom:16px;border-bottom:1px solid var(--l)}
+  .hero .h{font-size:36px;line-height:1.04}
+  .hero .meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;font-size:12px;color:var(--m);margin-top:12px}
+  .hero .meta b{color:var(--k);font-weight:600}
+  .board{display:grid;grid-auto-flow:column;background:var(--s);border:1px solid var(--l);border-radius:12px}
+  .board div{padding:10px 16px;display:flex;flex-direction:column;gap:3px;border-left:1px solid var(--l)}
+  .board div:first-child{border-left:0}
+  .board .v{font-family:var(--mono);font-weight:600;font-size:19px;line-height:1}
+  .charts{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:14px}
+  .chartbox{background:var(--s);border:1px solid var(--l);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+  .chartbox .hh{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+  .chartbox .hh .v{font-family:var(--mono);font-size:15px;font-weight:500}
+  canvas{width:100%;height:220px;display:block}
+  svg.payoff{width:100%;height:220px;display:block;overflow:visible}
+  .legend{display:flex;gap:14px;font-family:var(--mono);font-size:10.5px;color:var(--m);flex-wrap:wrap}
+  .legend i{display:inline-block;width:12px;height:2px;vertical-align:middle;margin-right:5px;border-radius:1px}
+  .tablewrap{overflow-x:auto;background:var(--s);border:1px solid var(--l);border-radius:14px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;font-weight:600;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--m);padding:10px 12px;border-bottom:1px solid var(--l)}
+  td{padding:10px 12px;border-bottom:1px solid var(--l);vertical-align:middle}
+  tr:last-child td{border-bottom:0}
+  td.num,th.num{text-align:right;font-family:var(--mono)}
+  .side-tag{display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:5px}
+  .side-tag.bull{color:var(--bull);background:var(--bull-soft)} .side-tag.bear{color:var(--bear);background:var(--bear-soft)}
+  .tx{font-family:var(--mono);font-size:11px;color:var(--m)} .tx:hover{color:var(--acc)}
+  .cmt{display:grid;grid-template-columns:28px 1fr;gap:10px;padding:10px 0;border-bottom:1px solid var(--l)}
+  .cmt .b{display:flex;flex-direction:column;gap:3px} .cmt .m{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  @media (max-width:1180px){.work{grid-template-columns:1fr}.col.l,.col.r{border:0;border-bottom:1px solid var(--l)}.charts{grid-template-columns:1fr}.hero{grid-template-columns:1fr}}
+</style>
+
+<div class="app">
+  <nav class="nav" aria-label="Primary">
+    <span class="logo" aria-hidden="true"><i></i></span>
+    <button aria-current="page" title="Home" data-view="discover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg></button>
+    <button title="Explore theses"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M15 9l-2 6-4 2 2-6z"/></svg></button>
+    <button title="Live tape"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2.5"/><path d="M7 7a7 7 0 0 0 0 10M17 7a7 7 0 0 1 0 10M4 4a11 11 0 0 0 0 16M20 4a11 11 0 0 1 0 16"/></svg></button>
+    <button title="Portfolio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l5-6 4 4 4-7 5 5"/><path d="M3 21h18"/></svg></button>
+    <button title="Leaderboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4a3 3 0 0 0 3 3M17 6h3a3 3 0 0 1-3 3"/></svg></button>
+    <button class="create" title="Launch a thesis"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></button>
+    <span class="spacer"></span>
+    <span class="me">WH</span>
+  </nav>
+
+  <header class="hdr">
+    <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>Search theses, markets and creators…</span><kbd>⌘ K</kbd></div>
+    <div class="r"><span class="ex">EXAMPLE DATA</span><span class="wallet"><span class="dot"></span>0x7c4a…e10b<span class="dim">Base</span></span></div>
+  </header>
+
+  <div class="ttape">
+    <span class="lbl">Top creators · 1W</span>
+    <span class="t"><span class="av s">MK</span><b>@merkle_mike</b><span class="num bull">+$18,240</span></span>
+    <span class="t"><span class="av s">NS</span><b>@nutsauce</b><span class="num bull">+$11,905</span></span>
+    <span class="t"><span class="av s">GA</span><b>@gamma.eth</b><span class="num bull">+$7,310</span></span>
+    <span class="t"><span class="av s">DV</span><b>@delta_vega</b><span class="num bull">+$4,082</span></span>
+    <span class="t"><span class="av s">JL</span><b>@jlin</b><span class="num bull">+$2,915</span></span>
+    <span class="t"><span class="av s">0X</span><b>@0xsable</b><span class="num bull">+$1,740</span></span>
+    <span class="t"><span class="av s">TB</span><b>@tailbet</b><span class="num bull">+$1,212</span></span>
+    <span class="t"><span class="av s">RH</span><b>@rekt_hedger</b><span class="num bear">−$1,140</span></span>
+  </div>
+
+  <!-- ================= DISCOVER ================= -->
+  <div class="work" id="view-discover">
+    <aside class="col l">
+      <div class="sec">
+        <div class="sec-h"><h2 class="h2">Top P&amp;L<span class="alt">Top earners</span></h2></div>
+        <div style="display:flex;gap:6px"><span class="pill on">Net P&amp;L ▾</span><span class="pill">1W ▾</span></div>
+        <div class="lb">
+          <div class="row"><span class="rank top">1</span><span class="av">MK</span><span class="who"><span class="n">merkle_mike</span><span class="h">71% · 24 theses</span></span><span class="num bull">+$18,240</span></div>
+          <div class="row"><span class="rank top">2</span><span class="av">NS</span><span class="who"><span class="n">nutsauce</span><span class="h">64% · 31</span></span><span class="num bull">+$11,905</span></div>
+          <div class="row"><span class="rank top">3</span><span class="av">GA</span><span class="who"><span class="n">gamma.eth</span><span class="h">58% · 12</span></span><span class="num bull">+$7,310</span></div>
+          <div class="row"><span class="rank">4</span><span class="av">DV</span><span class="who"><span class="n">delta_vega</span><span class="h">55% · 40</span></span><span class="num bull">+$4,082</span></div>
+          <div class="row"><span class="rank">5</span><span class="av">JL</span><span class="who"><span class="n">jlin</span><span class="h">60% · 9</span></span><span class="num bull">+$2,915</span></div>
+          <div class="row"><span class="rank">6</span><span class="av">0X</span><span class="who"><span class="n">0xsable</span><span class="h">52% · 17</span></span><span class="num bull">+$1,740</span></div>
+          <div class="row"><span class="rank">7</span><span class="av">TB</span><span class="who"><span class="n">tailbet</span><span class="h">50% · 6</span></span><span class="num bull">+$1,212</span></div>
+          <div class="row"><span class="rank">8</span><span class="av">RH</span><span class="who"><span class="n">rekt_hedger</span><span class="h">49% · 19</span></span><span class="num bear">−$1,140</span></div>
+        </div>
+        <span class="note">All P&amp;L from onchain fills and settlements. Ranking formula <span class="todo">TODO-OWNER</span></span>
+      </div>
+      <div class="sec">
+        <div class="sec-h"><span class="lbl">Creator payouts · this week</span></div>
+        <dl class="kv"><dt>Paid to creators</dt><dd class="acc">$2,184</dd><dt>From follower fills</dt><dd>$412,900</dd><dt>Top earner</dt><dd>merkle_mike · $611</dd></dl>
+        <span class="note">Creators earn a share of every fill their callout brings in, like X pays creators. Rate <span class="todo">TODO-OWNER</span></span>
+      </div>
+    </aside>
+
+    <main class="col">
+      <div class="sec-h"><h2 class="h2">Callouts<span class="alt">Following</span><span class="alt">Top</span></h2><div style="display:flex;gap:6px"><span class="pill on">All</span><span class="pill">BTC</span><span class="pill">ETH</span><span class="pill">SOL</span></div></div>
+      <div class="newbar"><span class="st"><span class="av s">TB</span><span class="av s">JL</span><span class="av s">NS</span></span><b>+9 new callouts</b><span>· show</span></div>
+
+      <div class="feed">
+        <article class="post">
+          <div class="thread"><span class="av lg">MK</span></div>
+          <div class="bd">
+            <div class="who2"><b>merkle_mike</b><span class="mono">@merkle_mike</span><span>· 18m</span><span class="live">LIVE · 6d 14h</span></div>
+            <p class="h">BTC bleeds after NFP. Jobs print is hot, cuts get pushed, risk unwinds into the weekend.</p>
+            <p class="t">Skew is already paying for the downside wing. I want defined risk into Monday. If we open above 80.5k I'm wrong, and it stays on the chain.</p>
+            <div class="poscard">
+              <div class="nm"><span class="a">BTC put spread <span class="chip">78,000 / 74,000 P</span><span class="chip">11 SEP</span></span><span class="d">Spot 79,607 · 0.0126 ct · max payout 4.6× · Base · OptionBook</span></div>
+              <div class="kv2"><span class="l">Risked</span><span class="v">$1,000</span></div>
+              <div class="kv2"><span class="l">Live P&amp;L</span><span class="v bull">+$612</span></div>
+              <div class="sent"><div class="row2"><span class="bull">78% Bull · 31 · $7,920</span><span class="bear">22% Bear · 9 · $1,500</span></div><div class="bar"><i style="width:78%"></i></div></div>
+            </div>
+            <div class="acts">
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>142</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>17</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
+              <span class="earn">creator earned <b>$611</b> from 40 fills</span>
+              <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
+              <span class="sides"><button class="b1">Bull</button><button class="b2">Bear</button></span>
+            </div>
+          </div>
+        </article>
+
+        <article class="post">
+          <div class="thread"><span class="av lg">NS</span></div>
+          <div class="bd">
+            <div class="who2"><b>nutsauce</b><span class="mono">@nutsauce</span><span>· 2m</span><span class="live ending">ENDING · 1d 02h</span></div>
+            <p class="h">SOL loses 100 before the weekend. Nobody is bidding this chop.</p>
+            <div class="poscard">
+              <div class="nm"><span class="a">SOL put <span class="chip">100 P</span><span class="chip">06 SEP</span></span><span class="d">Spot 101.46 · premium 2.14 / ct · break-even 97.86 · Base · OptionBook</span></div>
+              <div class="kv2"><span class="l">Risked</span><span class="v">$300</span></div>
+              <div class="kv2"><span class="l">Live P&amp;L</span><span class="v bear">−$38</span></div>
+              <div class="sent"><div class="row2"><span class="bull">40% Bull · 4 · $440</span><span class="bear">60% Bear · 6 · $670</span></div><div class="bar"><i style="width:40%"></i></div></div>
+            </div>
+            <div class="acts">
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>9</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>3</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
+              <span class="earn">creator earned <b>$14</b> from 10 fills</span>
+              <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
+              <span class="sides"><button class="b1">Bull</button><button class="b2">Bear</button></span>
+            </div>
+          </div>
+        </article>
+
+        <article class="post">
+          <div class="thread"><span class="av lg">GA</span></div>
+          <div class="bd">
+            <div class="who2"><b>gamma.eth</b><span class="mono">@gamma.eth</span><span>· 3h</span><span class="live">LIVE · 20d 09h</span></div>
+            <p class="h">ETH reclaims 2,600 into the Fusaka upgrade. Every dip has been bought for a month.</p>
+            <p class="t">Cheap upside because vol got crushed after the last range. Call spread caps it but I only need 2,800.</p>
+            <div class="poscard">
+              <div class="nm"><span class="a">ETH call spread <span class="chip">2,600 / 2,800 C</span><span class="chip">25 SEP</span></span><span class="d">Spot 2,450 · 0.71 ct · max payout 3.1× · Base · OptionBook</span></div>
+              <div class="kv2"><span class="l">Risked</span><span class="v">$500</span></div>
+              <div class="kv2"><span class="l">Live P&amp;L</span><span class="v bull">+$204</span></div>
+              <div class="sent"><div class="row2"><span class="bull">61% Bull · 22 · $4,205</span><span class="bear">39% Bear · 14 · $2,670</span></div><div class="bar"><i style="width:61%"></i></div></div>
+            </div>
+            <div class="acts">
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>88</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>12</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
+              <span class="earn">creator earned <b>$388</b> from 36 fills</span>
+              <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
+              <span class="sides"><button class="b1">Bull</button><button class="b2">Bear</button></span>
+            </div>
+          </div>
+        </article>
+
+        <article class="post settled">
+          <div class="thread"><span class="av lg">DV</span></div>
+          <div class="bd">
+            <div class="who2"><b>delta_vega</b><span class="mono">@delta_vega</span><span>· settled 9m</span><span class="live settled">SETTLED · BULL WON</span></div>
+            <p class="h">ETH prints 2,500 by Friday close. Funding reset, shorts are crowded.</p>
+            <div class="poscard">
+              <div class="nm"><span class="a">ETH call spread <span class="chip">2,400 / 2,500 C</span><span class="chip">04 SEP</span></span><span class="d">Settled 2,512.40 · payout 1,120 / ct · tx <a class="tx" href="#">0x91ab…4f2e ↗</a></span></div>
+              <div class="kv2"><span class="l">Risked</span><span class="v">$800</span></div>
+              <div class="kv2"><span class="l">Result</span><span class="v bull">+$1,920</span></div>
+              <div class="sent"><div class="row2"><span class="bull">71% Bull · 27 · +$3,455</span><span class="mut">29% Bear · 11 · −$1,580</span></div><div class="bar"><i style="width:71%"></i></div></div>
+            </div>
+            <div class="acts">
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>210</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>41</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
+              <span class="earn">creator earned <b>$524</b> from 38 fills</span>
+              <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </main>
+
+    <aside class="col r">
+      <div class="sec">
+        <div class="sec-h"><h2 class="h2">Trending<span class="alt">Ending</span><span class="alt">Settled</span></h2></div>
+        <div class="tl">
+          <div class="it"><span class="thumb btc">BTC</span><div class="b"><span class="n">BTC bleeds after NFP</span><span class="d"><span>merkle_mike</span><span>6d</span><span class="bull">+$612</span></span><div class="bar"><i style="width:78%"></i></div></div></div>
+          <div class="it"><span class="thumb eth">ETH</span><div class="b"><span class="n">ETH reclaims 2,600 into Fusaka</span><span class="d"><span>gamma.eth</span><span>20d</span><span class="bull">+$204</span></span><div class="bar"><i style="width:61%"></i></div></div></div>
+          <div class="it"><span class="thumb sol">SOL</span><div class="b"><span class="n">SOL loses 100 before the weekend</span><span class="d"><span>nutsauce</span><span>1d</span><span class="bear">−$38</span></span><div class="bar"><i style="width:40%"></i></div></div></div>
+          <div class="it"><span class="thumb btc">BTC</span><div class="b"><span class="n">BTC 85k by October. ETF flows don't care</span><span class="d"><span>tailbet</span><span>26d</span><span class="bull">+$91</span></span><div class="bar"><i style="width:55%"></i></div></div></div>
+          <div class="it"><span class="thumb eth">ETH</span><div class="b"><span class="n">ETH/BTC bottoms here, ratio squeeze</span><span class="d"><span>jlin</span><span>13d</span><span class="bear">−$120</span></span><div class="bar"><i style="width:33%"></i></div></div></div>
+          <div class="it"><span class="thumb sol">SOL</span><div class="b"><span class="n">SOL holds 95 through the unlock</span><span class="d"><span>0xsable</span><span>4d</span><span class="bull">+$47</span></span><div class="bar"><i style="width:66%"></i></div></div></div>
+        </div>
+        <span class="note">Trending and ending rules <span class="todo">TODO-OWNER</span></span>
+      </div>
+      <div class="sec">
+        <div class="sec-h"><span class="lbl">Your positions</span><span class="mono dim" style="font-size:11px">3 open</span></div>
+        <div class="tl">
+          <div class="it"><span class="thumb btc">BTC</span><div class="b"><span class="n">BTC bleeds after NFP</span><span class="d"><span class="bull">Bull</span><span>$250</span><span class="bull">+$96</span></span></div></div>
+          <div class="it"><span class="thumb eth">ETH</span><div class="b"><span class="n">ETH reclaims 2,600 into Fusaka</span><span class="d"><span class="bear">Bear</span><span>$80</span><span class="bear">−$12</span></span></div></div>
+          <div class="it"><span class="thumb sol">SOL</span><div class="b"><span class="n">SOL loses 100 before the weekend</span><span class="d"><span class="bull">Bull</span><span>$40</span><span>$0</span></span></div></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ================= THESIS PAGE ================= -->
+  <div class="work" id="view-thesis" hidden>
+    <aside class="col l">
+      <div class="sec">
+        <div class="sec-h"><span class="lbl">Creator</span><button class="btn sm">Follow</button></div>
+        <div class="lb">
+          <div class="row" style="grid-template-columns:36px 1fr;padding:4px 0"><span class="av lg">MK</span><span class="who"><span class="n">merkle_mike</span><span class="h">0x7c44…5dEd · since Jun 26</span></span></div>
+        </div>
+        <dl class="kv"><dt>Verified P&amp;L 30d</dt><dd class="bull">+$18,240</dd><dt>Win rate</dt><dd>71%</dd><dt>Theses</dt><dd>24</dd><dt>Followers</dt><dd>1,204</dd><dt>Creator payouts</dt><dd class="acc">$3,140</dd><dt>Biggest loss</dt><dd class="bear">−$2,000</dd></dl>
+        <span class="note">Every figure from onchain fills and settlements. Losing theses cannot be deleted.</span>
+      </div>
+      <div class="sec">
+        <div class="sec-h"><span class="lbl">Activity</span><span class="mono dim" style="font-size:11px">40</span></div>
+        <div class="lb">
+          <div class="row" style="grid-template-columns:28px 1fr auto"><span class="av s">JL</span><span class="who"><span class="n">jlin joined <span class="bull">Bull</span></span><span class="h">$250 · 0.0031 ct</span></span><a class="tx" href="#">0x3f…c1 ↗</a></div>
+          <div class="row" style="grid-template-columns:28px 1fr auto"><span class="av s">0X</span><span class="who"><span class="n">0xsable took <span class="bear">Bear</span></span><span class="h">$120 · sold 74k put</span></span><a class="tx" href="#">0x8a…07 ↗</a></div>
+          <div class="row" style="grid-template-columns:28px 1fr auto"><span class="av s">DV</span><span class="who"><span class="n">delta_vega joined <span class="bull">Bull</span></span><span class="h">$1,500 · 0.0189 ct</span></span><a class="tx" href="#">0xb2…9e ↗</a></div>
+          <div class="row" style="grid-template-columns:28px 1fr auto"><span class="av s">MK</span><span class="who"><span class="n">merkle_mike launched</span><span class="h">$1,000 · 0.0126 ct</span></span><a class="tx" href="#">0x5d…aa ↗</a></div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="col">
+      <header class="hero">
+        <div>
+          <div style="display:flex;gap:6px;margin-bottom:12px;align-items:center"><span class="pill on">BTC</span><span class="pill on">Put spread</span><span class="pill">Base · OptionBook</span><span class="live" style="margin-left:4px">LIVE · 6d 14h</span></div>
+          <h1 class="h">BTC bleeds after NFP. Jobs print is hot, cuts get pushed, risk unwinds into the weekend.</h1>
+          <div class="meta"><span class="av s">MK</span><b>merkle_mike</b><span>launched 18m ago</span><span>·</span><span>expires <b class="mono">11 Sep 26 08:00 UTC</b></span><span>·</span><span>settles on Thetanuts TWAP</span><button class="acts ai" style="display:inline-flex;gap:6px;color:var(--m)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain this thesis</button></div>
+        </div>
+        <div class="board">
+          <div><span class="lbl">Pooled</span><span class="v">$9,420</span></div>
+          <div><span class="lbl">Bull</span><span class="v bull">31</span></div>
+          <div><span class="lbl">Bear</span><span class="v bear">9</span></div>
+          <div><span class="lbl">Creator live</span><span class="v bull">+$612</span></div>
+        </div>
+      </header>
+
+      <div class="sent"><div class="row2"><span class="bull">78% Bull · $7,920</span><span class="bear">22% Bear · $1,500</span></div><div class="bar" style="height:14px;border-radius:7px"><i style="width:78%"></i></div></div>
+
+      <div class="charts">
+        <div class="chartbox">
+          <div class="hh"><span class="lbl">BTC spot · 7d · entries pinned</span><span class="v">$79,607 <span class="bull" style="font-size:12px">+1.65%</span></span></div>
+          <canvas id="spot" width="800" height="220" aria-label="BTC spot price, 7 days, with participant entries marked"></canvas>
+          <div class="legend"><span><i style="background:var(--k)"></i>spot</span><span><i style="background:var(--bear)"></i>78,000 long put</span><span><i style="background:var(--dim)"></i>74,000 short put</span><span><i style="background:var(--bull);width:8px;height:8px;border-radius:50%"></i>bull entry</span><span><i style="background:var(--bear);width:8px;height:8px;border-radius:50%"></i>bear entry</span></div>
+        </div>
+        <div class="chartbox">
+          <div class="hh"><span class="lbl">Payoff at expiry · per $1,000</span><span class="v">max <span class="bull">+$4,612</span></span></div>
+          <svg class="payoff" id="payoff" viewBox="0 0 400 220" role="img" aria-label="Payoff diagram of the put spread at expiry"></svg>
+          <div class="legend"><span><i style="background:var(--bull)"></i>Bull · long spread</span><span><i style="background:var(--bear)"></i>Bear · short spread</span><span class="dim">break-even $76,120</span></div>
+        </div>
+      </div>
+
+      <div class="tabs" role="tablist" id="ttabs">
+        <button role="tab" aria-selected="true" data-tab="parts">Participants<span class="count">40</span></button>
+        <button role="tab" aria-selected="false" data-tab="cmts">Comments<span class="count">17</span></button>
+      </div>
+
+      <div class="tablewrap" id="tab-parts">
+        <table>
+          <thead><tr><th>Trader</th><th>Side</th><th class="num">Risked</th><th class="num">Contracts</th><th class="num">Entry</th><th class="num">Live P&amp;L</th><th>Says</th><th>Tx</th></tr></thead>
+          <tbody>
+            <tr><td><span style="display:flex;gap:8px;align-items:center"><span class="av s">MK</span><b>merkle_mike</b> <span class="pill" style="font-size:9.5px;padding:0 7px;color:var(--acc);border-color:var(--acc)">CREATOR</span></span></td><td><span class="side-tag bull">BULL</span></td><td class="num">$1,000</td><td class="num">0.0126</td><td class="num">$79,120</td><td class="num bull">+$612</td><td class="mut">This is the thesis.</td><td><a class="tx" href="#">0x5d…aa ↗</a></td></tr>
+            <tr><td><span style="display:flex;gap:8px;align-items:center"><span class="av s">DV</span><b>delta_vega</b></span></td><td><span class="side-tag bull">BULL</span></td><td class="num">$1,500</td><td class="num">0.0189</td><td class="num">$79,340</td><td class="num bull">+$801</td><td class="mut">Same read. Skew already pricing it.</td><td><a class="tx" href="#">0xb2…9e ↗</a></td></tr>
+            <tr><td><span style="display:flex;gap:8px;align-items:center"><span class="av s">0X</span><b>0xsable</b></span></td><td><span class="side-tag bear">BEAR</span></td><td class="num">$120</td><td class="num">0.0015</td><td class="num">$79,400</td><td class="num bear">−$44</td><td class="mut">NFP is priced. Fade the crowd.</td><td><a class="tx" href="#">0x8a…07 ↗</a></td></tr>
+            <tr><td><span style="display:flex;gap:8px;align-items:center"><span class="av s">JL</span><b>jlin</b></span></td><td><span class="side-tag bull">BULL</span></td><td class="num">$250</td><td class="num">0.0031</td><td class="num">$79,590</td><td class="num bull">+$96</td><td class="mut">—</td><td><a class="tx" href="#">0x3f…c1 ↗</a></td></tr>
+            <tr><td><span style="display:flex;gap:8px;align-items:center"><span class="av s">RH</span><b>rekt_hedger</b></span></td><td><span class="side-tag bear">BEAR</span></td><td class="num">$400</td><td class="num">0.0051</td><td class="num">$79,610</td><td class="num bear">−$131</td><td class="mut">Selling this vol all day.</td><td><a class="tx" href="#">0xe7…31 ↗</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="tab-cmts" hidden>
+        <div class="cmt"><span class="av s">DV</span><div class="b"><span><b>delta_vega</b> <span class="m">· 11m</span></span><span>Skew already pricing it, but the 74k wing is cheap. Took the same spread bigger.</span></div></div>
+        <div class="cmt"><span class="av s">0X</span><div class="b"><span><b>0xsable</b> <span class="m">· 9m</span></span><span>NFP is the most telegraphed print of the year. Fading, small size.</span></div></div>
+        <div class="cmt"><span class="av s">MK</span><div class="b"><span><b>merkle_mike</b> <span class="m">· 6m</span></span><span>Fair. If we open above 80.5k Monday I'm wrong and it's on the chain forever.</span></div></div>
+      </div>
+    </main>
+
+    <aside class="col r">
+      <div class="panel">
+        <h3>Take a side</h3>
+        <div class="seg" role="tablist"><button class="bull" role="tab" aria-selected="true">Bull · with creator</button><button class="bear" role="tab" aria-selected="false">Bear · against</button></div>
+        <span class="note">Bull buys the same 78k / 74k put spread. Bear sells it and posts collateral. Both are live OptionBook fills sized to your budget.</span>
+        <div class="field"><span class="lbl">Your max loss</span>
+          <div class="inp"><span>$</span><span>250</span><span class="u">USDC</span></div>
+          <div class="presets"><button>$50</button><button>$100</button><button>$500</button><button>$1,000</button></div>
+          <span class="note">Preset values <span class="todo">TODO-OWNER</span></span></div>
+        <dl class="kv"><dt>Order</dt><dd>78000/74000-PS</dd><dt>Contracts</dt><dd>0.0031</dd><dt>Max loss</dt><dd class="bear">$250.00</dd><dt>Max payout</dt><dd class="big bull">+$1,153</dd><dt>Break-even</dt><dd>$76,090</dd><dt>Liquidity left</dt><dd>$41,200</dd><dt>To creator</dt><dd class="acc">rate <span class="todo" style="margin-left:0">TODO-OWNER</span></dd></dl>
+        <button class="btn primary block">Sign with wallet</button>
+        <span class="note">Approve USDC once, then one fill on Base. You appear in the participants list when it confirms.</span>
+      </div>
+      <div class="panel">
+        <h3>Share</h3>
+        <div class="share">
+          <div class="mono dim" style="font-size:10.5px;margin-bottom:6px">thesis.fun/t/btc-nfp-4a2c</div>
+          <p class="h" style="font-size:18px">BTC bleeds after NFP…</p>
+          <div class="sent" style="margin-top:10px"><div class="row2" style="font-size:11px"><span class="bull">78% Bull</span><span class="bear">22% Bear</span></div><div class="bar" style="height:8px"><i style="width:78%"></i></div></div>
+        </div>
+        <button class="btn block">Copy link</button>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="foot">
+    <span>BTC <b>79,607.32</b> <span class="bull">+1.65%</span></span>
+    <span>ETH <b>2,450.21</b> <span class="bull">+2.46%</span></span>
+    <span>SOL <b>101.46</b> <span class="bull">+3.18%</span></span>
+    <span>markets <b>from OptionBook liquidity</b></span>
+    <span class="src">Base · Thetanuts V4 · example data</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  function show(v){
+    document.getElementById('view-discover').hidden=v!=='discover';
+    document.getElementById('view-thesis').hidden=v!=='thesis';
+    document.querySelectorAll('.nav [data-view]').forEach(function(b){b.setAttribute('aria-current',b.dataset.view===v?'page':'false')});
+    if(v==='thesis') drawSpot();
+  }
+  document.querySelectorAll('.nav [data-view]').forEach(function(b){b.addEventListener('click',function(){show(b.dataset.view)})});
+  // open thesis page from any callout headline, trending row, or position row
+  document.querySelectorAll('#view-discover .post .h, #view-discover .tl .it').forEach(function(el){el.style.cursor='pointer';el.addEventListener('click',function(){show('thesis')})});
+  var tt=document.querySelectorAll('#ttabs [data-tab]');
+  tt.forEach(function(b){b.addEventListener('click',function(){
+    tt.forEach(function(x){x.setAttribute('aria-selected',x===b?'true':'false')});
+    document.getElementById('tab-parts').hidden=b.dataset.tab!=='parts';
+    document.getElementById('tab-cmts').hidden=b.dataset.tab!=='cmts';
+  })});
+  document.querySelectorAll('.seg button').forEach(function(b){b.addEventListener('click',function(){
+    b.parentNode.querySelectorAll('button').forEach(function(x){x.setAttribute('aria-selected',x===b?'true':'false')});
+  })});
+
+  var css=getComputedStyle(document.documentElement);
+  function tok(n){return css.getPropertyValue(n).trim()}
+  var drawn=false;
+  function drawSpot(){
+    if(drawn) return; drawn=true;
+    var c=document.getElementById('spot');var w=c.clientWidth||800,h=220;c.width=w*2;c.height=h*2;
+    var g=c.getContext('2d');g.scale(2,2);
+    var n=168,pts=[],p=78100,s=7;
+    function rnd(){s=(s*9301+49297)%233280;return s/233280-0.5}
+    for(var i=0;i<n;i++){p+=rnd()*420+(i>110?18:-2);pts.push(p)}
+    pts[n-1]=79607;
+    var lo=73500,hi=81500,padL=8,padR=52,padT=10,padB=18;
+    function X(i){return padL+(w-padL-padR)*i/(n-1)}
+    function Y(v){return padT+(h-padT-padB)*(1-(v-lo)/(hi-lo))}
+    g.strokeStyle=tok('--l');g.lineWidth=1;
+    [74000,76000,78000,80000].forEach(function(v){g.beginPath();g.moveTo(padL,Y(v));g.lineTo(w-padR,Y(v));g.stroke();
+      g.fillStyle=tok('--dim');g.font='10px '+tok('--mono');g.textAlign='left';g.fillText((v/1000)+'k',w-padR+6,Y(v)+3)});
+    function dash(v,col){g.save();g.setLineDash([4,4]);g.strokeStyle=col;g.lineWidth=1;g.beginPath();g.moveTo(padL,Y(v));g.lineTo(w-padR,Y(v));g.stroke();g.restore()}
+    dash(78000,tok('--bear-fill'));dash(74000,tok('--dim'));
+    var grad=g.createLinearGradient(0,padT,0,h);grad.addColorStop(0,'rgba(245,197,66,.16)');grad.addColorStop(1,'rgba(245,197,66,0)');
+    g.beginPath();g.moveTo(X(0),Y(pts[0]));for(var i=1;i<n;i++)g.lineTo(X(i),Y(pts[i]));g.lineTo(X(n-1),h-padB);g.lineTo(X(0),h-padB);g.closePath();g.fillStyle=grad;g.fill();
+    g.beginPath();g.moveTo(X(0),Y(pts[0]));for(i=1;i<n;i++)g.lineTo(X(i),Y(pts[i]));g.strokeStyle=tok('--k');g.lineWidth=1.6;g.stroke();
+    [[150,'MK',1],[153,'DV',1],[157,'0X',0],[163,'JL',1],[165,'RH',0]].forEach(function(e){var x=X(e[0]),y=Y(pts[e[0]]);
+      g.beginPath();g.arc(x,y,8,0,Math.PI*2);g.fillStyle=e[2]?tok('--bull-fill'):tok('--bear-fill');g.fill();
+      g.lineWidth=2;g.strokeStyle=tok('--s');g.stroke();
+      g.fillStyle=e[2]?'#04130a':'#fff';g.font='700 7px '+tok('--sans');g.textAlign='center';g.fillText(e[1],x,y+2.5)});
+    g.beginPath();g.arc(X(n-1),Y(pts[n-1]),3.5,0,Math.PI*2);g.fillStyle=tok('--acc');g.fill();
+    g.fillStyle=tok('--dim');g.font='10px '+tok('--mono');g.textAlign='center';
+    ['29 Aug','31 Aug','2 Sep','4 Sep','now'].forEach(function(t,k){g.fillText(t,X(Math.round(k*(n-1)/4)),h-4)});
+  }
+  (function(){
+    var svg=document.getElementById('payoff'),W=400,H=220,padL=44,padR=10,padT=12,padB=26;
+    var xlo=70000,xhi=84000,ylo=-4800,yhi=4800;
+    function X(v){return padL+(W-padL-padR)*(v-xlo)/(xhi-xlo)}
+    function Y(v){return padT+(H-padT-padB)*(1-(v-ylo)/(yhi-ylo))}
+    var prem=1000,maxp=4612,K1=78000,K2=74000,be=76120;
+    function bull(s){if(s>=K1)return -prem;if(s<=K2)return maxp;return -prem+(K1-s)/(K1-K2)*(maxp+prem)}
+    var el='';
+    function ln(x1,y1,x2,y2,c,d,wd){return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+c+'" stroke-width="'+(wd||1)+'"'+(d?' stroke-dasharray="3 4"':'')+'/>'}
+    function tx(x,y,t,a,c){return '<text x="'+x+'" y="'+y+'" font-family="'+tok('--mono')+'" font-size="10" fill="'+c+'" text-anchor="'+a+'">'+t+'</text>'}
+    [-4000,-2000,0,2000,4000].forEach(function(v){el+=ln(padL,Y(v),W-padR,Y(v),v===0?tok('--l2'):tok('--l'),false,1);el+=tx(padL-6,Y(v)+3,(v>0?'+':'')+(v/1000)+'k','end',tok('--dim'))});
+    [72000,74000,76000,78000,80000,82000].forEach(function(v){el+=tx(X(v),H-8,(v/1000)+'k','middle',tok('--dim'))});
+    el+=ln(X(K1),padT,X(K1),H-padB,tok('--bear-fill'),1);el+=ln(X(K2),padT,X(K2),H-padB,tok('--dim'),1);
+    el+=ln(X(79607),padT,X(79607),H-padB,tok('--acc'),1);el+=tx(X(79607),padT-2,'spot','middle',tok('--m'));
+    var pb='',pr='';for(var s=xlo;s<=xhi;s+=100){var v=bull(s);pb+=(s===xlo?'M':'L')+X(s).toFixed(1)+' '+Y(v).toFixed(1)+' ';pr+=(s===xlo?'M':'L')+X(s).toFixed(1)+' '+Y(-v).toFixed(1)+' '}
+    el+='<path d="'+pb+'" fill="none" stroke="'+tok('--bull-fill')+'" stroke-width="2.5"/>';
+    el+='<path d="'+pr+'" fill="none" stroke="'+tok('--bear-fill')+'" stroke-width="2.5" opacity=".85"/>';
+    el+='<circle cx="'+X(be)+'" cy="'+Y(0)+'" r="4" fill="'+tok('--g')+'" stroke="'+tok('--k')+'" stroke-width="1.5"/>';
+    svg.innerHTML=el;
+  })();
+})();
+</script>

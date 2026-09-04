@@ -19,7 +19,19 @@ const runtimeEnv = {
 
 export const env = createEnv({
 	server: {
+		/**
+		 * Application database connection. On Vercel this must be the Supabase
+		 * **transaction pooler** (port 6543): serverless functions open many
+		 * short-lived connections and would exhaust a direct connection.
+		 */
 		DATABASE_URL: z.string().min(1),
+		/**
+		 * Direct connection (port 5432), used only by drizzle-kit for migrations.
+		 * Schema changes cannot run through the transaction pooler. Optional: falls
+		 * back to DATABASE_URL, which is correct for a local database where both
+		 * are the same.
+		 */
+		DIRECT_DATABASE_URL: z.string().optional(),
 		NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 
 		/** OpenRouter key for the agent's model calls. Server-only, never exposed. */

@@ -65,7 +65,7 @@ cd packages/db && supabase status
 cd packages/db && supabase stop
 
 # The turbo db:* wrappers are marked interactive and fail without a TTY (agents, CI).
-# Run drizzle-kit directly instead:
+# Run drizzle-kit directly instead. No --env-file needed: see Env loading below.
 cd packages/db && bunx drizzle-kit push
 
 # Vercel
@@ -90,7 +90,8 @@ scripts/          sync-vercel-env.ts (used by env:preview / env:production)
 ```
 
 How the pieces connect:
-- **One env file**: `apps/web/.env` (gitignored). Set `DATABASE_URL` there; local Supabase value is `postgresql://postgres:postgres@127.0.0.1:54322/postgres`. `drizzle.config.ts` points at that file explicitly. `packages/env/src/server.ts` loads `.env` from the **current working directory** via dotenv, so `@nuts/db` finds it when Next runs from `apps/web` but not when a script runs from `packages/db`. For scripts there, use `bun --env-file=../../apps/web/.env run <file>`.
+- **Env files**: `apps/web/.env.local` holds real values and is gitignored; `apps/web/.env.example` is committed and documents every variable. `.env.local` overrides `.env`, matching Next.js precedence, and the real process environment beats both so Vercel and CI are unaffected. Copy to start: `cp apps/web/.env.example apps/web/.env.local`.
+- **Env loading**: `@nuts/env/load` resolves the files relative to the repo, not the current working directory, and every entry point imports it. A script run from `packages/db` finds the same values the web app sees, so `bun --env-file=...` is no longer needed. Required today: `DATABASE_URL` and `OPENROUTER_API_KEY`.
 - **DB access**: import `db` from `@nuts/db`. It is created eagerly from `env.DATABASE_URL`, so importing `@nuts/db` in a client component will fail. Keep it in server components, route handlers, and server actions.
 - **Env validation** runs at import time. `next.config.ts` imports `@nuts/env/web` so bad client env fails the build. Set `SKIP_ENV_VALIDATION=1` to bypass server validation.
 - **UI imports**: `import { Button } from "@nuts/ui/components/button"`. The web app's `index.css` just imports `@nuts/ui/globals.css`; design tokens live in `packages/ui/src/styles/globals.css`. Add shared primitives with `npx shadcn@latest add <name> -c packages/ui` from the root; app-specific blocks go through the shadcn CLI run inside `apps/web`.
@@ -104,7 +105,7 @@ How the pieces connect:
 
 ## Working rules
 
-- Never commit `apps/web/.env` or any secret/private key.
+- Never commit `apps/web/.env.local`, `apps/web/.env`, or any secret/private key. `.env.example` is the only env file that belongs in git, and it must never contain a real value.
 - GitHub is the canonical shared state. At the start of every work session, fetch and reconcile the latest remote branch before editing.
 - Update `docs/PRD.md` whenever product scope, shared interfaces, safety rules, or ownership changes.
 - Validate the affected type checks/build/tests before claiming a change works. Never state “100% confident” when validation or a live integration remains incomplete; report the exact remaining uncertainty instead.

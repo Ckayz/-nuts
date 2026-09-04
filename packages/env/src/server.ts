@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./load";
 import { createEnv } from "@t3-oss/env-core";
 import { z } from "zod";
 

@@ -276,7 +276,10 @@ export function sizeFill(order: TradeableOrder, budgetUsd: number) {
 	const costMicroUsd = (contracts * price) / PRICE_SCALE;
 
 	return {
-		/** Fixed-point contract count, scaled by 1e6. */
+		/**
+		 * Fixed-point contract count, scaled by 1e6. Kept as a bigint because the
+		 * eventual fill calldata needs the exact integer, never a float.
+		 */
 		contracts,
 		contractsDecimal: decimalString(contracts, USDC_SCALE),
 		/** Actual spend, which is below the budget when the order is too small. */
@@ -285,6 +288,16 @@ export function sizeFill(order: TradeableOrder, budgetUsd: number) {
 		cappedByOrderSize: requested > available,
 		/** A long option's loss is bounded by the premium paid. */
 		maxLossUsd: decimalString(costMicroUsd, USDC_SCALE),
+		/**
+		 * `contracts` is a bigint, which JSON.stringify throws on. This result
+		 * crosses two serialization boundaries — into tool results read by the
+		 * model, and into the browser — so it drops the bigint and keeps the
+		 * decimal strings, per the PRD's decimal-string contract.
+		 */
+		toJSON() {
+			const { contracts: _omitted, toJSON: _fn, ...rest } = this;
+			return rest;
+		},
 	};
 }
 

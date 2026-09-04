@@ -1,0 +1,1088 @@
+{
+  "id": "d8abeb95-5538-41de-a47c-f21005e40ca4",
+  "prevId": "3d1e14d0-6d54-4d2e-90b1-1e90abfb67d4",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.activity": {
+      "name": "activity",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "thesis_id": {
+          "name": "thesis_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "position_id": {
+          "name": "position_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "activity_user_id_users_id_fk": {
+          "name": "activity_user_id_users_id_fk",
+          "tableFrom": "activity",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "tableTo": "users",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "activity_thesis_id_theses_id_fk": {
+          "name": "activity_thesis_id_theses_id_fk",
+          "tableFrom": "activity",
+          "columnsFrom": [
+            "thesis_id"
+          ],
+          "tableTo": "theses",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "activity_position_id_positions_id_fk": {
+          "name": "activity_position_id_positions_id_fk",
+          "tableFrom": "activity",
+          "columnsFrom": [
+            "position_id"
+          ],
+          "tableTo": "positions",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.auth_challenges": {
+      "name": "auth_challenges",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "wallet_address": {
+          "name": "wallet_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nonce": {
+          "name": "nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chain_id": {
+          "name": "chain_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_at": {
+          "name": "consumed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "auth_challenges_nonce_unique": {
+          "name": "auth_challenges_nonce_unique",
+          "columns": [
+            {
+              "expression": "nonce",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "auth_challenges_wallet_address_lowercase": {
+          "name": "auth_challenges_wallet_address_lowercase",
+          "value": "\"auth_challenges\".\"wallet_address\" = lower(\"auth_challenges\".\"wallet_address\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.comments": {
+      "name": "comments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "thesis_id": {
+          "name": "thesis_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "comments_thesis_id_theses_id_fk": {
+          "name": "comments_thesis_id_theses_id_fk",
+          "tableFrom": "comments",
+          "columnsFrom": [
+            "thesis_id"
+          ],
+          "tableTo": "theses",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "comments_user_id_users_id_fk": {
+          "name": "comments_user_id_users_id_fk",
+          "tableFrom": "comments",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "tableTo": "users",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.follows": {
+      "name": "follows",
+      "schema": "",
+      "columns": {
+        "follower_user_id": {
+          "name": "follower_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "followed_user_id": {
+          "name": "followed_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "follows_follower_user_id_users_id_fk": {
+          "name": "follows_follower_user_id_users_id_fk",
+          "tableFrom": "follows",
+          "columnsFrom": [
+            "follower_user_id"
+          ],
+          "tableTo": "users",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "follows_followed_user_id_users_id_fk": {
+          "name": "follows_followed_user_id_users_id_fk",
+          "tableFrom": "follows",
+          "columnsFrom": [
+            "followed_user_id"
+          ],
+          "tableTo": "users",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "follows_follower_user_id_followed_user_id_pk": {
+          "name": "follows_follower_user_id_followed_user_id_pk",
+          "columns": [
+            "follower_user_id",
+            "followed_user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.positions": {
+      "name": "positions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "thesis_id": {
+          "name": "thesis_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "position_role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "side": {
+          "name": "side",
+          "type": "position_side",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "position_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chain_id": {
+          "name": "chain_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "wallet_address": {
+          "name": "wallet_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_hash": {
+          "name": "order_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order_snapshot": {
+          "name": "order_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fill_event": {
+          "name": "fill_event",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "indexer_position_id": {
+          "name": "indexer_position_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tx_hash": {
+          "name": "tx_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "option_address": {
+          "name": "option_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "referrer": {
+          "name": "referrer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "budget": {
+          "name": "budget",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "budget_decimals": {
+          "name": "budget_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contracts": {
+          "name": "contracts",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contract_decimals": {
+          "name": "contract_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "premium": {
+          "name": "premium",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "premium_decimals": {
+          "name": "premium_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fees": {
+          "name": "fees",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fee_decimals": {
+          "name": "fee_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collateral": {
+          "name": "collateral",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collateral_decimals": {
+          "name": "collateral_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "maximum_loss": {
+          "name": "maximum_loss",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maximum_loss_decimals": {
+          "name": "maximum_loss_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maximum_payout": {
+          "name": "maximum_payout",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maximum_payout_decimals": {
+          "name": "maximum_payout_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_even_prices": {
+          "name": "break_even_prices",
+          "type": "numeric[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "break_even_price_decimals": {
+          "name": "break_even_price_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estimated_pnl": {
+          "name": "estimated_pnl",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "estimated_pnl_decimals": {
+          "name": "estimated_pnl_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settlement_price": {
+          "name": "settlement_price",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settlement_price_decimals": {
+          "name": "settlement_price_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payout": {
+          "name": "payout",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payout_decimals": {
+          "name": "payout_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_pnl": {
+          "name": "final_pnl",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_pnl_decimals": {
+          "name": "final_pnl_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entry_premium_usd": {
+          "name": "entry_premium_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entry_fees_usd": {
+          "name": "entry_fees_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maximum_loss_usd": {
+          "name": "maximum_loss_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maximum_payout_usd": {
+          "name": "maximum_payout_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_even_prices_usd": {
+          "name": "break_even_prices_usd",
+          "type": "numeric[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estimated_pnl_usd": {
+          "name": "estimated_pnl_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_pnl_usd": {
+          "name": "final_pnl_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settlement_price_usd": {
+          "name": "settlement_price_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "indexed_at": {
+          "name": "indexed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "positions_chain_id_tx_hash_unique": {
+          "name": "positions_chain_id_tx_hash_unique",
+          "columns": [
+            {
+              "expression": "chain_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tx_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "positions_thesis_id_theses_id_fk": {
+          "name": "positions_thesis_id_theses_id_fk",
+          "tableFrom": "positions",
+          "columnsFrom": [
+            "thesis_id"
+          ],
+          "tableTo": "theses",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "positions_user_id_users_id_fk": {
+          "name": "positions_user_id_users_id_fk",
+          "tableFrom": "positions",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "tableTo": "users",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "positions_wallet_address_lowercase": {
+          "name": "positions_wallet_address_lowercase",
+          "value": "\"positions\".\"wallet_address\" = lower(\"positions\".\"wallet_address\")"
+        },
+        "positions_budget_integral_nonnegative": {
+          "name": "positions_budget_integral_nonnegative",
+          "value": "scale(\"positions\".\"budget\") = 0 and \"positions\".\"budget\" >= 0"
+        },
+        "positions_contracts_integral_nonnegative": {
+          "name": "positions_contracts_integral_nonnegative",
+          "value": "scale(\"positions\".\"contracts\") = 0 and \"positions\".\"contracts\" >= 0"
+        },
+        "positions_premium_integral_nonnegative": {
+          "name": "positions_premium_integral_nonnegative",
+          "value": "scale(\"positions\".\"premium\") = 0 and \"positions\".\"premium\" >= 0"
+        },
+        "positions_fees_integral_nonnegative": {
+          "name": "positions_fees_integral_nonnegative",
+          "value": "scale(\"positions\".\"fees\") = 0 and \"positions\".\"fees\" >= 0"
+        },
+        "positions_collateral_integral_nonnegative": {
+          "name": "positions_collateral_integral_nonnegative",
+          "value": "scale(\"positions\".\"collateral\") = 0 and \"positions\".\"collateral\" >= 0"
+        },
+        "positions_maximum_loss_integral_nonnegative": {
+          "name": "positions_maximum_loss_integral_nonnegative",
+          "value": "\"positions\".\"maximum_loss\" is null or (scale(\"positions\".\"maximum_loss\") = 0 and \"positions\".\"maximum_loss\" >= 0)"
+        },
+        "positions_maximum_payout_integral_nonnegative": {
+          "name": "positions_maximum_payout_integral_nonnegative",
+          "value": "\"positions\".\"maximum_payout\" is null or (scale(\"positions\".\"maximum_payout\") = 0 and \"positions\".\"maximum_payout\" >= 0)"
+        },
+        "positions_settlement_price_integral_nonnegative": {
+          "name": "positions_settlement_price_integral_nonnegative",
+          "value": "\"positions\".\"settlement_price\" is null or (scale(\"positions\".\"settlement_price\") = 0 and \"positions\".\"settlement_price\" >= 0)"
+        },
+        "positions_payout_integral_nonnegative": {
+          "name": "positions_payout_integral_nonnegative",
+          "value": "\"positions\".\"payout\" is null or (scale(\"positions\".\"payout\") = 0 and \"positions\".\"payout\" >= 0)"
+        },
+        "positions_estimated_pnl_integral": {
+          "name": "positions_estimated_pnl_integral",
+          "value": "\"positions\".\"estimated_pnl\" is null or scale(\"positions\".\"estimated_pnl\") = 0"
+        },
+        "positions_final_pnl_integral": {
+          "name": "positions_final_pnl_integral",
+          "value": "\"positions\".\"final_pnl\" is null or scale(\"positions\".\"final_pnl\") = 0"
+        },
+        "positions_break_even_prices_integral_nonnegative": {
+          "name": "positions_break_even_prices_integral_nonnegative",
+          "value": "array_to_string(\"positions\".\"break_even_prices\", ',') ~ '^[0-9]+(,[0-9]+)*$' or cardinality(\"positions\".\"break_even_prices\") = 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.theses": {
+      "name": "theses",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "creator_user_id": {
+          "name": "creator_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "headline": {
+          "name": "headline",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rationale": {
+          "name": "rationale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "direction": {
+          "name": "direction",
+          "type": "thesis_direction",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "thesis_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "underlying_asset": {
+          "name": "underlying_asset",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expiry_at": {
+          "name": "expiry_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "product_type": {
+          "name": "product_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_call": {
+          "name": "is_call",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_long": {
+          "name": "is_long",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "strikes": {
+          "name": "strikes",
+          "type": "numeric[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "strike_decimals": {
+          "name": "strike_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collateral_address": {
+          "name": "collateral_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collateral_symbol": {
+          "name": "collateral_symbol",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collateral_decimals": {
+          "name": "collateral_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "creator_order_snapshot": {
+          "name": "creator_order_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "creator_position_id": {
+          "name": "creator_position_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expired_at": {
+          "name": "expired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "theses_creator_position_unique": {
+          "name": "theses_creator_position_unique",
+          "columns": [
+            {
+              "expression": "creator_position_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "where": "\"theses\".\"creator_position_id\" is not null",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "theses_creator_user_id_users_id_fk": {
+          "name": "theses_creator_user_id_users_id_fk",
+          "tableFrom": "theses",
+          "columnsFrom": [
+            "creator_user_id"
+          ],
+          "tableTo": "users",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "theses_creator_position_id_positions_id_fk": {
+          "name": "theses_creator_position_id_positions_id_fk",
+          "tableFrom": "theses",
+          "columnsFrom": [
+            "creator_position_id"
+          ],
+          "tableTo": "positions",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "theses_public_creator_position_required": {
+          "name": "theses_public_creator_position_required",
+          "value": "\"theses\".\"status\" not in ('open', 'expired', 'settled') or \"theses\".\"creator_position_id\" is not null"
+        },
+        "theses_strikes_integral_nonnegative": {
+          "name": "theses_strikes_integral_nonnegative",
+          "value": "cardinality(\"theses\".\"strikes\") > 0 and array_to_string(\"theses\".\"strikes\", ',') ~ '^[0-9]+(,[0-9]+)*$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "wallet_address": {
+          "name": "wallet_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bio": {
+          "name": "bio",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "avatar_url": {
+          "name": "avatar_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "users_wallet_address_unique": {
+          "name": "users_wallet_address_unique",
+          "columns": [
+            {
+              "expression": "wallet_address",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "users_wallet_address_lowercase": {
+          "name": "users_wallet_address_lowercase",
+          "value": "\"users\".\"wallet_address\" = lower(\"users\".\"wallet_address\")"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.position_role": {
+      "name": "position_role",
+      "schema": "public",
+      "values": [
+        "creator",
+        "participant"
+      ]
+    },
+    "public.position_side": {
+      "name": "position_side",
+      "schema": "public",
+      "values": [
+        "back",
+        "counter"
+      ]
+    },
+    "public.position_status": {
+      "name": "position_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "confirmed",
+        "indexed",
+        "expired",
+        "settled",
+        "failed"
+      ]
+    },
+    "public.thesis_direction": {
+      "name": "thesis_direction",
+      "schema": "public",
+      "values": [
+        "bull",
+        "bear"
+      ]
+    },
+    "public.thesis_status": {
+      "name": "thesis_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "pending",
+        "open",
+        "expired",
+        "settled",
+        "cancelled"
+      ]
+    }
+  },
+  "schemas": {},
+  "views": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

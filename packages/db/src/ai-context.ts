@@ -55,8 +55,12 @@ export interface ThesisAiContext {
   };
 }
 
-const nullableDecimal = z.string().regex(/^-?\d+(?:\.\d+)?$/).nullable();
-const decimal = z.string().regex(/^-?\d+(?:\.\d+)?$/);
+const signedDecimal = z.string().regex(/^-?\d+(?:\.\d+)?$/);
+const nonnegativeDecimal = z.string().regex(/^\d+(?:\.\d+)?$/);
+const positiveDecimal = nonnegativeDecimal.refine((value) => Number(value) > 0, "must be positive");
+const nullableNonnegativeDecimal = nonnegativeDecimal.nullable();
+const nullableSignedDecimal = signedDecimal.nullable();
+const isoTimestamp = z.string().datetime({ offset: false });
 const thesisDirectionSchema = z.enum(["bull", "bear"]);
 const thesisStatusSchema = z.enum(["draft", "pending", "open", "expired", "settled", "cancelled"]);
 
@@ -67,7 +71,7 @@ export const thesisAiContextSchema: z.ZodType<ThesisAiContext> = z.object({
     rationale: z.string().nullable(),
     direction: thesisDirectionSchema,
     status: thesisStatusSchema,
-    createdAt: z.string(),
+    createdAt: isoTimestamp,
   }).strict(),
   creator: z.object({
     walletAddress: z.string(),
@@ -76,27 +80,27 @@ export const thesisAiContextSchema: z.ZodType<ThesisAiContext> = z.object({
   market: z.object({
     chainId: z.literal(8453),
     underlyingAsset: z.string(),
-    currentSpotPriceUsd: nullableDecimal,
-    expiryAt: z.string(),
-    dataAsOf: z.string(),
+    currentSpotPriceUsd: nullableNonnegativeDecimal,
+    expiryAt: isoTimestamp,
+    dataAsOf: isoTimestamp,
   }).strict(),
   structure: z.object({
     productType: z.string(),
     isCall: z.boolean(),
     isLong: z.boolean(),
-    strikesUsd: z.array(decimal),
+    strikesUsd: z.array(nonnegativeDecimal).min(1),
     collateralSymbol: z.string(),
-    contracts: decimal,
+    contracts: positiveDecimal,
   }).strict(),
   economics: z.object({
-    entryPremiumUsd: nullableDecimal,
-    entryFeesUsd: nullableDecimal,
-    maximumLossUsd: nullableDecimal,
-    maximumPayoutUsd: nullableDecimal,
-    breakEvenPricesUsd: z.array(decimal),
-    estimatedPnlUsd: nullableDecimal,
-    finalPnlUsd: nullableDecimal,
-    settlementPriceUsd: nullableDecimal,
+    entryPremiumUsd: nullableNonnegativeDecimal,
+    entryFeesUsd: nullableNonnegativeDecimal,
+    maximumLossUsd: nullableNonnegativeDecimal,
+    maximumPayoutUsd: nullableNonnegativeDecimal,
+    breakEvenPricesUsd: z.array(nonnegativeDecimal),
+    estimatedPnlUsd: nullableSignedDecimal,
+    finalPnlUsd: nullableSignedDecimal,
+    settlementPriceUsd: nullableNonnegativeDecimal,
   }).strict(),
   verification: z.object({
     transactionHash: z.string().nullable(),
@@ -114,7 +118,9 @@ export interface BuildThesisAiContextInput {
 }
 
 function iso(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : value;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new ThesisAiContextError("INVALID_VALUE", "Timestamp must be a valid date");
+  return date.toISOString();
 }
 
 function decimalFromBaseUnits(value: string, decimals: number): string {
@@ -138,10 +144,21 @@ function decimalFromBaseUnits(value: string, decimals: number): string {
  * The exact PRD contract cannot represent missing contracts, so a missing creator
  * position is rejected instead of being represented by an invented value.
  */
+export type ThesisAiContextErrorCode = "NO_CREATOR_POSITION" | "POSITION_MISMATCH" | "INVALID_POSITION" | "INVALID_VALUE";
+export class ThesisAiContextError extends Error {
+  constructor(readonly code: ThesisAiContextErrorCode, message: string) { super(message); this.name = "ThesisAiContextError"; }
+}
+const confirmedStatuses = new Set(["confirmed", "indexed", "expired", "settled"]);
+
 export function buildThesisAiContext(input: BuildThesisAiContextInput): ThesisAiContext {
   const position = input.creatorPosition;
   if (position === null) {
-    throw new Error("Cannot build ThesisAiContext without creator position: structure.contracts is required by PRD §10.2");
+    throw new ThesisAiContextError("NO_CREATOR_POSITION", "Cannot build ThesisAiContext without creator position: structure.contracts is required by PRD §10.2");
+  }
+  const mismatch = position.thesisId !== input.thesis.id || position.userId !== input.creator.id || position.id !== input.thesis.creatorPositionId || position.walletAddress.toLowerCase() !== input.creator.walletAddress.toLowerCase();
+  if (mismatch) throw new ThesisAiContextError("POSITION_MISMATCH", "Creator position does not belong to the thesis creator");
+  if (position.role !== "creator" || position.chainId !== 8453 || !confirmedStatuses.has(position.status) || position.confirmedAt === null) {
+    throw new ThesisAiContextError("INVALID_POSITION", "Creator position is not a confirmed Base creator position");
   }
 
   const context: ThesisAiContext = {
@@ -188,5 +205,16 @@ export function buildThesisAiContext(input: BuildThesisAiContextInput): ThesisAi
       confirmedOnchain: position.confirmedAt !== null,
     },
   };
-  return thesisAiContextSchema.parse(context);
+  const result = thesisAiContextSchema.safeParse(context);
+  if (!result.success) throw new ThesisAiContextError("INVALID_VALUE", result.error.message);
+  return result.data;
+}
+
+export type ThesisAiContextAvailability = { available: true; context: ThesisAiContext } | { available: false; reason: "no_creator_position" | "not_published" | "invalid_position"; thesisId: string; status: ThesisStatus };
+export function buildThesisAiContextOrUnavailable(input: BuildThesisAiContextInput): ThesisAiContextAvailability {
+  const unavailable = (reason: "no_creator_position" | "not_published" | "invalid_position"): ThesisAiContextAvailability => ({ available: false, reason, thesisId: input.thesis.id, status: input.thesis.status });
+  if (input.thesis.status === "draft" || input.thesis.status === "cancelled") return unavailable("not_published");
+  if (input.creatorPosition === null) return unavailable("no_creator_position");
+  try { return { available: true, context: buildThesisAiContext(input) }; }
+  catch (error) { if (error instanceof ThesisAiContextError) return unavailable("invalid_position"); throw error; }
 }

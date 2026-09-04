@@ -17,7 +17,7 @@ export const users = pgTable(
     bio: text("bio"),
     avatarUrl: text("avatar_url"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
   },
   (table) => [
     uniqueIndex("users_wallet_address_unique").on(table.walletAddress),

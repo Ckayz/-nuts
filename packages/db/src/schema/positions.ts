@@ -4,6 +4,8 @@ import { activity } from "./activity";
 import { positionRoleEnum, positionSideEnum, positionStatusEnum } from "./enums";
 import { theses } from "./theses";
 import { users } from "./users";
+import type { FillEventSnapshotV1 } from "../fill-event-snapshot";
+import type { OrderSnapshotV1 } from "../order-snapshot";
 
 export const positions = pgTable(
   "positions",
@@ -18,56 +20,58 @@ export const positions = pgTable(
     walletAddress: text("wallet_address").notNull(),
     orderId: text("order_id").notNull(),
     orderHash: text("order_hash"),
-    orderSnapshot: jsonb("order_snapshot").$type<Record<string, unknown>>().notNull(),
+    orderSnapshot: jsonb("order_snapshot").$type<OrderSnapshotV1>().notNull(),
+    fillEvent: jsonb("fill_event").$type<FillEventSnapshotV1>(),
+    indexerPositionId: text("indexer_position_id"),
     txHash: text("tx_hash").notNull(),
     optionAddress: text("option_address"),
     referrer: text("referrer"),
     // unit: collateral-token base units
-    budget: numeric("budget", { precision: 78, scale: 0 }).notNull(),
+    budget: numeric("budget").notNull(),
     // unit: decimal places used by budget
     budgetDecimals: integer("budget_decimals").notNull(),
     // unit: option contract base units
-    contracts: numeric("contracts", { precision: 78, scale: 0 }).notNull(),
+    contracts: numeric("contracts").notNull(),
     // unit: decimal places used by contracts
     contractDecimals: integer("contract_decimals").notNull(),
     // unit: collateral-token base units
-    premium: numeric("premium", { precision: 78, scale: 0 }).notNull(),
+    premium: numeric("premium").notNull(),
     // unit: decimal places used by premium
     premiumDecimals: integer("premium_decimals").notNull(),
     // unit: collateral-token base units
-    fees: numeric("fees", { precision: 78, scale: 0 }).notNull(),
+    fees: numeric("fees").notNull(),
     // unit: decimal places used by fees
     feeDecimals: integer("fee_decimals").notNull(),
     // unit: collateral-token base units
-    collateral: numeric("collateral", { precision: 78, scale: 0 }).notNull(),
+    collateral: numeric("collateral").notNull(),
     // unit: decimal places used by collateral
     collateralDecimals: integer("collateral_decimals").notNull(),
     // unit: collateral-token base units; null means no trusted deterministic value
-    maximumLoss: numeric("maximum_loss", { precision: 78, scale: 0 }),
+    maximumLoss: numeric("maximum_loss"),
     // unit: decimal places used by maximumLoss
     maximumLossDecimals: integer("maximum_loss_decimals"),
     // unit: collateral-token base units; null means no trusted deterministic value
-    maximumPayout: numeric("maximum_payout", { precision: 78, scale: 0 }),
+    maximumPayout: numeric("maximum_payout"),
     // unit: decimal places used by maximumPayout
     maximumPayoutDecimals: integer("maximum_payout_decimals"),
     // unit: underlying price base units
-    breakEvenPrices: numeric("break_even_prices", { precision: 78, scale: 0 }).array().notNull(),
+    breakEvenPrices: numeric("break_even_prices").array().notNull(),
     // unit: decimal places used by breakEvenPrices
     breakEvenPriceDecimals: integer("break_even_price_decimals").notNull(),
     // unit: collateral-token base units; null means unavailable
-    estimatedPnl: numeric("estimated_pnl", { precision: 78, scale: 0 }),
+    estimatedPnl: numeric("estimated_pnl"),
     // unit: decimal places used by estimatedPnl
     estimatedPnlDecimals: integer("estimated_pnl_decimals"),
     // unit: underlying price base units; null before settlement
-    settlementPrice: numeric("settlement_price", { precision: 78, scale: 0 }),
+    settlementPrice: numeric("settlement_price"),
     // unit: decimal places used by settlementPrice
     settlementPriceDecimals: integer("settlement_price_decimals"),
     // unit: collateral-token base units; null before settlement
-    payout: numeric("payout", { precision: 78, scale: 0 }),
+    payout: numeric("payout"),
     // unit: decimal places used by payout
     payoutDecimals: integer("payout_decimals"),
     // unit: collateral-token base units; null before settlement
-    finalPnl: numeric("final_pnl", { precision: 78, scale: 0 }),
+    finalPnl: numeric("final_pnl"),
     // unit: decimal places used by finalPnl
     finalPnlDecimals: integer("final_pnl_decimals"),
     // unit: decimal USD
@@ -94,6 +98,18 @@ export const positions = pgTable(
   (table) => [
     uniqueIndex("positions_chain_id_tx_hash_unique").on(table.chainId, table.txHash),
     check("positions_wallet_address_lowercase", sql`${table.walletAddress} = lower(${table.walletAddress})`),
+    check("positions_budget_integral_nonnegative", sql`scale(${table.budget}) = 0 and ${table.budget} >= 0`),
+    check("positions_contracts_integral_nonnegative", sql`scale(${table.contracts}) = 0 and ${table.contracts} >= 0`),
+    check("positions_premium_integral_nonnegative", sql`scale(${table.premium}) = 0 and ${table.premium} >= 0`),
+    check("positions_fees_integral_nonnegative", sql`scale(${table.fees}) = 0 and ${table.fees} >= 0`),
+    check("positions_collateral_integral_nonnegative", sql`scale(${table.collateral}) = 0 and ${table.collateral} >= 0`),
+    check("positions_maximum_loss_integral_nonnegative", sql`${table.maximumLoss} is null or (scale(${table.maximumLoss}) = 0 and ${table.maximumLoss} >= 0)`),
+    check("positions_maximum_payout_integral_nonnegative", sql`${table.maximumPayout} is null or (scale(${table.maximumPayout}) = 0 and ${table.maximumPayout} >= 0)`),
+    check("positions_settlement_price_integral_nonnegative", sql`${table.settlementPrice} is null or (scale(${table.settlementPrice}) = 0 and ${table.settlementPrice} >= 0)`),
+    check("positions_payout_integral_nonnegative", sql`${table.payout} is null or (scale(${table.payout}) = 0 and ${table.payout} >= 0)`),
+    check("positions_estimated_pnl_integral", sql`${table.estimatedPnl} is null or scale(${table.estimatedPnl}) = 0`),
+    check("positions_final_pnl_integral", sql`${table.finalPnl} is null or scale(${table.finalPnl}) = 0`),
+    check("positions_break_even_prices_integral_nonnegative", sql`array_to_string(${table.breakEvenPrices}, ',') ~ '^[0-9]+(,[0-9]+)*$' or cardinality(${table.breakEvenPrices}) = 0`),
   ],
 );
 

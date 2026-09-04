@@ -14,11 +14,13 @@ The database is the application index and social layer for Thesis.fun. Onchain s
 
 ## Unit conventions
 
-All onchain quantities are stored as `numeric(78,0)` integer strings in base units. Each quantity or same-unit array has an adjacent decimals column that is required to interpret it. This includes contracts, budget, premium, fees, collateral, strikes, deterministic payoff values, settlement price, payout, and P&L. Never convert these values through JavaScript `number`.
+All onchain quantities are stored as unconstrained `numeric` integer strings in base units, with database checks rejecting fractional values instead of rounding them. Each quantity or same-unit array has an adjacent decimals column that is required to interpret it. Never convert these values through JavaScript `number`.
 
-USD display values use Postgres `numeric` and cross application interfaces as decimal strings. A missing trusted value stays `null`; it is never estimated. `order_snapshot` and `creator_order_snapshot` retain immutable raw `OrderWithSignature` JSON.
+USD display values use Postgres `numeric` and cross application interfaces as decimal strings. A missing trusted value stays `null`; it is never estimated. `order_snapshot` and `creator_order_snapshot` retain immutable, lossless string-encoded, versioned `OrderWithSignature` JSON. `fill_event` does the same for receipt fields; `indexer_position_id` is nullable until indexed.
 
 Wallet addresses are normalized to lowercase before persistence. Database checks enforce lowercase values in `users`, `auth_challenges`, and `positions`.
+
+Constraint triggers fence every referenced creator position to the same thesis and creator, creator role, Base mainnet, a confirmed lifecycle status, and a non-null confirmation timestamp. Raw SQL writers must explicitly maintain `users.updated_at`; Drizzle updates apply its `$onUpdate` callback.
 
 ## Migrations
 
@@ -47,4 +49,4 @@ DATABASE_URL='<production-postgres-url>' bunx drizzle-kit migrate
 
 `src/ai-context.ts` exports the exact PRD §10.2 `ThesisAiContext`, `ThesisDirection`, and `ThesisStatus` types, the `thesisAiContextSchema` validator, and the pure `buildThesisAiContext` row mapper. It performs representation conversion only and never calls the SDK or calculates financial values.
 
-Four offline examples—open, expired, settled, and partially missing—are exported from `src/fixtures/thesis-ai-context.example.ts`. The AI companion treats these objects as read-only. The exact PRD contract requires a non-null `structure.contracts`, so the builder rejects a missing creator-position row rather than inventing a value.
+Four offline examples—open, expired, settled, and partially missing—are exported from `src/fixtures/thesis-ai-context.example.ts`. The exact PRD contract requires a non-null `structure.contracts`, so `buildThesisAiContext` rejects a missing position while `buildThesisAiContextOrUnavailable` returns an explicit unavailable result. `TODO-OWNER`: the owner and AI teammate must coordinate the draft/pending product behavior under PRD §15 without changing the shared context object.

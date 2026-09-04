@@ -15,6 +15,20 @@
       "when": 1788552268497,
       "tag": "0001_tidy_dragon_lord",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788553769423,
+      "tag": "0002_material_pestilence",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788553777046,
+      "tag": "0003_public-thesis-invariant",
+      "breakpoints": true
     }
   ]
 }

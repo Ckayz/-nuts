@@ -24,6 +24,7 @@
     "typescript": "catalog:"
   },
   "dependencies": {
+    "@thetanuts-finance/thetanuts-client": "0.3.0",
     "dotenv": "catalog:",
     "zod": "catalog:",
     "@nuts/env": "workspace:*",

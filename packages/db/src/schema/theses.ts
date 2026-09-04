@@ -5,6 +5,7 @@ import { comments } from "./comments";
 import { thesisDirectionEnum, thesisStatusEnum } from "./enums";
 import { positions } from "./positions";
 import { users } from "./users";
+import type { OrderSnapshotV1 } from "../order-snapshot";
 
 export const theses = pgTable(
   "theses",
@@ -23,14 +24,14 @@ export const theses = pgTable(
     isCall: boolean("is_call").notNull(),
     isLong: boolean("is_long").notNull(),
     // unit: underlying price base units per strike
-    strikes: numeric("strikes", { precision: 78, scale: 0 }).array().notNull(),
+    strikes: numeric("strikes").array().notNull(),
     // unit: decimal places used by every value in strikes
     strikeDecimals: integer("strike_decimals").notNull(),
     collateralAddress: text("collateral_address").notNull(),
     collateralSymbol: text("collateral_symbol").notNull(),
     // unit: decimal places used by collateral-token base-unit quantities
     collateralDecimals: integer("collateral_decimals").notNull(),
-    creatorOrderSnapshot: jsonb("creator_order_snapshot").$type<Record<string, unknown>>().notNull(),
+    creatorOrderSnapshot: jsonb("creator_order_snapshot").$type<OrderSnapshotV1>().notNull(),
     creatorPositionId: uuid("creator_position_id").references((): AnyPgColumn => positions.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     publishedAt: timestamp("published_at", { withTimezone: true }),
@@ -49,6 +50,7 @@ export const theses = pgTable(
       "theses_public_creator_position_required",
       sql`${table.status} not in ('open', 'expired', 'settled') or ${table.creatorPositionId} is not null`,
     ),
+    check("theses_strikes_integral_nonnegative", sql`cardinality(${table.strikes}) > 0 and array_to_string(${table.strikes}, ',') ~ '^[0-9]+(,[0-9]+)*$'`),
   ],
 );
 

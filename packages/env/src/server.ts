@@ -11,7 +11,8 @@ function getVercelOrigin() {
 	return vercelUrl.startsWith("http") ? vercelUrl : `https://${vercelUrl}`;
 }
 
-const vercelOrigin = getVercelOrigin();
+// Exposed for future URL-derived env (CORS/auth origins); unused today.
+export const vercelOrigin = getVercelOrigin();
 
 const runtimeEnv = {
 	...process.env,

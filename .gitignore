@@ -60,3 +60,6 @@ temp
 # Local design references, never committed
 .demo/
 .research/
+
+# Agent worktrees
+.claude/worktrees/

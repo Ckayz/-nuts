@@ -52,7 +52,7 @@ bun run build               # turbo build
 bun run check-types         # tsc --noEmit across packages (the only "test" today)
 
 # Database (Drizzle + Postgres, run from root)
-bun run db:push             # push schema to DATABASE_URL (dev)
+bun run db:push             # LOCAL THROWAWAY DATABASES ONLY - see warning below
 bun run db:generate         # write SQL migrations to packages/db/src/migrations
 bun run db:migrate          # apply migrations
 bun run db:studio           # Drizzle Studio
@@ -66,7 +66,13 @@ cd packages/db && supabase stop
 
 # The turbo db:* wrappers are marked interactive and fail without a TTY (agents, CI).
 # Run drizzle-kit directly instead. No --env-file needed: see Env loading below.
-cd packages/db && bunx drizzle-kit push
+cd packages/db && bunx drizzle-kit generate --name <change>   # write the migration
+cd packages/db && bunx drizzle-kit migrate                    # apply it
+
+# NEVER run `drizzle-kit push` against the shared Supabase project. push reshapes
+# the database to match the schema of whoever runs it, so running it from a tree
+# that lacks the other developer's tables can DROP those tables. Migrations are
+# additive and reviewable; push is for a local throwaway database only.
 
 # Vercel
 bun run deploy:setup        # vercel link (once)
@@ -92,6 +98,7 @@ scripts/          sync-vercel-env.ts (used by env:preview / env:production)
 How the pieces connect:
 - **Env files**: `apps/web/.env.local` holds real values and is gitignored; `apps/web/.env.example` is committed and documents every variable. `.env.local` overrides `.env`, matching Next.js precedence, and the real process environment beats both so Vercel and CI are unaffected. Copy to start: `cp apps/web/.env.example apps/web/.env.local`.
 - **Env loading**: `@nuts/env/load` resolves the files relative to the repo, not the current working directory, and every entry point imports it. A script run from `packages/db` finds the same values the web app sees, so `bun --env-file=...` is no longer needed. Required today: `DATABASE_URL` and `OPENROUTER_API_KEY`.
+- **Two database URLs.** `DATABASE_URL` is Supabase's transaction pooler (port 6543) and is what the app uses: Vercel functions open many short-lived connections and would exhaust a direct connection. `DIRECT_DATABASE_URL` is the direct connection (port 5432), used only by drizzle-kit because schema changes cannot run through the pooler. On a local database one string does both jobs and `DIRECT_DATABASE_URL` stays empty.
 - **DB access**: import `db` from `@nuts/db`. It is created eagerly from `env.DATABASE_URL`, so importing `@nuts/db` in a client component will fail. Keep it in server components, route handlers, and server actions.
 - **Env validation** runs at import time. `next.config.ts` imports `@nuts/env/web` so bad client env fails the build. Set `SKIP_ENV_VALIDATION=1` to bypass server validation.
 - **UI imports**: `import { Button } from "@nuts/ui/components/button"`. The web app's `index.css` just imports `@nuts/ui/globals.css`; design tokens live in `packages/ui/src/styles/globals.css`. Add shared primitives with `npx shadcn@latest add <name> -c packages/ui` from the root; app-specific blocks go through the shadcn CLI run inside `apps/web`.

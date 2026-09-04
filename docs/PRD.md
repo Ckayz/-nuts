@@ -488,6 +488,10 @@ agent. This is a required test case, not an aspiration.
 
 ### Database
 
+- Hosted Supabase project `-nuts` (AWS ap-northeast-1), shared by both developers. Hosting is Vercel.
+- Schema changes ship as drizzle migrations, never `drizzle-kit push`. `push` reshapes the database to match the schema of whoever runs it and can drop the other developer's tables.
+- Each developer owns their own tables. The AI track owns the `agent_*` tables; the core product owns users, theses, positions, follows, comments and activity. Both export from `packages/db/src/schema/index.ts`.
+- The app connects through Supabase's transaction pooler; migrations use the direct connection.
 - PostgreSQL with Drizzle.
 - Database stores social state and an indexed record of app-originated transactions.
 - Server-only access through `@nuts/db`.

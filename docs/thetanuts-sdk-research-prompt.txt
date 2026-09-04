@@ -1,0 +1,36 @@
+You are a senior TypeScript + EVM engineer doing RESEARCH (not a review) on the Thetanuts Finance SDK so a team can build a web app on it. Work READ-ONLY. Do not modify, create, or delete any file except the single output file named below (you DO have write access to .research/thetanuts/). Do not install packages. Do not access the network; everything you need is on disk.
+
+## Inputs (all under .research/thetanuts/ relative to the repo root)
+
+Pin check FIRST. Compute `env LC_ALL=C shasum -a 256` and `wc -l` for each file and compare to these. If ANY mismatch, STOP and write only the mismatch to the output file.
+
+- sdk/dist/index.js        SHA-256 9641d4cf9dbee2590d9c9c831e6cf4a90bf37f3535b9266983b32075687707c4   17135 lines   (bundled CJS build of @thetanuts-finance/thetanuts-client 0.3.0)
+- sdk/dist/index.d.ts      SHA-256 99135b1f5bb104d15247ab763c47752c9e658a39f7d5012d4865bcfb3d0e3914   14833 lines   (its type declarations; the authoritative API surface)
+- docs-llms-full.txt       SHA-256 e194017f31a1eb9c5a9c1a273fd0c5e307c7c2f2e126dddfd34b81f5c491ac65   11077 lines   (full markdown export of docs.thetanuts.finance)
+- sdk-context-llms.js      SHA-256 49c8b2e4fd8783b708303515e854645a414b3f35b6304a93468d4c41980b0aeb     814 lines   (the SDK's own condensed LLM context, embedded as JS string constants)
+- sdk/package.json         (dependency and export metadata)
+
+## The app being built (context only, so you know what matters)
+
+"Thesis.fun": a pump.fun-style social feed where each post is a real options position on Thetanuts, Base mainnet (chainId 8453). A creator posts a thesis, picks an option structure by hand from what the OptionBook currently has liquidity for, and fills it from their own browser wallet. Others take the same side or the opposite side with their own budget. Everyone's live and settled P&L must be derivable from onchain state. Every market Thetanuts offers is in scope, not just BTC/ETH. Frontend is Next.js with wagmi + viem for wallets; the SDK depends on ethers v6.
+
+## Questions to answer (every answer cites file:line in the inputs; never answer from memory)
+
+1. Client construction for a browser app with NO signer (read-only) and with an EXTERNAL signer. Exact constructor options, defaults, which URLs it hits (RPC, indexer, pricing, websocket, state API), and how to override them.
+2. OptionBook READ path: how to fetch all open maker orders; the exact order object shape (every field, units and decimals); how to derive the set of assets, strikes, expiries, call/put, collateral tokens that currently have liquidity; any filter helpers.
+3. OptionBook PREVIEW and FILL path: previewFillOrder and fillOrder signatures, what "amount" means (collateral budget vs contracts, per the docs' warning), what previews return (contracts, premium, max loss, max payout), and the exact encode/"external wallet" helpers that return {to,data,value} so a viem wallet client can send the tx WITHOUT an ethers signer. Include ERC-20 approve requirements (which spender, which token, how much).
+4. Multi-leg structures on OptionBook (spreads, etc.): how they are represented in orders and fills.
+5. Position and P&L: how to list a wallet's positions (indexer and/or onchain), the position object shape, how to compute live mark-to-market from MM pricing, how settlement works (who settles, when, TWAP/oracle), how to compute settled payout, and how to close early if supported. Which of these are on-chain reads vs indexer API calls.
+6. Referrer fees: how a frontend sets a referrer on fills and how fees are claimed.
+7. Market data: the pricing API surface (tickers, bid/ask, IV), the WebSocket subscription API (what channels, message shapes), and the market price feed for underlyings.
+8. Chain config for Base 8453: every contract address, every collateral token with address and decimals, every option implementation with its name/type/strike count. List them verbatim from the bundle.
+9. Decimals and units: a table of every quantity (premium, strike, contracts, collateral, payouts) with its unit and decimal convention, and the helper functions that convert.
+10. Gotchas: everything in the docs' gotcha sections plus anything you notice reading the code (e.g., bigint drift, availableAmount semantics, fee forwarding as msg.value, allowance patterns, error codes and how to map them).
+11. Node vs browser: does the bundle touch node-only APIs (fs, process.env, better-sqlite3, etc.) on the paths above? Which storage providers exist for RFQ keys (we probably do NOT need RFQ; say clearly what is OptionBook-only).
+12. Anything in the SDK the app should NOT use or that looks unfinished/experimental for Base mainnet.
+
+## Output
+
+Write ONE markdown file: `.research/thetanuts/sdk-research-sol.md`. If the write is rejected for any reason, do NOT stop: print the ENTIRE report to stdout instead, between the lines `===== REPORT BEGIN =====` and `===== REPORT END =====`. Even when the write succeeds, ALSO print the entire report to stdout between those same markers as a backup. Open it with the literal line:
+`Reviewed .research/thetanuts inputs; SHA-256 index.js <digest you computed>, index.d.ts <digest you computed>, docs <digest you computed>`
+Then the 12 sections above in order, each with code snippets (TypeScript) showing the exact calls, and a final section "Open questions the team must verify live" listing anything the inputs do not settle. Mark any numeric value you are unsure of as UNVERIFIED. Be complete rather than brief; the team will build directly from this document.

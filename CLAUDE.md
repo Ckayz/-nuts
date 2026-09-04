@@ -108,6 +108,9 @@ How the pieces connect:
 - GitHub is the canonical shared state. At the start of every work session, fetch and reconcile the latest remote branch before editing.
 - Update `docs/PRD.md` whenever product scope, shared interfaces, safety rules, or ownership changes.
 - Validate the affected type checks/build/tests before claiming a change works. Never state “100% confident” when validation or a live integration remains incomplete; report the exact remaining uncertainty instead.
-- Push each coherent, validated checkpoint when the owner has requested continuous GitHub updates. Do not leave teammate-relevant decisions only in chat.
-- Outside that standing owner instruction, never push without explicit approval.
+- Push each coherent, validated checkpoint. The owner granted standing approval for
+  continuous GitHub updates on 2026-09-05, so pushing a validated checkpoint does not need
+  to be asked for again. Do not leave teammate-relevant decisions only in chat.
+- That standing approval covers pushing validated work to a feature branch. It is not
+  approval to force-push, rewrite shared history, merge to main, or push failing work.
 - The scaffold came from Better-T-Stack; `bts.jsonc` records the exact flags and enables `bunx create-better-t-stack@latest add` for addons.

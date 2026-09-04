@@ -132,3 +132,12 @@ test("requires exactly one OrderFilled event and ignores unrelated decodable eve
   expect(() => expectOrderFilled([filled, filled], { optionBook: A("6") as Address, buyer, seller, nonce: 9n })).toThrow(ThetanutsLogicError);
   try { expectOrderFilled([filled, filled], { optionBook: A("6") as Address, buyer, seller, nonce: 9n }); } catch (error) { expect(error).toMatchObject({ code: "ORDER_FILLED_NOT_FOUND", details: { count: 2 } }); }
 });
+
+test("filters OrderFilled events by zero and nonzero nonce", () => {
+  const optionBook = A("6") as Address; const buyer = A("1") as Address; const seller = A("2") as Address; const optionAddress = A("3") as Address; const referrer = A("4") as Address;
+  const data = encodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "address" }, { type: "uint256" }, { type: "bool" }], [optionAddress, 11n, 2n, referrer, 1n, true]);
+  const log = (nonce: bigint, logIndex: number): Log<bigint, number, false> => ({ address: optionBook, blockHash: `0x${"e".repeat(64)}`, blockNumber: 1n, data, logIndex, removed: false, topics: encodeEventTopics({ abi: OPTION_BOOK_ABI, eventName: "OrderFilled", args: { nonce, buyer, seller } }) as Log<bigint, number, false>["topics"], transactionHash: `0x${"f".repeat(64)}`, transactionIndex: 0 });
+  const logs = [log(0n, 0), log(1n, 1)];
+  expect(expectOrderFilled(logs, { optionBook, nonce: 0n }).nonce).toBe(0n);
+  expect(expectOrderFilled(logs, { optionBook, nonce: 1n }).nonce).toBe(1n);
+});

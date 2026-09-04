@@ -1,0 +1,24 @@
+{
+  "name": "@nuts/thetanuts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@thetanuts-finance/thetanuts-client": "0.3.0",
+    "ethers": "^6.13.0",
+    "viem": "^2.47.0"
+  },
+  "devDependencies": {
+    "@nuts/config": "workspace:*",
+    "@types/bun": "latest",
+    "typescript": "catalog:"
+  }
+}

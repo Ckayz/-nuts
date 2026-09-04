@@ -50,9 +50,15 @@ bun run db:migrate          # apply migrations
 bun run db:studio           # Drizzle Studio
 
 # Local Postgres via Supabase CLI (Docker), config in packages/db/supabase/
+# Only the db (and its kong gateway) are enabled; auth, storage, studio, realtime,
+# inbucket, edge runtime and analytics are switched off in config.toml on purpose.
 cd packages/db && supabase start     # DB on postgresql://postgres:postgres@127.0.0.1:54322/postgres
 cd packages/db && supabase status
 cd packages/db && supabase stop
+
+# The turbo db:* wrappers are marked interactive and fail without a TTY (agents, CI).
+# Run drizzle-kit directly instead:
+cd packages/db && bunx drizzle-kit push
 
 # Vercel
 bun run deploy:setup        # vercel link (once)
@@ -76,7 +82,7 @@ scripts/          sync-vercel-env.ts (used by env:preview / env:production)
 ```
 
 How the pieces connect:
-- **One env file**: `apps/web/.env` (gitignored). Both `packages/env/src/server.ts` (via dotenv) and `packages/db/drizzle.config.ts` read it. It is currently empty; `DATABASE_URL` must be set before the DB or app will work.
+- **One env file**: `apps/web/.env` (gitignored). Set `DATABASE_URL` there; local Supabase value is `postgresql://postgres:postgres@127.0.0.1:54322/postgres`. `drizzle.config.ts` points at that file explicitly. `packages/env/src/server.ts` loads `.env` from the **current working directory** via dotenv, so `@nuts/db` finds it when Next runs from `apps/web` but not when a script runs from `packages/db`. For scripts there, use `bun --env-file=../../apps/web/.env run <file>`.
 - **DB access**: import `db` from `@nuts/db`. It is created eagerly from `env.DATABASE_URL`, so importing `@nuts/db` in a client component will fail. Keep it in server components, route handlers, and server actions.
 - **Env validation** runs at import time. `next.config.ts` imports `@nuts/env/web` so bad client env fails the build. Set `SKIP_ENV_VALIDATION=1` to bypass server validation.
 - **UI imports**: `import { Button } from "@nuts/ui/components/button"`. The web app's `index.css` just imports `@nuts/ui/globals.css`; design tokens live in `packages/ui/src/styles/globals.css`. Add shared primitives with `npx shadcn@latest add <name> -c packages/ui` from the root; app-specific blocks go through the shadcn CLI run inside `apps/web`.

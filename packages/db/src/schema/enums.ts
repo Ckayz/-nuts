@@ -1,0 +1,21 @@
+import { pgEnum } from "drizzle-orm/pg-core";
+
+export const thesisDirectionEnum = pgEnum("thesis_direction", ["bull", "bear"]);
+export const thesisStatusEnum = pgEnum("thesis_status", [
+  "draft",
+  "pending",
+  "open",
+  "expired",
+  "settled",
+  "cancelled",
+]);
+export const positionRoleEnum = pgEnum("position_role", ["creator", "participant"]);
+export const positionSideEnum = pgEnum("position_side", ["back", "counter"]);
+export const positionStatusEnum = pgEnum("position_status", [
+  "pending",
+  "confirmed",
+  "indexed",
+  "expired",
+  "settled",
+  "failed",
+]);

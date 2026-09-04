@@ -8,14 +8,20 @@ const PRICE_SCALE = 100_000_000n;
 
 function checked(params: RiskParams): bigint {
   const expected = params.kind.endsWith("spread") ? 2 : 1;
-  if (!Number.isInteger(params.contractSizeDecimals) || params.contractSizeDecimals < 0 || params.strikes.length !== expected || params.numContracts <= 0n || params.premiumUsd8 < 0n) throw new ThetanutsLogicError("INVALID_RISK_PARAMS", "Invalid risk parameters");
+  if (!Number.isSafeInteger(params.contractSizeDecimals) || params.contractSizeDecimals < 0 || params.contractSizeDecimals > 255 || params.strikes.length !== expected || params.numContracts <= 0n || params.premiumUsd8 < 0n) throw new ThetanutsLogicError("INVALID_RISK_PARAMS", "Invalid risk parameters");
   if (expected === 2 && (params.strikes[0] === undefined || params.strikes[1] === undefined || params.strikes[0] >= params.strikes[1])) throw new ThetanutsLogicError("INVALID_RISK_PARAMS", "Spread strikes must be ascending");
-  return 10n ** BigInt(params.contractSizeDecimals);
+  const scale = 10n ** BigInt(params.contractSizeDecimals);
+  if (params.kind !== "call") {
+    const grossPerContract = params.kind === "put" ? params.strikes[0] : (params.strikes[1] ?? 0n) - (params.strikes[0] ?? 0n);
+    const cap = (grossPerContract ?? 0n) * params.numContracts / scale;
+    if (params.premiumUsd8 > cap) throw new ThetanutsLogicError("INVALID_RISK_PARAMS", "Premium exceeds bounded gross payoff", { premiumUsd8: params.premiumUsd8, cap });
+  }
+  return scale;
 }
 
 /** Converts total collateral-token premium to total 8-decimal USD premium. The caller chooses `collateralUsdPrice8` (including for USDC), and this convention is UNVERIFIED (research §9). */
 export function premiumUsd8From({ premiumBaseUnits, collateralDecimals, collateralUsdPrice8 }: PremiumUsd8Params): bigint {
-  if (premiumBaseUnits < 0n || collateralUsdPrice8 < 0n || !Number.isInteger(collateralDecimals) || collateralDecimals < 0) throw new ThetanutsLogicError("INVALID_RISK_PARAMS", "Invalid premium conversion parameters");
+  if (premiumBaseUnits < 0n || collateralUsdPrice8 < 0n || !Number.isSafeInteger(collateralDecimals) || collateralDecimals < 0 || collateralDecimals > 255) throw new ThetanutsLogicError("INVALID_RISK_PARAMS", "Invalid premium conversion parameters");
   return premiumBaseUnits * collateralUsdPrice8 / 10n ** BigInt(collateralDecimals);
 }
 

@@ -3,11 +3,11 @@
 Framework-neutral Thetanuts OptionBook logic for Base mainnet.
 
 - `createReadClient({ rpcUrl, referrer? })` creates a read-only SDK client with browser-safe memory storage; `assertBaseChain(chainId)` guards wallet chain selection.
-- `fetchLiveOrders(client, now?)` fetches and filters fillable rows. `deriveMarkets(orders, now?)` resolves feed, collateral and implementation metadata. `listAssets`, `listExpiries`, and `listStructures` group results.
-- `quoteFill({ client, order, budget, referrer?, allowUnverifiedTakerSell? })` turns collateral-base-unit premium spend into a capped fill quote.
+- `fetchLiveOrders(client, now?)` fetches API-advertised rows passing local amount and expiry filters; cancellation and minimum-size preflight are not checked. `deriveMarkets(orders, now?)` resolves feed, collateral and implementation metadata. `listAssets`, `listExpiries`, and `listStructures` group results.
+- `quoteFill({ client, order, budget, referrer?, allowUnverifiedTakerSell?, now? })` turns collateral-base-unit premium spend into a capped fill quote.
 - `premiumUsd8From` converts collateral-base-unit premium to total 8-decimal USD premium; `payoffAtExpiry`, `payoffCurve`, `maxLoss`, `maxPayout`, and `breakEven` calculate vanilla/spread long or short risk from explicit strikes, size, total USD premium, and contract-size decimals.
 - `buildFillTransactions({ client, order, budget, referrer?, account, allowUnverifiedTakerSell?, now? })` returns optional exact ERC-20 approval calldata, fill calldata, and expected values. Call `assertBaseChain` separately.
-- `parseOrderFilled(logs)` extracts all canonical r12 fill fields; `expectOrderFilled(logs)` requires exactly one.
+- `parseOrderFilled(logs, { optionBook })` extracts canonical r12 fill fields emitted by the expected OptionBook; `expectOrderFilled(logs, { optionBook, buyer?, seller?, nonce? })` requires exactly one matching fill.
 - `getIndexedPositions`, `getOptionState`, and `settledPayout` wrap the supported indexer and on-chain reads.
 - `ThetanutsLogicError` exposes stable local error codes and optional details.
 

@@ -3,6 +3,7 @@ export type ThetanutsLogicErrorCode =
   | "INVALID_ORDER"
   | "ORDER_EXPIRED"
   | "ZERO_CONTRACTS"
+  | "ZERO_PREMIUM"
   | "TAKER_SELL_UNVERIFIED"
   | "ORDER_FILLED_NOT_FOUND"
   | "INVALID_RISK_PARAMS";

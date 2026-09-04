@@ -53,10 +53,18 @@ describe("markets", () => {
 
 describe("quote", () => {
   const preview = (maxContracts: bigint) => ({ optionBook: { previewFillOrder: (row: OrderWithSignature, budget?: bigint, referrer?: string) => { const price = row.order.price; const requested = (budget ?? 0n) * 100_000_000n / price; const numContracts = requested > maxContracts ? maxContracts : requested; return { numContracts, maxContracts, collateralToken: row.rawApiData?.collateral ?? A("0"), pricePerContract: price, totalCollateral: budget ?? 0n, referrer: referrer ?? A("0"), maker: row.order.maker, expiry: row.order.expiry, isCall: row.rawApiData?.isCall ?? false, strikes: row.rawApiData?.strikes.map(BigInt) ?? [] }; } } });
-  test("rounds and caps while recomputing premium", () => { const row = order({ price: 30_000_000n }); const uncapped = quoteFill({ client: preview(100n), order: row, budget: 1n }); expect(uncapped.numContracts).toBe(3n); expect(uncapped.premium).toBe(0n); expect(uncapped.capped).toBe(false); const capped = quoteFill({ client: preview(2n), order: row, budget: 1n }); expect(capped.numContracts).toBe(2n); expect(capped.capped).toBe(true); });
+  test("rounds and caps while recomputing premium", () => { const row = order({ price: 30_000_000n }); const uncapped = quoteFill({ client: preview(100n), order: row, budget: 2n, now }); expect(uncapped.numContracts).toBe(6n); expect(uncapped.premium).toBe(1n); expect(uncapped.capped).toBe(false); const capped = quoteFill({ client: preview(4n), order: row, budget: 2n, now }); expect(capped.numContracts).toBe(4n); expect(capped.capped).toBe(true); });
   test("marks the exact cap uncapped and one requested contract above capped", () => { const row = order({ price: 100_000_000n }); expect(quoteFill({ client: preview(5n), order: row, budget: 5n }).capped).toBe(false); expect(quoteFill({ client: preview(5n), order: row, budget: 6n }).capped).toBe(true); });
   test("gates taker sell", () => { const row = order({ isLong: false }); expect(() => quoteFill({ client: preview(10n), order: row, budget: 1n })).toThrow(ThetanutsLogicError); expect(quoteFill({ client: preview(10n), order: row, budget: 1n, allowUnverifiedTakerSell: true }).numContracts).toBeGreaterThan(0n); });
   test("matches the real SDK pure preview", () => { const client = createReadClient({ rpcUrl: "http://127.0.0.1:1" }); const row = order({ price: 123_456_789n, available: 1_000_000_000_000n }); const quote = quoteFill({ client, order: row, budget: 10_000_000n }); expect(quote.numContracts).toBe(8_100_000n); expect(quote.premium).toBe(9_999_999n); });
+  test("rejects non-fillable quotes", () => {
+    expect(() => quoteFill({ client: preview(10n), order: order({}), budget: 0n, now })).toThrowError(expect.objectContaining({ code: "ZERO_CONTRACTS" }));
+    expect(() => quoteFill({ client: preview(10n), order: order({ price: 100_000_001n }), budget: 1n, now })).toThrowError(expect.objectContaining({ code: "ZERO_CONTRACTS" }));
+    expect(() => quoteFill({ client: preview(0n), order: order({}), budget: 1n, now })).toThrowError(expect.objectContaining({ code: "ZERO_CONTRACTS" }));
+    expect(() => quoteFill({ client: preview(10n), order: order({ expiry: BigInt(now) }), budget: 1n, now })).toThrowError(expect.objectContaining({ code: "ORDER_EXPIRED" }));
+    expect(() => quoteFill({ client: preview(10n), order: order({ orderExpiry: now }), budget: 1n, now })).toThrowError(expect.objectContaining({ code: "ORDER_EXPIRED" }));
+    expect(() => quoteFill({ client: preview(10n), order: order({ price: 30_000_000n }), budget: 1n, now })).toThrowError(expect.objectContaining({ code: "ZERO_PREMIUM" }));
+  });
 });
 
 describe("risk", () => {
@@ -82,12 +90,22 @@ describe("risk", () => {
     }
   });
   test("break-even payoff is zero for every kind, side, and required size scale", () => { for (const decimals of [6, 8, 18]) for (const side of ["long", "short"] as const) for (const [kind, strikes] of [["call", [100n]], ["put", [100n]], ["call-spread", [100n, 120n]], ["put-spread", [80n, 100n]]] as const) { const params = p(kind, side, [...strikes], decimals); expect(payoffAtExpiry(params, breakEven(params))).toBe(0n); } });
+  test("accepts bounded premiums through the cap and rejects above it on both sides", () => {
+    for (const side of ["long", "short"] as const) for (const [kind, strikes, cap] of [["put", [100n], 100n], ["call-spread", [100n, 120n], 20n], ["put-spread", [80n, 100n], 20n]] as const) {
+      for (const premiumUsd8 of [cap - 1n, cap]) expect(() => maxLoss({ ...p(kind, side, [...strikes]), premiumUsd8 })).not.toThrow();
+      expect(() => maxLoss({ ...p(kind, side, [...strikes]), premiumUsd8: cap + 1n })).toThrowError(expect.objectContaining({ code: "INVALID_RISK_PARAMS", details: { premiumUsd8: cap + 1n, cap } }));
+    }
+  });
+  test("rejects decimals outside the uint8 safe-integer domain", () => {
+    for (const contractSizeDecimals of [256, 1e9]) expect(() => maxLoss({ ...p("call", "long", [100n]), contractSizeDecimals })).toThrowError(expect.objectContaining({ code: "INVALID_RISK_PARAMS" }));
+    for (const collateralDecimals of [256, 1e9]) expect(() => premiumUsd8From({ premiumBaseUnits: 1n, collateralDecimals, collateralUsdPrice8: 1n })).toThrowError(expect.objectContaining({ code: "INVALID_RISK_PARAMS" }));
+  });
 });
 
 describe("fill", () => {
   function client(allowance: bigint) { const real = createReadClient({ rpcUrl: "http://127.0.0.1:1" }); return { optionBook: real.optionBook, erc20: { getAllowance: async () => allowance, encodeApprove: real.erc20.encodeApprove.bind(real.erc20) } }; }
   test("uses original budget for calldata and approves recomputed premium", async () => { const budget = 10_000_000n; const row = order({ price: 123_456_789n, available: 1_000_000_000_000n }); const result = await buildFillTransactions({ client: client(0n), order: row, budget, account: A("5") as Address, now }); const decoded = decodeFunctionData({ abi: OPTION_BOOK_ABI, data: result.fill.data }); const encodedOrder = decoded.args?.[0]; expect(typeof encodedOrder === "object" && encodedOrder !== null && "numContracts" in encodedOrder ? encodedOrder.numContracts : -1n).toBe(8_100_000n); expect(result.expected).toMatchObject({ budget, numContracts: 8_100_000n, premium: 9_999_999n }); expect(result.approve).toBeDefined(); expect(result.fill.value).toBe(0n); const high = await buildFillTransactions({ client: client(9_999_999n), order: row, budget, account: A("5") as Address, now }); expect(high.approve).toBeUndefined(); });
-  test("preserves a one-unit budget through real SDK encoding", async () => { const result = await buildFillTransactions({ client: client(0n), order: order({ price: 30_000_000n, available: 1_000_000_000_000n }), budget: 1n, account: A("5") as Address, now }); const decoded = decodeFunctionData({ abi: OPTION_BOOK_ABI, data: result.fill.data }); const encodedOrder = decoded.args?.[0]; expect(typeof encodedOrder === "object" && encodedOrder !== null && "numContracts" in encodedOrder ? encodedOrder.numContracts : -1n).toBe(3n); expect(result.expected).toMatchObject({ budget: 1n, numContracts: 3n, premium: 0n }); });
+  test("rejects a nonzero contract count with zero recomputed premium", async () => { await expect(buildFillTransactions({ client: client(0n), order: order({ price: 30_000_000n, available: 1_000_000_000_000n }), budget: 1n, account: A("5") as Address, now })).rejects.toMatchObject({ code: "ZERO_PREMIUM" }); });
   test("rejects expiry and gates taker sell", async () => { await expect(buildFillTransactions({ client: client(0n), order: order({ expiry: 1n, orderExpiry: 1 }), budget: 1n, account: A("5") as Address, now })).rejects.toBeInstanceOf(ThetanutsLogicError); const sell = order({ isLong: false }); await expect(buildFillTransactions({ client: client(0n), order: sell, budget: 1n, account: A("5") as Address, now })).rejects.toMatchObject({ code: "TAKER_SELL_UNVERIFIED" }); });
 });
 
@@ -96,17 +114,21 @@ test("parses the canonical r12 OrderFilled event", () => {
   const topics = encodeEventTopics({ abi: OPTION_BOOK_ABI, eventName: "OrderFilled", args: { nonce: 9n, buyer, seller } });
   const data = encodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "address" }, { type: "uint256" }, { type: "bool" }], [optionAddress, 11n, 2n, referrer, 1n, true]);
   const log: Log<bigint, number, false> = { address: A("6") as Address, blockHash: `0x${"a".repeat(64)}`, blockNumber: 1n, data: data as Hex, logIndex: 0, removed: false, topics: topics as Log<bigint, number, false>["topics"], transactionHash: `0x${"b".repeat(64)}`, transactionIndex: 0 };
-  expect(parseOrderFilled([log])[0]).toEqual({ nonce: 9n, buyer, seller, optionAddress, premiumAmount: 11n, feeCollected: 2n, referrer, referralFeePaid: 1n, sellerWasMaker: true });
-  expect(expectOrderFilled([log]).nonce).toBe(9n);
+  expect(parseOrderFilled([log], { optionBook: A("6") as Address })[0]).toEqual({ nonce: 9n, buyer, seller, optionAddress, premiumAmount: 11n, feeCollected: 2n, referrer, referralFeePaid: 1n, sellerWasMaker: true });
+  expect(expectOrderFilled([log], { optionBook: A("6") as Address }).nonce).toBe(9n);
+  expect(parseOrderFilled([log], { optionBook: A("9") as Address })).toEqual([]);
 });
 
 test("requires exactly one OrderFilled event and ignores unrelated decodable events", () => {
   const unrelated: Log<bigint, number, false> = { address: A("6") as Address, blockHash: `0x${"c".repeat(64)}`, blockNumber: 1n, data: "0x", logIndex: 0, removed: false, topics: encodeEventTopics({ abi: OPTION_BOOK_ABI, eventName: "OrderCancelled", args: { nonce: 1n, maker: A("1") as Address } }) as Log<bigint, number, false>["topics"], transactionHash: `0x${"d".repeat(64)}`, transactionIndex: 0 };
-  expect(() => expectOrderFilled([])).toThrow(ThetanutsLogicError);
-  expect(() => expectOrderFilled([unrelated])).toThrow(ThetanutsLogicError);
+  expect(() => expectOrderFilled([], { optionBook: A("6") as Address })).toThrow(ThetanutsLogicError);
+  expect(() => expectOrderFilled([unrelated], { optionBook: A("6") as Address })).toThrow(ThetanutsLogicError);
   const buyer = A("1") as Address; const seller = A("2") as Address; const optionAddress = A("3") as Address; const referrer = A("4") as Address;
   const filled: Log<bigint, number, false> = { ...unrelated, data: encodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "address" }, { type: "uint256" }, { type: "bool" }], [optionAddress, 11n, 2n, referrer, 1n, true]), topics: encodeEventTopics({ abi: OPTION_BOOK_ABI, eventName: "OrderFilled", args: { nonce: 9n, buyer, seller } }) as Log<bigint, number, false>["topics"] };
-  expect(parseOrderFilled([unrelated, filled])).toHaveLength(1);
-  expect(() => expectOrderFilled([filled, filled])).toThrow(ThetanutsLogicError);
-  try { expectOrderFilled([filled, filled]); } catch (error) { expect(error).toMatchObject({ code: "ORDER_FILLED_NOT_FOUND", details: { count: 2 } }); }
+  expect(parseOrderFilled([unrelated, filled], { optionBook: A("6") as Address })).toHaveLength(1);
+  const otherBuyer = A("7") as Address;
+  const other = { ...filled, topics: encodeEventTopics({ abi: OPTION_BOOK_ABI, eventName: "OrderFilled", args: { nonce: 10n, buyer: otherBuyer, seller } }) as Log<bigint, number, false>["topics"] };
+  expect(expectOrderFilled([other, filled, other], { optionBook: A("6") as Address, buyer, seller, nonce: 9n }).nonce).toBe(9n);
+  expect(() => expectOrderFilled([filled, filled], { optionBook: A("6") as Address, buyer, seller, nonce: 9n })).toThrow(ThetanutsLogicError);
+  try { expectOrderFilled([filled, filled], { optionBook: A("6") as Address, buyer, seller, nonce: 9n }); } catch (error) { expect(error).toMatchObject({ code: "ORDER_FILLED_NOT_FOUND", details: { count: 2 } }); }
 });

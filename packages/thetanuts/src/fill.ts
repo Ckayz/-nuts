@@ -20,11 +20,15 @@ export async function buildFillTransactions({ client, order, budget, referrer, a
   const preview = client.optionBook.previewFillOrder(order, budget, referrer);
   if (preview.numContracts <= 0n) throw new ThetanutsLogicError("ZERO_CONTRACTS", "Premium produces zero contracts");
   const premium = preview.numContracts * preview.pricePerContract / 100_000_000n;
+  if (premium === 0n) throw new ThetanutsLogicError("ZERO_PREMIUM", "Nonzero contract count produces zero premium");
   const fill = tx(client.optionBook.encodeFillOrder(order, budget, referrer));
   const decoded = decodeFunctionData({ abi: OPTION_BOOK_ABI, data: fill.data });
   const encodedOrder = decoded.args?.[0];
-  const encodedContracts = typeof encodedOrder === "object" && encodedOrder !== null && "numContracts" in encodedOrder && typeof encodedOrder.numContracts === "bigint" ? encodedOrder.numContracts : -1n;
-  if (decoded.functionName !== "fillOrder" || encodedContracts !== preview.numContracts) {
+  if (decoded.functionName !== "fillOrder" || typeof encodedOrder !== "object" || encodedOrder === null || !("numContracts" in encodedOrder) || typeof encodedOrder.numContracts !== "bigint") {
+    throw new ThetanutsLogicError("INVALID_ORDER", "Could not decode fill calldata");
+  }
+  const encodedContracts = encodedOrder.numContracts;
+  if (encodedContracts !== preview.numContracts) {
     throw new ThetanutsLogicError("INVALID_ORDER", "Encoded fill contract count differs from preview", { expected: preview.numContracts, encoded: encodedContracts });
   }
   const collateralToken = preview.collateralToken as Address;

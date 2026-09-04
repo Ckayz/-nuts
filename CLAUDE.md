@@ -15,13 +15,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Scope decisions from the owner (2026-09-05):
 - **Every market Thetanuts offers**, not a fixed asset list. Read available assets, strikes and expiries live from OptionBook; never hardcode BTC/ETH.
 - Base mainnet only.
-- **AI is a companion, never a trade step.** The creator picks the option structure by hand from what OptionBook has liquidity for. AI does not build, size, or execute positions. What it does: an "explain this" action on a thesis, like Grok on X, where a user asks what the creator is saying, what the option structure means, the payoff, and the risk. Style reference: Elfa.ai.
+- **AI is an embedded trading agent.** It supports discovery from a user goal and contextual actions from a selected thesis. It may search live liquidity, ask for missing constraints, compare up to three bounded-risk choices, and prepare deterministic OptionBook or RFQ transactions. It never signs or submits a transaction: the user's connected wallet must approve every write.
 - Product numbers (risk defaults, fees, trending rules, leaderboard formulas) are the owner's. Ask, never invent.
 
-Team split (2026-09-05): owner + Claude on UI and Thetanuts (build steps 1 to 4 below). Teammate on the AI companion, which depends on the thesis data shape from step 1.
+Team split (2026-09-05): the core-product teammate owns the social product, thesis data, and manual Thetanuts flows. The AI-track teammate owns the `/agent` workspace, model/tool orchestration, agent persistence, and approval-gated transaction preparation. Shared contracts are coordinated through `docs/PRD.md`.
 
 Thetanuts integration:
-- Use `@thetanuts-finance/thetanuts-client` directly (OptionBook: browse orders, `previewFillOrder`, `fillOrder`). Not yet installed.
+- Use `@thetanuts-finance/thetanuts-client` directly for OptionBook and OptionFactory RFQ flows.
 - Do not use `@thetanuts-finance/mcp`; it is for AI chat clients and the owner ruled it out. The SDK and docs were audited on 2026-09-05 and are clean.
 - Docs: https://docs.thetanuts.finance/sdk (append `.md` to a page URL for markdown; full export at https://docs.thetanuts.finance/llms-full.txt).
 
@@ -34,7 +34,7 @@ Thetanuts integration:
 5. **Socials.** Follow, comment, join a side, activity log, leaderboard, trending. Needs steps 1 and 4.
 6. **Polish and ship.** Open Graph share images, verified badges from onchain history, Vercel deploy.
 
-Parallel track (teammate): **AI companion.** "Explain this thesis" action on the thesis page and feed cards. Reads the thesis, the option structure and payoff data from the DB and SDK, and answers in plain words. Starts once step 1 types are agreed.
+Parallel track (AI teammate): **AI trading agent.** A dedicated `/agent` workspace supports broad discovery and selected-thesis context. Read tools may run automatically. Any write tool must show a deterministic preview, enforce the PRD safety limits, require explicit user approval, and return calldata for the user's wallet rather than submitting server-side.
 
 Parallel work: steps 2 and 3 side by side once step 1 types are agreed. Step 5 can start on the DB/UI side while step 4 is being tested.
 
@@ -104,5 +104,10 @@ How the pieces connect:
 
 ## Working rules
 
-- Never commit `apps/web/.env`. Never push without an explicit owner instruction.
+- Never commit `apps/web/.env` or any secret/private key.
+- GitHub is the canonical shared state. At the start of every work session, fetch and reconcile the latest remote branch before editing.
+- Update `docs/PRD.md` whenever product scope, shared interfaces, safety rules, or ownership changes.
+- Validate the affected type checks/build/tests before claiming a change works. Never state “100% confident” when validation or a live integration remains incomplete; report the exact remaining uncertainty instead.
+- Push each coherent, validated checkpoint when the owner has requested continuous GitHub updates. Do not leave teammate-relevant decisions only in chat.
+- Outside that standing owner instruction, never push without explicit approval.
 - The scaffold came from Better-T-Stack; `bts.jsonc` records the exact flags and enables `bunx create-better-t-stack@latest add` for addons.

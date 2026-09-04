@@ -13,6 +13,7 @@ export function quoteFill({ client, order, budget, referrer, allowUnverifiedTake
   if (!order.rawApiData) throw new ThetanutsLogicError("INVALID_ORDER", "Order is missing rawApiData");
   if (!order.rawApiData.isLong && !allowUnverifiedTakerSell) throw new ThetanutsLogicError("TAKER_SELL_UNVERIFIED", "Taker-sell collateral debit is unverified");
   const preview = client.optionBook.previewFillOrder(order, budget, referrer);
+  const requested = budget * 100_000_000n / preview.pricePerContract;
   const premium = preview.numContracts * preview.pricePerContract / 100_000_000n;
-  return { numContracts: preview.numContracts, maxContracts: preview.maxContracts, pricePerContract: preview.pricePerContract, premium, capped: preview.numContracts < budget * 100_000_000n / preview.pricePerContract, collateralToken: preview.collateralToken, referrer: preview.referrer, expiry: preview.expiry, isCall: preview.isCall, strikes: preview.strikes };
+  return { numContracts: preview.numContracts, maxContracts: preview.maxContracts, pricePerContract: preview.pricePerContract, premium, capped: requested > preview.maxContracts, collateralToken: preview.collateralToken, referrer: preview.referrer, expiry: preview.expiry, isCall: preview.isCall, strikes: preview.strikes };
 }

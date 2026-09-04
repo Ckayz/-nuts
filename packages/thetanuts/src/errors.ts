@@ -4,6 +4,7 @@ export type ThetanutsLogicErrorCode =
   | "ORDER_EXPIRED"
   | "ZERO_CONTRACTS"
   | "TAKER_SELL_UNVERIFIED"
+  | "ORDER_FILLED_NOT_FOUND"
   | "INVALID_RISK_PARAMS";
 
 export class ThetanutsLogicError extends Error {

@@ -17,7 +17,7 @@ function unixNow(now?: number | bigint | Date): bigint {
 
 export async function fetchLiveOrders(client: ThetanutsClient, now?: number | bigint | Date): Promise<OrderWithSignature[]> {
   const timestamp = unixNow(now);
-  return (await client.api.fetchOrders()).filter((row) => row.rawApiData !== undefined && row.availableAmount > 0n && row.order.expiry > timestamp && BigInt(row.rawApiData.orderExpiryTimestamp) > timestamp);
+  return (await client.api.fetchOrders()).filter((row) => row.rawApiData && row.availableAmount > 0n && row.order.expiry > timestamp && BigInt(row.rawApiData.orderExpiryTimestamp) > timestamp);
 }
 
 export function deriveMarkets(orders: readonly OrderWithSignature[], now?: number | bigint | Date): Market[] {

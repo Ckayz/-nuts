@@ -11,8 +11,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Scope decisions from the owner (2026-09-05):
 - **Every market Thetanuts offers**, not a fixed asset list. Read available assets, strikes and expiries live from OptionBook; never hardcode BTC/ETH.
 - Base mainnet only.
-- **No AI in the loop.** The creator picks the option structure from what OptionBook has liquidity for. Do not add an LLM step.
+- **AI is a companion, never a trade step.** The creator picks the option structure by hand from what OptionBook has liquidity for. AI does not build, size, or execute positions. What it does: an "explain this" action on a thesis, like Grok on X, where a user asks what the creator is saying, what the option structure means, the payoff, and the risk. Style reference: Elfa.ai.
 - Product numbers (risk defaults, fees, trending rules, leaderboard formulas) are the owner's. Ask, never invent.
+
+Team split (2026-09-05): owner + Claude on UI and Thetanuts (build steps 1 to 4 below). Teammate on the AI companion, which depends on the thesis data shape from step 1.
 
 Thetanuts integration:
 - Use `@thetanuts-finance/thetanuts-client` directly (OptionBook: browse orders, `previewFillOrder`, `fillOrder`). Not yet installed.
@@ -27,6 +29,8 @@ Thetanuts integration:
 4. **Thetanuts write.** Approve collateral, fill from the user's wallet, store tx hash and position. Read settlement, compute live and settled P&L. Riskiest step; test with small size on mainnet.
 5. **Socials.** Follow, comment, join a side, activity log, leaderboard, trending. Needs steps 1 and 4.
 6. **Polish and ship.** Open Graph share images, verified badges from onchain history, Vercel deploy.
+
+Parallel track (teammate): **AI companion.** "Explain this thesis" action on the thesis page and feed cards. Reads the thesis, the option structure and payoff data from the DB and SDK, and answers in plain words. Starts once step 1 types are agreed.
 
 Parallel work: steps 2 and 3 side by side once step 1 types are agreed. Step 5 can start on the DB/UI side while step 4 is being tested.
 

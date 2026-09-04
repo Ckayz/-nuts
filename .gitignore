@@ -63,3 +63,6 @@ temp
 
 # Agent worktrees
 .claude/worktrees/
+
+# Browser-tool artifacts written by agents
+.playwright-mcp/

@@ -23,7 +23,9 @@
       "version": "0.1.0",
       "dependencies": {
         "@ai-sdk/react": "^4.0.95",
+        "@nuts/db": "workspace:*",
         "@nuts/env": "workspace:*",
+        "@nuts/thetanuts": "workspace:*",
         "@nuts/ui": "workspace:*",
         "@openrouter/ai-sdk-provider": "^3.0.0",
         "@swc/helpers": "^0.5.23",
@@ -48,6 +50,7 @@
       "devDependencies": {
         "@nuts/config": "workspace:*",
         "@tailwindcss/postcss": "catalog:",
+        "@types/bun": "^1.4.1",
         "@types/node": "catalog:",
         "@types/react": "catalog:",
         "@types/react-dom": "catalog:",

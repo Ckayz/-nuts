@@ -47,6 +47,7 @@ export const env = createEnv({
 
 		/** Base mainnet RPC. Public endpoint works; a keyed provider is better under load. */
 		BASE_RPC_URL: z.string().url().default("https://mainnet.base.org"),
+		THESIS_REFERRER: z.string().regex(/^0x[0-9a-fA-F]{40}$/).default("0xd5E66B6d957C2d5e6C8c167707a49a029D1247dd"),
 		/**
 		 * OptionBook order feed. This is the only list-all-orders source: the SDK's
 		 * filterOrders() is broken and its WebSocket host does not resolve. See PRD 11.

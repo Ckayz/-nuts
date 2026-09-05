@@ -1,98 +1,22 @@
-import { z } from "zod";
-
-/** Base mainnet. The only chain this product trades on (PRD 18). */
-export const CHAIN_ID = 8453 as const;
-
-/** USDC on Base, 6 decimals. The only collateral in v1 (PRD 10.2). */
-export const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
-
-/** Price and strike fixed-point scale used by the order feed. */
-export const PRICE_SCALE = 100_000_000n; // 1e8
-/** USDC fixed-point scale. */
-export const USDC_SCALE = 1_000_000n; // 1e6
-
-/**
- * One order exactly as the feed publishes it. Fields are preserved verbatim
- * because the maker's EIP-712 signature covers them (PRD 11): anything we
- * re-derive and send instead of these values will fail signature validation.
- */
-export const rawOrderSchema = z.object({
-	/**
-	 * Present only on single-leg vanillas, e.g. "ETH-5SEP26-2420-P". Multi-leg
-	 * structures and binaries omit it and carry `name`/`type` instead, so the
-	 * underlying asset is resolved from `priceFeed` for those.
-	 */
-	ticker: z.string().optional(),
-	/** Human label on structured products, e.g. "ETH 2460 Up 1D". */
-	name: z.string().nullish(),
-	/** Product family on structured products, e.g. "binaries". */
-	type: z.string().nullish(),
-	numContracts: z.string().nullish(),
-	maker: z.string(),
-	orderExpiryTimestamp: z.number(),
-	collateral: z.string(),
-	isCall: z.boolean(),
-	priceFeed: z.string(),
-	implementation: z.string(),
-	isLong: z.boolean(),
-	maxCollateralUsable: z.string(),
-	strikes: z.array(z.number()),
-	expiry: z.number(),
-	price: z.string(),
-	extraOptionData: z.string(),
-});
-
-export const orderEntrySchema = z.object({
-	order: rawOrderSchema,
-	signature: z.string(),
-	chainId: z.number(),
-	optionBookAddress: z.string(),
-	nonce: z.string(),
-	greeks: z
-		.object({
-			delta: z.number(),
-			iv: z.number(),
-			gamma: z.number(),
-			theta: z.number(),
-			vega: z.number(),
-		})
-		.partial()
-		.optional(),
-});
-
-export const ordersPayloadSchema = z.object({
-	data: z.object({
-		timestamp: z.union([z.number(), z.string()]).optional(),
-		// Rows are validated one at a time by the caller so a single unfamiliar
-		// entry cannot blank the whole book.
-		orders: z.array(z.unknown()),
-		market_data: z.record(z.string(), z.number()).optional(),
-	}),
-	metadata: z
-		.object({
-			last_updated: z.number().optional(),
-			current_time: z.number().optional(),
-		})
-		.optional(),
-});
-
-export type RawOrder = z.infer<typeof rawOrderSchema>;
-export type OrderEntry = z.infer<typeof orderEntrySchema>;
-export type OrdersPayload = z.infer<typeof ordersPayloadSchema>;
+import type { Market } from "@nuts/thetanuts";
 
 /** An order entry plus the derived fields the agent reasons about. */
 export interface TradeableOrder {
-	entry: OrderEntry;
-	/** "ETH-5SEP26-2420-P" on vanillas, "ETH 2460 Up 1D" on structured products. */
+	entry: { order: NonNullable<Market["order"]["rawApiData"]> & { expiry: number }; signature: string };
+	sdkOrder: Market["order"];
+	side: "buy" | "sell";
+	implementation: Market["implementation"];
+	collateralToken: Market["collateralToken"];
+	/** Label rebuilt from package market fields and SDK implementation metadata. */
 	label: string;
 	/** Underlying symbol, e.g. "ETH". Null when it cannot be resolved. */
 	asset: string | null;
 	/**
-	 * "vanilla" for single-strike calls and puts, "binary" for the up/down
-	 * products, "multi_leg" for spreads, butterflies and condors.
+	 * "vanilla" for single-strike calls and puts; "multi_leg" for spreads,
+	 * butterflies and condors. SDK 0.3.0 has no binary discriminator.
 	 */
-	kind: "vanilla" | "binary" | "multi_leg";
-	/** Product family as published, e.g. "binaries". Null on vanillas. */
+	kind: "vanilla" | "multi_leg" | null;
+	/** SDK implementation name; null when unknown. */
 	productType: string | null;
 	isCall: boolean;
 	/** Strike prices as decimal strings, e.g. "2420". */
@@ -101,10 +25,22 @@ export interface TradeableOrder {
 	expiryAt: string;
 	/** When this order's signature stops being valid, ISO 8601. Roughly 59s out. */
 	orderExpiresAt: string;
-	/** Premium per contract as a decimal string, e.g. "1.63192941". */
-	pricePerContractUsd: string;
-	/** Maker's remaining collateral budget as a decimal string, e.g. "10000". */
-	makerBudgetUsd: string;
+	/**
+	 * Legacy name: signed premium per contract in collateral token, not USD.
+	 *
+	 * `null` when the SDK's contract-size unit for this order is not proven, because
+	 * the maker price is 1e8-scaled PER CONTRACT-SIZE UNIT: `price / 1e8` is a
+	 * token-per-contract amount only when that unit and the collateral unit have the
+	 * same decimals. Never present a scaled number whose unit is unknown.
+	 */
+	pricePerContractUsd: string | null;
+	/**
+	 * Decimals of the SDK's contract-size unit for this order, or `null` when it is
+	 * unproven (see `buyContractSizeDecimals` in orders.ts).
+	 */
+	contractSizeDecimals: number | null;
+	/** Legacy name: collateral token amount, not USD; null if decimals are unknown. */
+	makerBudgetUsd: string | null;
 }
 
 export interface OrderSnapshot {
@@ -123,3 +59,34 @@ export interface OrderSnapshot {
 	 */
 	droppedEntries: number;
 }
+
+/**
+ * The SDK's per-row normalizer is a private, version-specific compatibility boundary
+ * (see `rawOrderApi` in orders.ts). When it is absent or not callable the feed cannot
+ * be read at all. That is an adapter failure, NOT an empty book, and it is surfaced
+ * verbatim rather than reported as "nothing matches".
+ */
+export interface SdkIncompatible {
+	readonly error: "sdk_incompatible";
+	readonly detail: string;
+}
+
+/**
+ * The feed answered, but nothing usable came back: either the payload carried no
+ * `orders` array at all, or every row it did carry failed validation.
+ *
+ * Both are total losses of the book's contents, and both are indistinguishable from a
+ * genuinely empty book once they collapse to zero orders — so they are reported as their
+ * own structured error, the same shape as `SdkIncompatible`, and never through the
+ * "nothing on the book matches" note. A genuinely empty `orders: []` is NOT this: it is
+ * a real, readable book that happens to hold nothing.
+ */
+export interface FeedUnusable {
+	readonly error: "feed_unusable";
+	readonly detail: string;
+	/** Rows the feed returned that failed validation. Zero when there was no array at all. */
+	readonly droppedEntries: number;
+}
+
+/** Either reason the order book cannot be read. Tools return these verbatim. */
+export type FeedUnavailable = SdkIncompatible | FeedUnusable;

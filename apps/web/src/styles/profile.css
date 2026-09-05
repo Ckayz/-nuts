@@ -1,0 +1,20 @@
+/* Profile rules and inline spacing from #profile. */
+.profile-header{padding:26px}
+.prof{display:flex;gap:20px;align-items:flex-start}
+.prof h1{font-size:30px;font-weight:800;letter-spacing:-.025em;line-height:1.1;overflow-wrap:anywhere}
+.prof .handle{margin-top:4px;font-size:15px;color:var(--muted);font-weight:500;overflow-wrap:anywhere}
+.prof .meta{margin-top:8px;font-size:13px;color:var(--muted);font-weight:500;overflow-wrap:anywhere}
+.prof .counts{display:flex;gap:20px;margin-top:14px;font-size:13.5px;font-weight:500;color:var(--muted);flex-wrap:wrap}
+.prof .counts b{color:var(--text);font-weight:700}
+.prof-act{margin-left:auto;display:flex;gap:8px;flex:none}
+.profile-avatar>.av{width:80px;height:80px;font-size:27px}
+.profile-identity{min-width:0}
+.position-row{padding:13px 10px}
+.profile-posts .post{background:none;border:0;padding:12px 10px}
+.profile-posts .p-body{font-size:15px}
+.profile-posts .p-name{font-size:14px}
+.profile-editor summary{cursor:pointer;font-weight:600}
+.profile-editor form{margin-top:16px;display:flex;flex-direction:column;gap:14px}
+.profile-editor .field{display:flex;flex-direction:column;gap:6px}
+.profile-editor .inp{padding:10px 14px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--r-field);width:100%}
+@media(max-width:900px){.prof{flex-wrap:wrap}.prof-act{margin-left:0;width:100%}.profile-header{padding:20px}}

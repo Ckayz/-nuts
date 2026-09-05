@@ -1,10 +1,16 @@
 import { ProfileEditor } from "@/components/creator/profile-editor";
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
-import { ActivityList } from "@/components/creator/activity-list";
+
 import { CreatorStats } from "@/components/creator/creator-stats";
-import { CalloutPost } from "@/components/feed/callout-post";
-import { ParticipantsTable } from "@/components/thesis/participants-table";
+import Link from "next/link";
+import { Avatar } from "@/components/primitives";
+import { LikeButton } from "@/components/feed/like-button";
+import { CommentIcon, ShareIcon } from "@/components/icons";
+import { PositionRows } from "@/components/thesis/position-rows";
+import { ProfileTabs } from "@/components/thesis/profile-tabs";
+import { PagesFrame } from "@/components/thesis/pages-frame";
+import "@/styles/profile.css";
 import { creatorPageData } from "@/lib/page-data";
 
 /**
@@ -45,27 +51,11 @@ export default async function CreatorPage({
 	if (handle !== handle.toLowerCase()) permanentRedirect(`/u/${handle.toLowerCase()}`);
 	const data = await creatorPageData(handle);
 	if (!data) notFound();
-	const { creator, activity, callouts, positions } = data;
+	const { creator, callouts, positions } = data;
 
-	return (
-		<div className="work profile">
-			<aside className="col l">
-				<CreatorStats creator={creator} signedIn={data.signedIn} databaseMode={data.databaseMode} following={data.following} self={data.self} />
-				{data.isOwner && data.editableProfile ? <ProfileEditor key={JSON.stringify(data.editableProfile)} profile={data.editableProfile} walletAddress={data.editableProfile.walletAddress} /> : null}
-				<ActivityList items={activity} count={activity.length} />
-			</aside>
-
-			<main className="col">
-				<div className="sec-h">
-					<h2 className="h2">Callouts</h2>
-				</div>
-				<div className="feed">
-					{callouts.map((t) => (
-						<CalloutPost key={t.slug} thesis={t} signedIn={data.signedIn} databaseMode={data.databaseMode} />
-					))}
-				</div>
-				<ParticipantsTable rows={positions} />
-			</main>
-		</div>
-	);
+ return <PagesFrame>
+  <CreatorStats creator={creator} signedIn={data.signedIn} databaseMode={data.databaseMode} following={data.following} self={data.self} profile />
+  {data.isOwner && data.editableProfile ? <ProfileEditor key={JSON.stringify(data.editableProfile)} profile={data.editableProfile} walletAddress={data.editableProfile.walletAddress} /> : null}
+  <ProfileTabs positions={<PositionRows rows={positions} />} posts={<section className="card profile-posts"><div className="card-h"><h3>Recent posts</h3><span className="x num">{callouts.length}</span></div><div className="card-b">{callouts.map(t => <article className="post" key={t.slug}><Avatar initials={t.creator.initials} size="s" /><div className="post-main"><div className="p-head"><span className="p-name">{t.creator.displayName}</span><span className="p-time">{t.postedLabel}</span>{t.backing ? <span className="chip flat">Backed</span> : null}</div><p className="p-body"><Link href={`/t/${t.slug}`}>{t.headline}</Link></p><div className="p-acts"><LikeButton thesisId={t.id} likes={t.likes} liked={t.likedByViewer} signedIn={data.signedIn} databaseMode={data.databaseMode} /><Link className="act" href={`/t/${t.slug}`} aria-label={`Comments, ${t.commentCount}`}><CommentIcon />{t.commentCount}</Link><button className="act" type="button"><ShareIcon />Share</button></div></div></article>)}</div></section>} />
+ </PagesFrame>;
 }

@@ -1,3 +1,4 @@
+import "@/styles/composer.css";
 import { Composer } from "./composer";
 import { composerData } from "@/lib/thesis/composer-data";
 
@@ -17,9 +18,6 @@ import { composerData } from "@/lib/thesis/composer-data";
  *                       its link, write the post — arrives with the trade card
  *                       already showing in the preview.
  *
- * The mockup has no composer copy beyond the rail button's title "Launch a
- * thesis" (docs/mockups/thesis-fun-mockup.html). Labels are the minimum needed
- * to name the controls; the real copy is the owner's.
  */
 export default async function NewThesisPage({
 	searchParams,
@@ -28,8 +26,8 @@ export default async function NewThesisPage({
 }) {
 	const data = await composerData(await searchParams);
 	return (
-		<div className="work single">
-			<main className="col">
+		<div className="wrap">
+			<main className="compose stack lg">
 				<Composer {...data} />
 			</main>
 		</div>

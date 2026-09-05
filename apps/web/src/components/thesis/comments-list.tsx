@@ -10,18 +10,19 @@ export function CommentsList({ comments, thesisId, signedIn = false, databaseMod
 	const [visible, addPending] = useOptimistic([...comments, ...local], (rows, comment: Comment) => [...rows, comment]);
 	return (
 		<div>
+			{thesisId ? <CommentForm initials={mockCreator?.initials} thesisId={thesisId} signedIn={signedIn} databaseMode={databaseMode} onPending={body => { if (mockCreator) addPending({ creator: mockCreator, body, postedLabel: "· 0m" }); }} onMockComment={body => { if (mockCreator) setLocal(rows => [...rows, { creator: mockCreator, body, postedLabel: "· 0m" }]); }} /> : null}
 			{visible.map((c, index) => (
-				<div className="cmt" key={`${c.creator.handle}-${index}`}>
+				<div className="thread-comment" key={`${c.creator.handle}-${index}`}>
 					<Avatar initials={c.creator.initials} size="s" />
-					<div className="b">
+					<div className="post-main">
 						<span>
-							<b>{c.creator.displayName}</b> <span className="m">{c.postedLabel}</span>
+							<b>{c.creator.displayName}</b> <span className="p-time">{c.postedLabel}</span>
 						</span>
 						<span>{c.body}</span>
 					</div>
 				</div>
 			))}
-			{thesisId ? <CommentForm thesisId={thesisId} signedIn={signedIn} databaseMode={databaseMode} onPending={body => { if (mockCreator) addPending({ creator: mockCreator, body, postedLabel: "· 0m" }); }} onMockComment={body => { if (mockCreator) setLocal(rows => [...rows, { creator: mockCreator, body, postedLabel: "· 0m" }]); }} /> : null}
+
 		</div>
 	);
 }

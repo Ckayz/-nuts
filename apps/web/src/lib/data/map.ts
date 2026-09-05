@@ -34,7 +34,7 @@
 import type { Comment as CommentRow, Position as PositionRow, Thesis as ThesisRow, User as UserRow } from "@nuts/db/schema/index";
 import type * as Domain from "@/types";
 import { decimalFromBaseUnits, decimalFromNullableBaseUnits, sumDecimals, usdDecimalOrNull } from "./decimal";
-import { creatorHandle, creatorInitials, thesisSlug } from "./identity";
+import { creatorHandle, creatorInitials } from "./identity";
 
 /** Aggregates a caller computed for one thesis. */
 export interface ThesisAggregates {
@@ -81,7 +81,7 @@ export function mapCreator(row: UserRow, counts: CreatorCounts = { thesesCount: 
 		id: row.id,
 		walletAddress,
 		displayName: row.displayName,
-		handle: creatorHandle(walletAddress),
+		handle: row.handle ?? creatorHandle(walletAddress),
 		initials: creatorInitials(row.displayName, walletAddress),
 		mockWalletFragment: null,
 		sinceLabel: sinceLabel(row.createdAt),
@@ -288,7 +288,7 @@ export function mapThesis(input: MapThesisInput): Domain.Thesis {
 
 	return {
 		id: thesis.id,
-		slug: thesisSlug(thesis.id),
+		slug: thesis.slug,
 		creatorUserId: thesis.creatorUserId,
 		creator: mapCreator(input.creator, input.creatorCounts),
 		thesis: {
@@ -316,7 +316,7 @@ export function mapThesis(input: MapThesisInput): Domain.Thesis {
 
 export interface MapPositionInput {
 	position: PositionRow;
-	thesis: Pick<ThesisRow, "id" | "headline" | "underlyingAsset" | "taggedAsset">;
+	thesis: Pick<ThesisRow, "id" | "slug" | "headline" | "underlyingAsset" | "taggedAsset">;
 }
 
 export function mapPosition(input: MapPositionInput): Domain.Position {
@@ -333,7 +333,7 @@ export function mapPosition(input: MapPositionInput): Domain.Position {
 		status: position.status,
 		chainId: 8453,
 		walletAddress: position.walletAddress.toLowerCase(),
-		thesisSlug: thesisSlug(thesis.id),
+		thesisSlug: thesis.slug,
 		thesisHeadline: thesis.headline,
 		// A position exists only on a structured thesis
 		// (`theses_backing_requires_structure` plus the positions relationship

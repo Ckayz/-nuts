@@ -38,7 +38,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   likes: many(likes),
   following: many(follows, { relationName: "follower" }),
   followers: many(follows, { relationName: "following" }),
-  activity: many(activity),
+  activity: many(activity, { relationName: "activityActor" }),
+  targetedActivity: many(activity, { relationName: "activityTarget" }),
 }));
 
 export type User = typeof users.$inferSelect;

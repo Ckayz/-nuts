@@ -105,7 +105,7 @@ if (!databaseUrl) {
 		test(name, async () => {
 			const rollback = new Error("rollback social probe");
 			try { await db.transaction(async tx => {
-				await tx.insert(users).values([{ id: A, walletAddress: WA }, { id: B, walletAddress: WB }]);
+				await tx.insert(users).values([{ id: A, walletAddress: WA, handle: "social_alice" }, { id: B, walletAddress: WB }]);
 				await tx.insert(theses).values([
 					{ id: T, slug: "social-a-3333", creatorUserId: A, headline: "Social A", status: "open", ...STRUCTURE },
 					{ id: U, slug: "social-b-3333", creatorUserId: B, headline: "Social B", status: "open", ...STRUCTURE, expiryAt: new Date(EXPIRY.getTime() + 86400000) },
@@ -135,6 +135,23 @@ if (!databaseUrl) {
 		expect(await writeFollow(tx, B, A)).toEqual({ following: false, followers: 0 });
 		expect(await writeFollow(tx, B, A, false)).toEqual({ following: false, followers: 0 });
 	});
+	probe("follow retries write one target-only activity; unfollow writes none", async tx => {
+		await writeFollow(tx, B, A, true);
+		await writeFollow(tx, B, A, true);
+		const readEvents = () => tx.select().from(activity).where(eq(activity.userId, B));
+		const before = await readEvents();
+		expect(before).toHaveLength(1);
+		expect(before[0]).toMatchObject({ eventType: "follow", userId: B, targetUserId: A, thesisId: null, positionId: null });
+		const rendered = await listActivity(B, { database: tx });
+		expect(rendered).toHaveLength(1);
+		expect(rendered[0]).toMatchObject({ action: "follow", socialDetail: "social_alice", transactionHash: null, contracts: null, side: null });
+		expect(rendered[0]?.thesisSlug).toBeUndefined();
+		expect(await listActivity(B, { database: tx, thesisId: T })).toEqual([]);
+		expect(await listActivity(A, { database: tx })).toEqual([]);
+		await writeFollow(tx, B, A, false);
+		await writeFollow(tx, B, A, false);
+		expect(await readEvents()).toEqual(before);
+	});
 	probe("comment insert trims body and records actor activity atomically", async tx => {
 		const result = await writeComment(tx, B, T, "  useful comment  ");
 		expect("body" in result && result.body).toBe("useful comment");
@@ -145,6 +162,7 @@ if (!databaseUrl) {
 		expect(events[0]?.action).toBe("comment");
 		expect(events[0]?.creator.id).toBe(B);
 		expect(events[0]?.socialDetail).toBe("Social A");
+		expect(events[0]?.thesisSlug).toBe("social-a-3333");
 		expect(events[0]?.transactionHash).toBeNull();
 		expect(await listActivity(A, { database: tx })).toEqual([]);
 	});

@@ -163,6 +163,25 @@ export const FARCASTER_MIN_FOLLOWERS = 25;
 const OVERFETCH = 8;
 
 /**
+ * TODO-OWNER: how long the rail waits for Neynar before giving up, in ms.
+ *
+ * B-C2 (lane B confirming pass). The read had NO deadline of any kind, and the
+ * feed page awaits it in the same `Promise.all` as its own database reads
+ * (`app/page.tsx`), so a stalled Neynar connection held the whole feed open
+ * with nothing on screen. Measured before the fix, with an injected
+ * never-resolving `fetchImpl` and with OK headers plus a never-resolving body:
+ * both were still pending after 1,500 ms and would have stayed pending forever.
+ *
+ * The number is PROVISIONAL and picked to be defensible, not tuned: the rail is
+ * a secondary panel, the four searches run in parallel so one timeout is the
+ * whole added ceiling, and a serverless function's own budget is single-digit
+ * seconds — 3 s leaves the page's own reads the rest of it. Nothing was
+ * measured about Neynar's real latency (no API key in this repository), so
+ * treat this as a bound, not an estimate.
+ */
+export const FARCASTER_TIMEOUT_MS = 3_000;
+
+/**
  * Characters of normalised text compared when collapsing duplicates.
  *
  * MEASURED: 28, not 40. The farm's shared opening "Unlock the power of crypto
@@ -548,6 +567,7 @@ async function fetchOnePage(
 	query: string,
 	limit: number,
 	request: typeof fetch,
+	timeoutMs: number,
 ): Promise<{ ok: true; casts: FarcasterRailCast[] } | { ok: false; detail: string }> {
 	const url = new URL(NEYNAR_SEARCH_URL);
 	url.searchParams.set("q", query);
@@ -559,24 +579,66 @@ async function fetchOnePage(
 	// cast search is the one endpoint rate-limited at 120 RPM.
 	url.searchParams.set("limit", String(Math.min(Math.max(limit * OVERFETCH, 1), 100)));
 
+	// One deadline for the WHOLE exchange, headers and body alike. A response
+	// whose headers arrive and whose body never does is the same stall to the
+	// page as a connection that never answers, and only the body read below
+	// puts the signal in front of it — `Response.text()` takes no signal of its
+	// own, so it is raced against the same one.
+	//
+	// NOT VERIFIED: Next.js documents that passing a signal opts a fetch out of
+	// per-render MEMOIZATION (node_modules/next/dist/docs/01-app/03-api-reference/
+	// 04-functions/fetch.md), which it states is separate from the persistent
+	// `next: { revalidate }` cache. Whether the data cache still applies here
+	// was not measured — there is no API key in this repository. Memoization
+	// itself is worth nothing to this module: every query is a different URL and
+	// the rail is read once per render.
+	const signal = AbortSignal.timeout(timeoutMs);
+	const timedOut = () => `Neynar did not answer within ${timeoutMs} ms.`;
+
+	// The signal is passed to the transport AND raced against, on purpose. The
+	// signal alone only bounds a transport that honours it; the race bounds this
+	// function whatever the transport does, which is what the page needs.
 	let response: Response;
 	try {
-		response = await request(url, {
-			headers: { "x-api-key": apiKey, accept: "application/json" },
-			// Server-side cache window; see FARCASTER_REVALIDATE_SECONDS.
-			next: { revalidate: FARCASTER_REVALIDATE_SECONDS },
-		});
+		response = await Promise.race([
+			request(url, {
+				headers: { "x-api-key": apiKey, accept: "application/json" },
+				// Server-side cache window; see FARCASTER_REVALIDATE_SECONDS.
+				next: { revalidate: FARCASTER_REVALIDATE_SECONDS },
+				signal,
+			}),
+			aborted(signal),
+		]);
 	} catch (error) {
+		if (signal.aborted) return { ok: false, detail: timedOut() };
 		return { ok: false, detail: `Neynar could not be reached (${error instanceof Error ? error.message : String(error)}).` };
 	}
 	if (!response.ok) return { ok: false, detail: `Neynar returned HTTP ${response.status}.` };
 	let body: unknown;
 	try {
-		body = await response.json();
+		body = await Promise.race([response.json(), aborted(signal)]);
 	} catch {
+		if (signal.aborted) return { ok: false, detail: timedOut() };
 		return { ok: false, detail: "Neynar returned a body that is not JSON." };
 	}
 	return readCastPage(body);
+}
+
+/**
+ * A promise that never resolves and rejects when `signal` aborts.
+ *
+ * Used only inside `Promise.race`, which attaches a handler to it, so its
+ * rejection is always handled even when the body wins. `AbortSignal.timeout`'s
+ * timer does not hold the event loop open, so a losing race costs nothing.
+ */
+function aborted(signal: AbortSignal): Promise<never> {
+	return new Promise((_resolve, reject) => {
+		if (signal.aborted) {
+			reject(signal.reason);
+			return;
+		}
+		signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+	});
 }
 
 /**
@@ -605,14 +667,17 @@ export async function loadFarcasterRail(
 		minFollowers?: number;
 		maxAgeDays?: number;
 		fetchImpl?: typeof fetch;
+		/** Only tests pass this; production uses `FARCASTER_TIMEOUT_MS`. */
+		timeoutMs?: number;
 	} = {},
 ): Promise<FarcasterRailState> {
 	if (apiKey === undefined || apiKey.trim() === "") return { status: "unconfigured" };
 	const limit = options.limit ?? FARCASTER_RAIL_LIMIT;
 	const queries = options.queries ?? searchQueriesFor(options.assets ?? [], options.now, options.maxAgeDays);
 	const request = options.fetchImpl ?? fetch;
+	const timeoutMs = options.timeoutMs ?? FARCASTER_TIMEOUT_MS;
 
-	const pages = await Promise.all(queries.map((query) => fetchOnePage(apiKey, query, limit, request)));
+	const pages = await Promise.all(queries.map((query) => fetchOnePage(apiKey, query, limit, request, timeoutMs)));
 
 	const understood: FarcasterRailCast[][] = [];
 	let lastFailure: string | null = null;

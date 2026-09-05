@@ -90,6 +90,37 @@ test("refuses a loopback DATABASE_URL instead of warning, and runs no vercel com
 	expect(output).not.toContain("Syncing");
 });
 
+/**
+ * A-C3. The reviewer's fixture: `production --dry-run` with an IPv6-loopback
+ * DATABASE_URL exited 0 and planned the sync, while the `127.0.0.1` fixture
+ * exited 1. Every form below is a host only the machine that ran the script can
+ * reach, so every one of them must refuse.
+ */
+for (const [label, url] of [
+	["ipv6 loopback", "postgresql://u:p@[::1]:5432/postgres"],
+	["ipv6 loopback, expanded", "postgresql://u:p@[0:0:0:0:0:0:0:1]:5432/postgres"],
+	["ipv6 unspecified", "postgresql://u:p@[::]:5432/postgres"],
+	["127.0.0.0/8 beyond .1", "postgresql://u:p@127.0.0.2:5432/postgres"],
+	["uppercase host", "postgresql://u:p@LOCALHOST:5432/postgres"],
+] as const) {
+	test(`refuses a ${label} value for production`, () => {
+		const file = envFile(`loopback-${label.replace(/[^a-z0-9]+/gi, "-")}.env`, `DATABASE_URL=${url}\nSESSION_SECRET=${SECRETS.sessionSecret}\n`);
+		const { code, output } = run(["production", file, "--dry-run"]);
+		expect(code).toBe(1);
+		expect(output).toContain("local-only value(s)");
+		expect(output).toContain("DATABASE_URL");
+		expect(output).not.toContain("Dry run");
+		expect(output).not.toContain("Syncing");
+	});
+}
+
+test("a deployable remote host is still accepted (the fence is not refusing everything)", () => {
+	const { code, output } = run(["production", remoteFile, "--dry-run"]);
+	expect(code).toBe(0);
+	expect(output).toContain("Dry run");
+	expect(output).not.toContain("local-only value(s)");
+});
+
 test("skips keys outside the validated schema, naming them without reading their values", () => {
 	const { code, output } = run(["production", remoteFile, "--dry-run"]);
 	expect(code).toBe(0);

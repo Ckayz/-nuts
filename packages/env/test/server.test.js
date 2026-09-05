@@ -29,6 +29,34 @@ test("production accepts 32 characters and db mode", () => {
 test("invalid data source fails", () => {
   expect(validate("test", "", "invalid").exitCode).not.toBe(0);
 });
-test("explicit build validation bypass remains available", () => {
-  expect(validate("production", "", "mock", "1").exitCode).toBe(0);
+/**
+ * A-C5. The bypass is a build-time convenience for a checkout without
+ * credentials. It must NOT reach production: turbo forwards the variable into
+ * builds and a Vercel build runs with NODE_ENV=production, so one stray value
+ * would have shipped a deployment whose env was never validated. Measured
+ * before the fix: production + SKIP_ENV_VALIDATION=1 + a 5-character secret
+ * exited 0.
+ */
+test("the build validation bypass still works outside production", () => {
+  for (const nodeEnv of ["development", "test"]) {
+    const result = validate(nodeEnv, "short", "mock", "1");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString().trim()).toBe("mock");
+  }
+});
+test("production IGNORES the build validation bypass", () => {
+  const result = validate("production", "", "mock", "1");
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr.toString()).toContain("SESSION_SECRET is required in production");
+});
+test("production ignores the bypass for every other invalid value too", () => {
+  // A too-short secret is a schema failure, not the explicit throw above.
+  const short = validate("production", "x".repeat(31), "db", "1");
+  expect(short.exitCode).not.toBe(0);
+  expect(short.stderr.toString()).toContain("Invalid environment variables");
+});
+test("a fully valid production env still passes with the bypass set", () => {
+  const result = validate("production", "x".repeat(32), "db", "1");
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.toString().trim()).toBe("db");
 });

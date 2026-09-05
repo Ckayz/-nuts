@@ -31,7 +31,6 @@ import {
 	premiumUsd8From,
 	type RiskKind,
 } from "@nuts/thetanuts";
-import type { PositionStatus } from "@/types";
 import { decimalFromBaseUnits } from "@/lib/data/decimal";
 
 /** USD prices and payoffs are carried at 8 decimals, the scale `risk.ts` uses (`PRICE_SCALE`). */

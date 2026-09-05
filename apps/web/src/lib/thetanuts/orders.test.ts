@@ -14,6 +14,12 @@ const { env } = await import("@nuts/env/server");
 type SdkIncompatible = import("./types").SdkIncompatible;
 type FeedUnavailable = import("./types").FeedUnavailable;
 /** Narrow away BOTH unreadable-book arms; a test that hits one should fail loudly, not silently skip. */
+/** A configured token, or a loud failure. The SDK types the map as partial. */
+const tokenAddress = (symbol: string): `0x${string}` => {
+ const configured = (client.chainConfig.tokens as Record<string, { address: `0x${string}` } | undefined>)[symbol];
+ if (!configured) throw new Error(`SDK chainConfig has no ${symbol} token on this chain`);
+ return configured.address;
+};
 const ok = <T extends object>(value: T | FeedUnavailable): T => {
  if (isFeedUnavailable(value)) throw new Error(`unexpected ${value.error}: ${value.detail}`);
  return value;
@@ -71,7 +77,7 @@ test("decoded sell put: 22000000 collateral, 21268 premium, 2658 estimated fee",
  spy.mockRestore();
 });
 test("gated sell pair is non-executable without opting out", () => {
- const result = sizeFill(view(fixture(true, client.chainConfig.tokens.USDC.address)), "1", client);
+ const result = sizeFill(view(fixture(true, tokenAddress("USDC"))), "1", client);
  expect(result).toMatchObject({ found: true, executable: false, verification: "unverified" });
  if (!result.executable) expect(result.reason).toContain("STRUCTURE_COLLATERAL_UNVERIFIED");
 });
@@ -83,7 +89,8 @@ test("snapshot uses SDK methods, keeps all collateral and sides, caches and dedu
  const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 2000, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
  try {
   const [a, b] = (await Promise.all([getOrderSnapshot(), getOrderSnapshot()])).map(ok);
-  expect(a).toBe(b); expect(a!.orders).toHaveLength(3); expect(a!.marketData).toEqual({ ETH: 2000 });
+  if (!a || !b) throw new Error("expected two snapshots");
+  expect(a).toBe(b); expect(a.orders).toHaveLength(3); expect(a.marketData).toEqual({ ETH: 2000 });
   expect(await getOrderSnapshot()).toBe(a); expect(orders).toHaveBeenCalledTimes(1); expect(data).toHaveBeenCalledTimes(1);
   await getOrderSnapshot(true); expect(orders).toHaveBeenCalledTimes(2);
  } finally { orders.mockRestore(); data.mockRestore(); }
@@ -112,7 +119,7 @@ test("other PHYSICAL_PUT implementation is rejected by the package gate", () => 
 });
 
 test("decoded buy has human contracts and explicitly denominated money", () => {
- const row = fixture(false, client.chainConfig.tokens.USDC.address);
+ const row = fixture(false, tokenAddress("USDC"));
  row.order.price = 256458427n;
  row.order.strikes = [234000000000n];
  row.order.strikePrice = 234000000000n;
@@ -640,7 +647,7 @@ test("MINOR1: a taker-SELL view withholds the unit and price on non-6-decimal co
  console.log("D2_SELL_18DEC", JSON.stringify({ csd: sell.contractSizeDecimals, price: sell.pricePerContractUsd, executable: quoted.executable }));
  expect(quoted.executable).toBe(false);
  // 8-decimal collateral is withheld for the same reason.
- const eight = view(fixture(true, client.chainConfig.tokens.cbBTC.address));
+ const eight = view(fixture(true, tokenAddress("cbBTC")));
  expect(eight.contractSizeDecimals).toBeNull();
  expect(eight.pricePerContractUsd).toBeNull();
  // The proven 6-decimal unit is still published.

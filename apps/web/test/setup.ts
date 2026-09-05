@@ -7,6 +7,8 @@
  */
 import { plugin } from "bun";
 
+import { databaseUrlRefusal, fenceTestDatabase } from "@nuts/db/test-fence";
+
 plugin({
 	name: "server-only-stub",
 	setup(build) {
@@ -21,47 +23,17 @@ plugin({
  * them at a shared or remote database is a data-loss bug, not a configuration
  * preference.
  *
- * The fence is positive identity, not a denylist: the host must be a loopback
- * literal. Anything else refuses the whole run unless `TEST_DATABASE_OK=1` is
- * set deliberately by the operator.
- *
- * An unset or empty `DATABASE_URL` is allowed: that is the offline mode the
- * integration files already skip themselves on.
+ * The fence, the ORDER it must run in relative to `@nuts/env/load`, and the
+ * shared list of refused destination-override parameters all live in
+ * `packages/db/src/test-fence.ts` — read that file before changing anything
+ * here. Both `bun test` preloads and `scripts/verify.ts` now use it, so the four
+ * copies that had drifted apart (one-shot review 2026-09-06, A-C1/CL-1 and
+ * A-C2) cannot drift again.
  */
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"]);
 
+/** Kept for `database-fence.test.ts`, which pins the refusal messages. */
 export function testDatabaseUrlRefusal(rawUrl: string | undefined, override: string | undefined): string | null {
-	const raw = rawUrl?.trim();
-	if (!raw) return null;
-	if (override === "1") return null;
-
-	let host: string;
-	try {
-		const url = new URL(raw);
-		// pg copies query parameters before the authority; never trust that
-		// authority when a destination override is present (even an empty one).
-		for (const parameter of ["host", "hostaddr", "connectionString", "service", "servicefile"]) {
-			if (url.searchParams.has(parameter)) {
-				return `Refusing DATABASE_URL query parameter "${parameter}": it can override the destination host. Set TEST_DATABASE_OK=1 to override deliberately.`;
-			}
-		}
-		host = url.hostname;
-	} catch {
-		return `DATABASE_URL is not a parseable URL, so the test suite cannot prove it is local. Set TEST_DATABASE_OK=1 to run anyway.`;
-	}
-	// `new URL("...://user@[::1]:5432/db").hostname` yields "[::1]"; a bare host
-	// yields the literal. Both forms are covered by LOOPBACK_HOSTS.
-	if (LOOPBACK_HOSTS.has(host.toLowerCase())) return null;
-	return (
-		`Refusing to run tests against DATABASE_URL host "${host}": the integration suites write and delete rows, ` +
-		`so they only run against a loopback throwaway database. Create one ` +
-		`(createdb x && cd packages/db && DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/x bunx drizzle-kit migrate) ` +
-		`or set TEST_DATABASE_OK=1 to override deliberately.`
-	);
+	return databaseUrlRefusal(rawUrl, override);
 }
 
-const refusal = testDatabaseUrlRefusal(process.env.DATABASE_URL, process.env.TEST_DATABASE_OK);
-if (refusal !== null) {
-	console.error(refusal);
-	process.exit(1);
-}
+await fenceTestDatabase();

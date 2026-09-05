@@ -3,42 +3,19 @@
  * web suite's `DATABASE_URL`; this package's live suites
  * (`schema.integration.test.ts`, `schema.concurrency.test.ts`) had no such
  * fence and they INSERT and DELETE rows. `@nuts/env/load` fills `DATABASE_URL`
- * from `apps/web/.env`, which on the owner's machine holds a production
+ * from `apps/web/.env`, which on the owner's machine held a production
  * Supabase URL, so an unfenced run here is a data-loss bug.
  *
- * Positive identity: the host must be a loopback literal. Anything else refuses
- * the run unless the operator sets `TEST_DATABASE_OK=1`. An unset or empty URL
- * is the offline mode the integration files already skip on.
+ * The fence itself, the reason its ORDER matters, and the escape hatch all live
+ * in one place now — `packages/db/src/test-fence.ts` — because four copies of
+ * the refused-parameter list had drifted apart (one-shot review 2026-09-06,
+ * A-C1/CL-1 and A-C2). Read that file before changing anything here.
  */
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"]);
+import { databaseUrlRefusal, fenceTestDatabase } from "../src/test-fence";
 
+/** Kept for `database-fence.test.ts`, which pins the refusal messages. */
 export function testDatabaseUrlRefusal(rawUrl: string | undefined, override: string | undefined): string | null {
-	const raw = rawUrl?.trim();
-	if (!raw) return null;
-	if (override === "1") return null;
-	let host: string;
-	try {
-		const url = new URL(raw);
-		// pg copies query parameters before the authority; never trust that
-		// authority when a destination override is present (even an empty one).
-		for (const parameter of ["host", "hostaddr", "connectionString", "service", "servicefile"]) {
-			if (url.searchParams.has(parameter)) {
-				return `Refusing DATABASE_URL query parameter "${parameter}": it can override the destination host. Set TEST_DATABASE_OK=1 to override deliberately.`;
-			}
-		}
-		host = url.hostname;
-	} catch {
-		return "DATABASE_URL is not a parseable URL, so the test suite cannot prove it is local. Set TEST_DATABASE_OK=1 to run anyway.";
-	}
-	if (LOOPBACK_HOSTS.has(host.toLowerCase())) return null;
-	return (
-		`Refusing to run tests against DATABASE_URL host "${host}": the integration suites write and delete rows, ` +
-		"so they only run against a loopback throwaway database. Set TEST_DATABASE_OK=1 to override deliberately."
-	);
+	return databaseUrlRefusal(rawUrl, override);
 }
 
-const refusal = testDatabaseUrlRefusal(process.env.DATABASE_URL, process.env.TEST_DATABASE_OK);
-if (refusal !== null) {
-	console.error(refusal);
-	process.exit(1);
-}
+await fenceTestDatabase();

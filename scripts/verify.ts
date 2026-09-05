@@ -1,6 +1,11 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
+// ONE destination fence, shared with both bun-test preloads and
+// packages/db/drizzle.config.ts. Imported by relative path because the root
+// workspace does not depend on @nuts/db; the module has no imports of its own.
+import { databaseUrlRefusal } from "../packages/db/src/test-fence";
+
 const root = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
 if (args.some((arg) => arg !== "--offline")) {
@@ -22,32 +27,36 @@ const offline = args.includes("--offline");
  *
  *  1. `DATABASE_URL` must be present in the REAL parent environment — a value
  *     that only an env file supplies is not an explicit selection;
- *  2. its host must be a loopback literal (the suites INSERT and DELETE rows),
- *     overridable only by a deliberate `TEST_DATABASE_OK=1`;
- *  3. every migration in the journal must already be applied, so a stale
- *     throwaway fails loudly here instead of mid-suite.
+ *  2. the destination must survive the shared fence in
+ *     `packages/db/src/test-fence.ts` — loopback host, no destination-override
+ *     query parameter, no `PGOPTIONS` — overridable only by a deliberate
+ *     `TEST_DATABASE_OK=1`. Both `bun test` preloads and `drizzle.config.ts` use
+ *     that same function, so the four copies that had drifted apart cannot
+ *     drift again;
+ *  3. the applied migrations must be EXACTLY the journal's: missing, extra and
+ *     duplicated hashes all fail, so a stale throwaway or one migrated from
+ *     another tree fails loudly here instead of mid-suite.
  *
  * The value is then forced into every child, and any mandatory live suite that
  * still reports itself skipped fails its step.
+ *
+ * Every live suite prints this exact tail when it skips itself:
  */
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"]);
-/** Every live suite prints this exact tail when it skips itself. */
 const SKIP_SENTINEL = "skipped: DATABASE_URL is not set";
 
 /**
  * Runs inside `packages/db` (where `pg` resolves) and proves the selected
- * database carries EXACTLY this tree's migrations.
- *
- * `drizzle.__drizzle_migrations.hash` is the SHA-256 of the migration's `.sql`
- * bytes — measured against `0000_agent_tables.sql` and
- * `0007_standalone_positions.sql` on 2026-09-05 — so comparing hashes catches a
- * database migrated from a DIFFERENT tree, which a count alone would pass.
+ * database carries EXACTLY this tree's migrations — missing, extra AND
+ * duplicated hashes all refuse. The comparison itself lives in
+ * `packages/db/src/migration-check.ts` so it can be unit-tested; this probe only
+ * reads the journal and the table.
  */
 const MIGRATION_PROBE = `
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import pg from "pg";
+const { migrationMismatches } = await import(resolve(process.cwd(), "src/migration-check.ts"));
 const dir = resolve(process.cwd(), "src/migrations");
 const journal = JSON.parse(readFileSync(resolve(dir, "meta/_journal.json"), "utf8"));
 const expected = journal.entries.map((entry) => ({
@@ -71,13 +80,12 @@ try {
   process.exit(1);
 }
 await client.end();
-const missing = expected.filter((entry) => !applied.includes(entry.hash));
-if (missing.length > 0) {
-  console.error(missing.length + " migration(s) not applied: " + missing.map((entry) => entry.tag).join(", "));
+const problems = migrationMismatches(expected, applied);
+if (problems.length > 0) {
+  console.error(problems.join("; "));
   process.exit(1);
 }
-const extra = applied.length - expected.length;
-console.log(expected.length + " migrations applied" + (extra > 0 ? " (+" + extra + " unknown to this tree)" : ""));
+console.log(expected.length + " migrations applied");
 `;
 
 function fail(message: string): never {
@@ -97,25 +105,11 @@ if (!offline) {
         "Use `bun run verify --offline` to run the offline subset instead.",
     );
   }
-  let host: string;
-  try {
-    const url = new URL(databaseUrl);
-    // Identical destination-override check to both test preloads.
-    for (const parameter of ["host", "hostaddr", "connectionString", "service", "servicefile"]) {
-      if (url.searchParams.has(parameter) && process.env.TEST_DATABASE_OK !== "1") {
-        fail(`Refusing DATABASE_URL query parameter "${parameter}": it can override the destination host. Set TEST_DATABASE_OK=1 to override deliberately.`);
-      }
-    }
-    host = url.hostname;
-  } catch {
-    fail("DATABASE_URL is not a parseable URL, so verify cannot prove it is local. Set TEST_DATABASE_OK=1 to override.");
-  }
-  if (!LOOPBACK_HOSTS.has(host.toLowerCase()) && process.env.TEST_DATABASE_OK !== "1") {
-    fail(
-      `Refusing to verify against DATABASE_URL host "${host}": the live suites write and delete rows, ` +
-        "so they run only against a loopback throwaway. Set TEST_DATABASE_OK=1 to override deliberately.",
-    );
-  }
+  // Fence 2, identical to both test preloads because it is literally the same
+  // function: loopback host, no destination-override query parameter, no
+  // PGOPTIONS.
+  const refusal = databaseUrlRefusal(databaseUrl, process.env.TEST_DATABASE_OK, process.env.PGOPTIONS, "verify");
+  if (refusal !== null) fail(refusal);
 
   // Fence 3: the journal's migrations must all be applied. `pg` resolves inside
   // packages/db, not at the repository root, so the probe runs there.
@@ -161,7 +155,7 @@ const steps = [
 ];
 const results: { directory: string; command: string; result: string }[] = [];
 let failed = false;
-if (offline) console.log("Offline: database credentials cleared; live DB suites and both builds skipped.");
+if (offline) console.log("Offline: database credentials cleared; live DB suites and the one db-mode build skipped.");
 for (const step of steps) {
   let cmd = step.cmd;
   if (offline && cmd[0] === "bun" && cmd[1] === "test") {

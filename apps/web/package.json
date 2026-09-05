@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.95",
+    "@dicebear/collection": "9.4.2",
+    "@dicebear/core": "9.4.3",
     "@nuts/db": "workspace:*",
     "@nuts/env": "workspace:*",
     "@nuts/thetanuts": "workspace:*",

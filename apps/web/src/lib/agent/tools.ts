@@ -5,6 +5,9 @@ import { z } from "zod";
 import { getThesisContext as loadThesisContext } from "@/lib/thesis-context";
 import { getPublicPostContext } from "@/lib/post-context";
 
+import { riskOutputs } from "@/lib/market/quote";
+import { riskKindFor } from "@/lib/market/structures";
+import { decimalFromUsd8 } from "@/lib/position/pnl";
 import { instrumentKey, findByInstrumentKey } from "@/lib/thetanuts/instrument";
 import {
 	COLLATERAL_USD_UNAVAILABLE,
@@ -239,6 +242,129 @@ export const getMarketData = tool({
 	},
 });
 
+/** What a sized fill carries that the payoff model needs. Mirrors `sizeFill`'s `raw`. */
+interface SizedFillRaw {
+	readonly numContracts: string;
+	readonly premium: string;
+	readonly feeEstimate: string;
+	readonly collateralDecimals: number;
+}
+
+interface PayoutAndBreakEven {
+	readonly maxPayoutUsd: string | null;
+	readonly breakEvenUsd: string | null;
+	/** Present only when one of the two is null; says WHICH reason applies here. */
+	readonly unavailable?: string;
+}
+
+/**
+ * Maximum payout and break-even for one sized fill, in decimal USD.
+ *
+ * These come from `riskOutputs` in `lib/market/quote.ts` — the exact function
+ * `quoteStructure` calls for the Bull/Bear ticket — with the inputs derived the
+ * same way from the same order. One payoff model, so the agent and `/m/<asset>`
+ * cannot state different numbers for one structure at one budget;
+ * `preview-risk.test.ts` pins that equality and fails if either side drifts.
+ *
+ * `maxLoss` is deliberately NOT taken from here. On a taker SELL, `sizeFill`'s
+ * `maxLoss` is the COLLATERAL that leaves the wallet, while the risk model's
+ * `maxLossUsd8` is the NET figure (collateral minus the premium kept). They are
+ * different quantities; printing one under the other's name would misstate the
+ * downside, so this returns payout and break-even only.
+ *
+ * A `null` is never silent. Every branch below names its own reason, because
+ * "unavailable" and "uncapped" mean opposite things to somebody deciding
+ * whether to buy: a long vanilla call HAS no maximum payout, and saying that is
+ * information, not a gap.
+ */
+function payoutAndBreakEven(input: {
+	order: TradeableOrder;
+	side: "buy" | "sell";
+	raw: SizedFillRaw;
+	contractSizeDecimals: number;
+	collateralSymbol: string | null;
+	/** USD price of one collateral token at 8 decimals, or null when none is justified. */
+	collateralUsdPrice8: bigint | null;
+}): PayoutAndBreakEven {
+	// TODO-OWNER: every sentence in this function is descriptive, not approved copy.
+	const token = input.collateralSymbol ?? "this collateral token";
+	if (input.collateralUsdPrice8 === null) {
+		return {
+			maxPayoutUsd: null,
+			breakEvenUsd: null,
+			unavailable: `Maximum payout and break-even are unavailable: ${COLLATERAL_USD_UNAVAILABLE} There is no USD price for ${token}, so no USD figure can be computed. Say they are unavailable and why; never estimate them.`,
+		};
+	}
+	// The implementation NAME, from the SDK metadata the book row carries
+	// (`toTradeable`: `productType` is this same expression). `riskKindFor`
+	// returns null for every structure `@nuts/thetanuts`'s risk model does not
+	// cover — rangers, flies, condors, physical and inverse calls.
+	const riskKind = riskKindFor(input.order.implementation.info?.name ?? null, input.order.strikesUsd.length);
+	if (riskKind === null) {
+		return {
+			maxPayoutUsd: null,
+			breakEvenUsd: null,
+			unavailable:
+				"Maximum payout and break-even are unavailable: this product shape has no payoff model here (only single-strike calls and puts and two-strike call and put spreads are modelled). Say they are unavailable; never estimate them.",
+		};
+	}
+	let outputs;
+	try {
+		outputs = riskOutputs({
+			riskKind,
+			// The taker's own side. A taker BUY is a long position; a taker SELL is short.
+			positionSide: input.side === "buy" ? "long" : "short",
+			// The book's own 8-decimal strike integers, the same array
+			// `deriveMarkets` builds `market.strikes` from (`raw.strikes.map(BigInt)`).
+			// `riskOutputs` sorts them itself.
+			strikes: input.order.entry.order.strikes.map(BigInt),
+			numContracts: BigInt(input.raw.numContracts),
+			// A seller's economics use the premium they KEEP, which is what
+			// `quoteStructure` passes on its sell branch (`premiumNet` =
+			// `premiumGross - feeEstimate`, `packages/thetanuts/src/quote.ts`).
+			premiumBaseUnits:
+				input.side === "buy"
+					? BigInt(input.raw.premium)
+					: BigInt(input.raw.premium) - BigInt(input.raw.feeEstimate),
+			collateralDecimals: input.raw.collateralDecimals,
+			collateralUsdPrice8: input.collateralUsdPrice8,
+			contractSizeDecimals: input.contractSizeDecimals,
+		});
+	} catch {
+		// Nothing about a payout figure may cost the user a preview: a throw here
+		// (a strike string the book sent that is not an integer, a parameter the
+		// risk model rejects outside its own guarded region) reports no value
+		// rather than failing the tool.
+		return {
+			maxPayoutUsd: null,
+			breakEvenUsd: null,
+			unavailable:
+				"Maximum payout and break-even could not be computed for this order. Say they are unavailable; never estimate them.",
+		};
+	}
+	const maxPayoutUsd = outputs.maxPayoutUsd8 === null ? null : decimalFromUsd8(outputs.maxPayoutUsd8);
+	const breakEvenUsd = outputs.breakEvenUsd8 === null ? null : decimalFromUsd8(outputs.breakEvenUsd8);
+	if (maxPayoutUsd === null && breakEvenUsd !== null) {
+		// `maxPayout` returns null for exactly one modelled case: a LONG vanilla
+		// call, whose payoff has no upper bound (`packages/thetanuts/src/risk.ts`).
+		return {
+			maxPayoutUsd,
+			breakEvenUsd,
+			unavailable:
+				"There is no maximum payout for this trade: a call you buy pays more the higher the asset settles, so the upside is uncapped. Say it is uncapped, not unknown.",
+		};
+	}
+	if (maxPayoutUsd === null || breakEvenUsd === null) {
+		return {
+			maxPayoutUsd,
+			breakEvenUsd,
+			unavailable:
+				"Maximum payout and break-even could not be computed for this order. Say they are unavailable; never estimate them.",
+		};
+	}
+	return { maxPayoutUsd, breakEvenUsd };
+}
+
 export const previewOptionBookTrade = tool({
 	description:
 		"Cost and risk for a buy (premium budget) or sell (collateral budget), denominated in its collateral token. Call this before stating any cost, " +
@@ -283,6 +409,14 @@ export const previewOptionBookTrade = tool({
         const maxLossUsd = valuation?.amount ?? null;
         const executable = valuation?.withinLimit ?? false;
         const token = fill.collateralToken.symbol;
+        // Built exactly as `quoteStructure` builds it (`lib/market/quote.ts`:
+        // `BigInt(usdPrice) * 100_000_000n`), from the same `collateralUsdPrice`
+        // above, so both surfaces value the collateral identically.
+        const payout = payoutAndBreakEven({
+            order, side: fill.side, raw: fill.raw, contractSizeDecimals: fill.contractSizeDecimals,
+            collateralSymbol: fill.collateralToken.symbol,
+            collateralUsdPrice8: tokenUsd === undefined ? null : BigInt(tokenUsd) * 100_000_000n,
+        });
         return {
             ...fill, executable, asOf, instrument: describe(order),
             reason: executable ? undefined : maxLossUsd === null ? COLLATERAL_USD_UNAVAILABLE : "Maximum loss exceeds the 10 USD agent risk limit.",
@@ -293,8 +427,10 @@ export const previewOptionBookTrade = tool({
                 explanation: fill.side === "buy"
                     ? `You BUY this option. You pay the premium up front in ${token}. The most you can lose is that premium.`
                     : `You SELL this option. You receive the premium minus the protocol fee and must LOCK ${fill.collateralRequired?.amount} in ${token} as collateral. You can lose up to that collateral.`,
-                maxPayoutUsd: null, breakEvenUsd: null,
-                unavailable: "Maximum payout and break-even are not computed yet and must not be estimated. Say they are unavailable if asked.",
+                // Same payoff model as the market ticket, same order, same budget
+                // (`payoutAndBreakEven` above). `unavailable` is present only when one
+                // of the two is null, and it says WHICH reason applies.
+                ...payout,
             },
         };
 	},

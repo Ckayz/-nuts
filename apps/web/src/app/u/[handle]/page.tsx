@@ -1,3 +1,4 @@
+import { ProfileEditor } from "@/components/creator/profile-editor";
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { ActivityList } from "@/components/creator/activity-list";
@@ -48,6 +49,7 @@ export default async function CreatorPage({
 		<div className="work profile">
 			<aside className="col l">
 				<CreatorStats creator={creator} signedIn={data.signedIn} databaseMode={data.databaseMode} following={data.following} self={data.self} />
+				{data.isOwner && data.editableProfile ? <ProfileEditor key={JSON.stringify(data.editableProfile)} profile={data.editableProfile} walletAddress={data.editableProfile.walletAddress} /> : null}
 				<ActivityList items={activity} count={activity.length} />
 			</aside>
 

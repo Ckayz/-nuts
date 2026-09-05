@@ -46,6 +46,8 @@ export interface DiscoverData {
 }
 
 export interface CreatorPageData {
+	isOwner: boolean;
+	editableProfile?: import("./profile/validation").ProfileFields & { walletAddress: string };
 	signedIn: boolean;
 	databaseMode: boolean;
 	following: boolean;
@@ -145,7 +147,7 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		const creator = mock.creatorByHandle(handle);
 		if (!creator) return undefined;
 		return {
-			signedIn: false, databaseMode: false, following: false, self: false,
+			signedIn: false, databaseMode: false, following: false, self: false, isOwner: false,
 			creator,
 			callouts: mock.thesesByCreator(handle),
 			positions: mock.participantsByCreator(handle),
@@ -157,7 +159,10 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 	const signedIn = await viewer();
 	const profile = await getCreator(handle, { viewerUserId: signedIn?.userId ?? null });
 	if (profile === null) return undefined;
+	const isOwner = signedIn?.userId === profile.creator.id;
+	const editableProfile = isOwner ? await readEditableProfile(signedIn!.userId) : undefined;
 	return {
+		isOwner, editableProfile,
 		signedIn: signedIn !== null, databaseMode: true, self: signedIn?.userId === profile.creator.id,
 		following: (await getFollowState(signedIn?.userId ?? null, profile.creator.id)).following,
 		creator: display.creator(profile.creator),
@@ -217,4 +222,12 @@ export async function socialPageState(creatorId?: string) {
 	const profile = session ? await getCreator(session.walletAddress) : null;
 	return { databaseMode: true, signedIn: session !== null, self: session?.userId === creatorId,
 		following: creatorId ? (await getFollowState(session?.userId ?? null, creatorId )).following : false, mockCreator: profile ? display.creator(profile.creator) : undefined };
+}
+
+async function readEditableProfile(userId: string) {
+	const { db } = await import("@nuts/db");
+	const { users } = await import("@nuts/db/schema/index");
+	const { eq } = await import("drizzle-orm");
+	const [profile] = await db.select({ handle: users.handle, displayName: users.displayName, bio: users.bio, walletAddress: users.walletAddress }).from(users).where(eq(users.id, userId)).limit(1);
+	return profile;
 }

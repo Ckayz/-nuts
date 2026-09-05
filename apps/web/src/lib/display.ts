@@ -139,8 +139,6 @@ export function detail(value: Domain.ThesisDetail): View.ThesisDetail {
     return { thesis: thesis(value.thesis), shareUrl: value.shareUrl, shareHeadline: value.shareHeadline,
         expiryLabel: value.thesis.market?.expiryAt == null ? null : expiryLabel(value.thesis.market.expiryAt, true),
         settlementLabel: value.settlementLabel, launchedLabel: `launched ${elapsed(value.thesis.thesis.createdAt, value.thesis.dataAsOf)} ago`,
-        spotUsd: amount(value.thesis.market?.currentSpotPriceUsd ?? null),
-        spotChangeLabel: value.spotChangePct === null ? null : pctLabel(value.spotChangePct),
         maxPayoutUsd: amount(back?.economics.maximumPayoutUsd ?? null), breakEvenUsd: amount(back?.economics.breakEvenPricesUsd[0] ?? null),
         participants: value.participants.map(participant),
         comments: value.comments.map(v => ({ creator: creator(v.creator), postedLabel: `· ${elapsed(v.createdAt, value.thesis.dataAsOf)}`, body: v.body })),

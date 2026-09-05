@@ -1,12 +1,12 @@
-import { CalloutPost } from "@/components/feed/callout-post";
-import { NewCalloutsBar } from "@/components/feed/new-callouts-bar";
-import { PositionList, TrendingList } from "@/components/feed/thesis-list";
+import { CalloutTabs } from "@/components/feed/callout-tabs";
+import { RailTabs } from "@/components/feed/rail-tabs";
+import { PositionList } from "@/components/feed/thesis-list";
 import { Leaderboard } from "@/components/creator/leaderboard";
 import { Pill, TodoOwner } from "@/components/primitives";
 import { discoverData } from "@/lib/page-data";
 
 export default async function DiscoverPage() {
-	const { leaderboard, theses, trending, yourPositions, signedIn, databaseMode } = await discoverData();
+	const { leaderboard, theses, following, top, trending, ending, settled, yourPositions, signedIn, databaseMode } = await discoverData();
 	return (
 		<div className="work">
 			<aside className="col l">
@@ -29,35 +29,12 @@ export default async function DiscoverPage() {
 			</aside>
 
 			<main className="col">
-				<div className="sec-h">
-					<h2 className="h2">
-						Callouts<span className="alt">Following</span>
-						<span className="alt">Top</span>
-					</h2>
-					<div style={{ display: "flex", gap: "6px" }}>
-						<Pill on>All</Pill>
-						<Pill>BTC</Pill>
-						<Pill>ETH</Pill>
-						<Pill>SOL</Pill>
-					</div>
-				</div>
-				<NewCalloutsBar />
-				<div className="feed">
-					{theses.map((t) => (
-						<CalloutPost key={t.slug} thesis={t} signedIn={signedIn} databaseMode={databaseMode} />
-					))}
-				</div>
+				<CalloutTabs {...{ theses, following, top, signedIn, databaseMode }} />
 			</main>
 
 			<aside className="col r">
 				<div className="sec">
-					<div className="sec-h">
-						<h2 className="h2">
-							Trending<span className="alt">Ending</span>
-							<span className="alt">Settled</span>
-						</h2>
-					</div>
-					<TrendingList items={trending} />
+					<RailTabs {...{ trending, ending, settled }} />
 					<span className="note">
 						Trending and ending rules <TodoOwner />
 					</span>

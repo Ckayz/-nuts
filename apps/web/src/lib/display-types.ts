@@ -178,9 +178,6 @@ export interface ThesisDetail {
     /** Null when no settlement wording is available; the database holds none. */
     settlementLabel: string | null;
     launchedLabel: string;
-    spotUsd: DisplayAmount;
-    /** Spot change as rendered, e.g. "+1.65%"; null with no market or spot series. */
-    spotChangeLabel: string | null;
     maxPayoutUsd: DisplayAmount;
     breakEvenUsd: DisplayAmount;
     participants: Participant[];

@@ -39,6 +39,8 @@ export interface DiscoverData {
 	settled: View.TrendingItem[];
 	leaderboard: View.Creator[];
 	theses: View.Thesis[];
+	following: View.Thesis[];
+	top: View.Thesis[];
 	trending: View.TrendingItem[];
 	yourPositions: View.Position[];
 }
@@ -71,7 +73,8 @@ async function viewer(): Promise<{ userId: string; walletAddress: string } | nul
 export async function discoverData(): Promise<DiscoverData> {
 	if (!usingDatabase()) {
 		return {
-			signedIn: false, databaseMode: false, ending: [], settled: [],
+			signedIn: false, databaseMode: false, ending: mock.ending, settled: mock.settled,
+			following: mock.following, top: mock.top,
 			leaderboard: mock.leaderboard,
 			theses: mock.theses,
 			trending: mock.trending,
@@ -80,6 +83,7 @@ export async function discoverData(): Promise<DiscoverData> {
 	}
 	await connection();
 	const { listFeed, getPortfolio, leaderboard, trending, endingSoon, settled } = await import("./data/reads");
+	const { following, top } = await import("./social/feeds");
 	const signedIn = await viewer();
 	const theses = await listFeed({ viewerUserId: signedIn?.userId ?? null });
 	const positions = signedIn === null ? [] : await getPortfolio(signedIn.walletAddress);
@@ -90,6 +94,8 @@ export async function discoverData(): Promise<DiscoverData> {
 		ending: (await endingSoon()).map(railItem),
 		settled: (await settled()).map(railItem),
 		theses: theses.map(display.thesis),
+		following: (await following({ viewerUserId: signedIn?.userId ?? null })).map(display.thesis),
+		top: (await top({ viewerUserId: signedIn?.userId ?? null })).map(display.thesis),
 		// `getPortfolio` already applies the single fill-status rule, so nothing
 		// is filtered by status a second time here.
 		yourPositions: positions.map(display.position).filter(isOpen),
@@ -121,13 +127,11 @@ export async function thesisDetailData(slug: string): Promise<View.ThesisDetail 
 		thesis: thread.thesis,
 		shareUrl: `thesis.fun/t/${thread.thesis.slug}`,
 		shareHeadline: thread.thesis.thesis.headline,
-		// TODO-OWNER: settlement wording and the spot series both come from
-		// outside the database — settlement copy is the owner's, and spot is a
-		// Thetanuts read. Null keeps those parts of the page hidden instead of
+		// TODO-OWNER: settlement wording is the owner's.
+		// Null keeps that part of the page hidden instead of
 		// stating something unverified. The ticket is not here at all: since round
 		// 6 a post carries no ticket and trading happens on the market page.
 		settlementLabel: null,
-		spotChangePct: null,
 		participants: thread.participants,
 		comments: thread.comments,
 		activity: thread.activity,

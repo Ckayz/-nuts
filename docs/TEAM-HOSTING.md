@@ -1,0 +1,44 @@
+# Hosting on Vercel — for the team (owner 2026-09-05: "The vercel project will be hosted by my team")
+
+Everything below is read from the repo's own config (`vercel.json`, `apps/web/.env.example`, `packages/env/src/server.ts`, `docs/DEPLOY.md`) and from measurements made on 2026-09-05. Nothing here is a guess. Do the steps in this order; the gate in step 0 is the owner's rule.
+
+## 0. Gate — do not deploy before this
+The one-shot review must be **GREEN** (`CLAUDE.md` § Current state says where it stands; `docs/OPEN-WORK.md` lists what is still open). Deploying earlier ships known money-path defects.
+
+## 1. What the repo already tells Vercel
+- `vercel.json` (repo root) declares one service `web` with `root: apps/web`, framework Next.js, and `installCommand: cd ../.. && bun install` (the workspace installs from the repo root; bun only). Every path rewrites to that service. So: **import the repo as ONE Vercel project, leave the Root Directory at the repository root** (the file picks `apps/web` itself), framework preset Next.js, build command default (`next build`).
+- The build is a **database build**: `next build` runs with `NODE_ENV=production`, and the app refuses to prerender from fixtures in production (`apps/web/src/lib/data/source.ts`, measured 2026-09-05). If `DATA_SOURCE=db` is not set at BUILD time the build fails with "Production requires DATA_SOURCE=db". Set every variable in step 2 for **Production and Preview** before the first build.
+
+## 2. Environment variables (Vercel → Project → Settings → Environment Variables)
+From `apps/web/.env.example` and `packages/env/src/server.ts`:
+
+| Variable | Value | Notes |
+|---|---|---|
+| `DATA_SOURCE` | `db` | Required at build and runtime. |
+| `DATABASE_URL` | the Supabase **transaction pooler** URL, port **6543** (`postgresql://postgres.<ref>:<password>@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres`) | The app uses this. Vercel functions open many short connections; the pooler is what survives that. |
+| `DIRECT_DATABASE_URL` | leave EMPTY on Vercel | Only drizzle-kit uses it, and migrations are run from a laptop (step 3), never from Vercel. |
+| `SESSION_SECRET` | 32+ random characters, e.g. `openssl rand -hex 32` | Required in production; the build fails without it. Never reuse a value from anywhere else. |
+| `OPENROUTER_API_KEY` | the team's OpenRouter key | Required (the AI agent). |
+| `AGENT_MODEL`, `AGENT_GATE_MODEL`, `BASE_RPC_URL`, `THETANUTS_ORDERS_URL`, `THESIS_REFERRER` | as in `apps/web/.env.example` | Optional with defaults; `THESIS_REFERRER` defaults to the owner's referrer wallet — keep it, that is the revenue address. |
+
+The owner's laptop can push its gitignored `apps/web/.env` to Vercel with `bun run env:production` (`scripts/sync-vercel-env.ts`), but the dashboard is the simpler path for the team. Never commit any of these values.
+
+## 3. Production database — migrate BEFORE the first deploy
+The app needs tables `users`, `theses`, `positions`, … Production currently holds only the teammate's migration `0000_agent_tables` (measured 2026-09-05 18:0x). From a laptop with the repo:
+```
+# session pooler (port 5432 on the pooler host — the only IPv4 route; the direct host is IPv6-only)
+cd packages/db
+DIRECT_DATABASE_URL='postgresql://postgres.<ref>:<url-encoded password>@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres' DRIZZLE_ALLOW_REMOTE=1 bunx drizzle-kit migrate
+```
+Never `drizzle-kit push` against the shared project (it can DROP the other developer's tables — `CLAUDE.md` § Commands). Details and recovery: `docs/DEPLOY.md`.
+
+## 4. Deploy and verify
+1. Trigger the production deploy (push to `main`, or "Redeploy" in the dashboard). Watch the build log for the `DATA_SOURCE` error above — it means step 2 was missed.
+2. Open `/`, `/m/btc`, `/new`, `/portfolio`, sign in with a wallet on Base, post, like. Every route should answer 200; the Markets panel must show the live book (6–8 assets), not "unavailable".
+3. **Custom domain**: assign it in Vercel → Domains. The app derives its share-link origin from `VERCEL_PROJECT_PRODUCTION_URL` (set by Vercel to the production domain), so pasted `https://<domain>/p/<id>` links unfurl into trade cards only once the domain is the production domain.
+4. Then the owner's tiny real fill (`packages/thetanuts/scripts/README.md`) is the final proof of the money path.
+
+## 5. Things that will bite
+- Preview deployments get their own database URL only if you set one; do not point previews at production data.
+- The agent needs `OPENROUTER_API_KEY` at runtime; without it every `/agent` message fails.
+- Vercel's build must run `bun install` from the repo root (the `installCommand` does that); a project imported with Root Directory = `apps/web` and the default install command breaks the workspace links.

@@ -23,7 +23,7 @@
 // (ethCallsCheap: market + structure, no backing) and backed (the rest). The
 // unbacked posts' headline, rationale and counts are example data in the shape
 // the mockup's discover feed shows; likedByViewer is illustrative.
-import type { Comment, Creator, Thesis, Position, ThesisDetail, TrendingItem, Market } from "@/types";
+import type { Comment, Creator, Thesis, LinkedPosition, Position, ThesisDetail, TrendingItem, Market } from "@/types";
 export const merkleMike: Creator = {
     "handle": "merkle_mike",
     "displayName": "merkle_mike",
@@ -1178,5 +1178,112 @@ export const markets: Market[] = [
             "breakEvenPricesUsd": ["97.86"],
             "liquidityLeftUsd": "4600"
         }
+    }
+];
+
+/* ------------------------------------------------------------------------- *
+ * Trade-card unfurl fixtures (APPENDED; nothing above this line is edited).
+ *
+ * Owner 2026-09-05: a trade and a post are separate things, and a `/p/<uuid>`
+ * link in a post renders the trade as a clickable card. These fixtures give
+ * mock mode two such posts without touching the six existing thesis literals —
+ * `lib/page-data.ts` composes them, so `rails-r1` can still edit the array
+ * above and the two changes merge cleanly.
+ *
+ * The ids are real UUIDs because `lib/thesis/links.ts` accepts nothing else;
+ * every other mock id in this file is a readable fixture string. Economics
+ * reproduce the mockup's position card and the portfolio rows above; nothing
+ * new is invented and absent values stay null.
+ * ------------------------------------------------------------------------- */
+
+/** Position ids the two example links below point at. */
+export const MOCK_TRADE_CARD_POSITION_IDS = {
+    btcPutSpread: "9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01",
+    ethCall: "9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f02",
+} as const;
+
+export const mockLinkedPositions: LinkedPosition[] = [
+    {
+        "position": {
+            "id": MOCK_TRADE_CARD_POSITION_IDS.btcPutSpread,
+            "thesisId": "btc-nfp-4a2c",
+            "userId": "mock-user-merkle_mike",
+            "role": "creator",
+            "side": "back",
+            "status": "indexed",
+            "chainId": 8453,
+            "walletAddress": "",
+            "thesisSlug": "btc-nfp-4a2c",
+            "thesisHeadline": "BTC bleeds after NFP",
+            "underlyingAsset": "BTC",
+            "contracts": "0.0126",
+            "entrySpotPriceUsd": null,
+            "economics": {
+                "entryPremiumUsd": null,
+                "entryFeesUsd": null,
+                "maximumLossUsd": "1000",
+                "maximumPayoutUsd": "4612",
+                "breakEvenPricesUsd": ["77287"],
+                "estimatedPnlUsd": "612",
+                "finalPnlUsd": null,
+                "settlementPriceUsd": null
+            },
+            "verification": { "transactionHash": null, "optionAddress": null, "confirmedOnchain": false },
+            "createdAt": "2026-09-04T17:42:00Z",
+            "mockTransactionFragment": null
+        },
+        "owner": merkleMike
+    },
+    {
+        "position": {
+            "id": MOCK_TRADE_CARD_POSITION_IDS.ethCall,
+            "thesisId": "eth-reclaims-2600-into-fusaka",
+            "userId": "mock-user-wh",
+            "role": "participant",
+            "side": "counter",
+            "status": "indexed",
+            "chainId": 8453,
+            "walletAddress": "",
+            "thesisSlug": "eth-reclaims-2600-into-fusaka",
+            "thesisHeadline": "ETH reclaims 2,600 into Fusaka",
+            "underlyingAsset": "ETH",
+            "contracts": null,
+            "entrySpotPriceUsd": null,
+            "economics": {
+                "entryPremiumUsd": null,
+                "entryFeesUsd": null,
+                "maximumLossUsd": "80",
+                "maximumPayoutUsd": null,
+                "breakEvenPricesUsd": [],
+                "estimatedPnlUsd": "-12",
+                "finalPnlUsd": null,
+                "settlementPriceUsd": null
+            },
+            "verification": { "transactionHash": null, "optionAddress": null, "confirmedOnchain": false },
+            "createdAt": "2026-09-04T20:00:00Z",
+            "mockTransactionFragment": null
+        },
+        "owner": currentUser
+    }
+];
+
+/**
+ * The rationale each post reads with its trade link appended. Applied by
+ * `lib/page-data.ts`, which rebuilds the post rather than mutating the literal
+ * above: importing this module must have no side effects.
+ *
+ * TODO-OWNER: the sentence around the link is example copy, like every other
+ * rationale in this file. The mockup specifies none.
+ */
+export const MOCK_TRADE_CARD_LINKS: { slug: string; rationale: string; positionId: string }[] = [
+    {
+        "slug": "btc-nfp-4a2c",
+        "rationale": `${btcNfp.thesis.rationale} Here is the fill: /p/${MOCK_TRADE_CARD_POSITION_IDS.btcPutSpread}`,
+        "positionId": MOCK_TRADE_CARD_POSITION_IDS.btcPutSpread
+    },
+    {
+        "slug": "sol-loses-100-before-the-weekend",
+        "rationale": `${solLoses100.thesis.rationale ?? ""} Took the other side here /p/${MOCK_TRADE_CARD_POSITION_IDS.ethCall} — different book, same idea.`.trim(),
+        "positionId": MOCK_TRADE_CARD_POSITION_IDS.ethCall
     }
 ];

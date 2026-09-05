@@ -1470,14 +1470,77 @@ describeLive("MAJOR-1: the post-fill card is priced like every other surface", (
 		console.log(`[MAJOR-1] ${JSON.stringify({ basis: card.basis, pnl: card.pnl, derived: live.derivedPnlUsd, label: card.pnlBasisLabel.slice(0, 60) })}`);
 	}, 60_000);
 
-	test("no spot keeps the honest sentence and never invents a zero", async () => {
-		const [row] = await db.select().from(positions).limit(1);
+	/**
+	 * Round 2 of this fold: the first version of this case read
+	 * `db.select().from(positions).limit(1)` — an ARBITRARY row, so what it
+	 * asserted depended on what earlier tests had inserted. On the coordinator's
+	 * throwaway it drew a `failed`/`transaction_reverted` row, whose (correct)
+	 * sentence is "This transaction failed, so there is no position." and which
+	 * therefore failed a check written for a live position. The product was
+	 * right and the test was order-dependent. It now seeds and names its OWN
+	 * row, and the failed case is asserted deliberately instead of by accident.
+	 */
+	test("no spot keeps the honest sentence for a CONFIRMED row, and never invents a zero", async () => {
+		const { fill, user, ticket } = await buyRow();
+		const recorded = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(ticket), txHash: fill.hash },
+			publicClient(),
+			(t, r) => fillCard(t, r, book(WORTHLESS_SPOT)),
+		);
+		expect(recorded.ok).toBe(true);
+		if (!recorded.ok) throw new Error("unreachable");
+		const [row] = await db.select().from(positions).where(eq(positions.id, recorded.positionId));
 		if (!row) throw new Error("no stored position");
+		expect(row.status).toBe("confirmed");
+
 		const answer = await pricedPnl(row, book(null));
-		expect({ usd: answer.usd, basis: answer.basis, honest: answer.detail.includes("No P&L") || answer.detail.includes("Settlement pending") || answer.detail.includes("price feed") }).toEqual({
+		expect(answer).toEqual({
 			usd: null,
 			basis: "unavailable",
-			honest: true,
+			detail:
+				"No P&L: the Thetanuts price feed could not be read, so there is no spot price to value this position at.",
 		});
+	});
+
+	/**
+	 * The other honest sentence, on the same row with only its status changed —
+	 * in memory, so no other case's fixtures move. A reverted transaction is not
+	 * a position, and the card must not describe it as one whose figure is
+	 * merely late.
+	 */
+	test("a FAILED row gets its own sentence, not the missing-mark one", async () => {
+		const { fill, user, ticket } = await buyRow();
+		const recorded = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(ticket), txHash: fill.hash },
+			publicClient(),
+			(t, r) => fillCard(t, r, book(WORTHLESS_SPOT)),
+		);
+		if (!recorded.ok) throw new Error("unreachable");
+		const [row] = await db.select().from(positions).where(eq(positions.id, recorded.positionId));
+		if (!row) throw new Error("no stored position");
+
+		const reverted = await pricedPnl(
+			{ ...row, status: "failed", failureReason: "transaction_reverted" },
+			book(WORTHLESS_SPOT),
+		);
+		expect(reverted).toEqual({
+			usd: null,
+			basis: "unavailable",
+			detail: "This transaction failed, so there is no position.",
+		});
+
+		// C#9: a fill that IS on chain must never be called a reverted transaction.
+		const unproven = await pricedPnl(
+			{ ...row, status: "failed", failureReason: "fill_quantity_unproven" },
+			book(WORTHLESS_SPOT),
+		);
+		expect({ usd: unproven.usd, basis: unproven.basis, onChain: unproven.detail.includes("on chain") }).toEqual({
+			usd: null,
+			basis: "unavailable",
+			onChain: true,
+		});
+		expect(unproven.detail).not.toContain("This transaction failed");
 	});
 });

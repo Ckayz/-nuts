@@ -21,13 +21,13 @@ Optional environment:
 
 Arguments:
 
-- `--side buy|sell` and `--budget <decimal>` required. Buy budget funds premium; sell budget funds gross collateral before premium credit.
+- `--side buy|sell` and `--budget <decimal>` required. Buy budget funds premium; sell budget funds gross collateral before premium credit. The side comes from the package's `takerSide`, corrected in round 9 against decoded chain bytes: a maker order with `isLong: false` is the taker **BUY** side (fill `0x9c4bb145a85740323a14f99cfbbf69c7da18bef1a8fa8f087d2330d095828f8c`) and `isLong: true` is the taker **SELL** side (fill `0xdf3323fefb54cd040a0e86cca3733e4c469a77e33c85a0351e9e987dcfda76f3`). Rounds 1–8 had this backwards, so a `--side buy` run before this correction would have selected a sell order.
 - `--collateral <symbol>` filters live SDK symbols. Buy defaults to USDC/aBasUSDC ordered by lowest signed price per contract in token units, not total maker capacity or USD. Sell defaults to the package's verified address pair.
 - `--order <nonce>` pins a nonce. Ambiguous eligible makers refuse; all side, collateral and verification filters still apply.
 - `--allow-unverified` permits additional sell pairs supported by the package. It does not bypass its structure/decimal guards.
 - `--send` sends at most one approval and one fill. Never automatically retries a transaction.
 
-Output includes order identity, implementation, strikes, expiry, token decimals, quote in base units, estimated fee, expected wallet debit/credit, approval, calldata and decoded contract count. Fee uses the recorded 12.5%-of-premium branch; the unverified notional fee branch may differ.
+Output includes order identity, implementation, strikes, expiry, token decimals, quote in base units, estimated fee, expected wallet debit/credit, approval, calldata and decoded contract count. Fee uses the 12.5%-of-premium branch, which is an **upper bound**: the notional branch of `min(0.06% notional, 12.5% premium)` fires on Base (fill `0x3e7417c5c676109e737f540debe95d0aec9477c9797c19f37e626d0c611cff04` collected 737 on a 9009 premium). On such an order the receipt comparison below reports a fee mismatch and exits nonzero **after** the fill is mined, even though nothing went wrong.
 
 Signatures with under 30 seconds remaining trigger one read refresh for the same maker/nonce, then refuse if still too old. After mined approval the script refreshes that identity and prints a new quote, refusing if another approval is needed. Before fill submission it requires quote age below 30 seconds and signature validity of at least 30 seconds. This bounds submission, not mining. The gas limit is the printed RPC estimate, without invented headroom or replacement policy. Dry runs with insufficient allowance estimate approval gas and defer fill gas estimation until allowance is mined.
 

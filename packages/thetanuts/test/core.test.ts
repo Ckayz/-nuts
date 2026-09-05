@@ -15,11 +15,18 @@ const tokenAddress = token.address;
 const implementations = Object.entries(config.implementations);
 const implementationFor = (name: string) => implementations.find(([key]) => key === name)?.[1] ?? A("9");
 
+/** `isLong` is the raw MAKER long flag, exactly as the chain and the feed carry it.
+ * `isLong: false` (the default here) = maker sells = TAKER BUYS, as in production fill
+ * 0x9c4bb145a85740323a14f99cfbbf69c7da18bef1a8fa8f087d2330d095828f8c;
+ * `isLong: true` = maker buys = TAKER SELLS, as in fill
+ * 0xdf3323fefb54cd040a0e86cca3733e4c469a77e33c85a0351e9e987dcfda76f3.
+ * `order.isBuyer` mirrors the SDK's own `!isLong` derivation, which is INVERTED and is
+ * never used for a side decision (see src/side.ts). */
 function order(overrides: Partial<{ feed: string; collateral: string; implementation: string; strikes: string[]; isCall: boolean; isLong: boolean; expiry: bigint; orderExpiry: number; available: bigint; price: bigint }>): OrderWithSignature {
   const expiry = overrides.expiry ?? BigInt(now + 10_000);
   const strikes = overrides.strikes ?? ["10000000000"];
   const collateral = overrides.collateral ?? tokenAddress;
-  return { order: { maker: A("1"), taker: A("0"), option: "", isBuyer: !(overrides.isLong ?? true), numContracts: 0n, price: overrides.price ?? 10_000_000n, expiry, nonce: 1n, optionType: overrides.isCall === false ? 1 : 0, strikes: strikes.map(BigInt), strikePrice: BigInt(strikes[0] ?? "0"), collateralToken: collateral, underlyingToken: A("0"), deadline: BigInt(overrides.orderExpiry ?? now + 5_000) }, signature: "0x12", availableAmount: overrides.available ?? 1_000_000n, makerAddress: A("1"), rawApiData: { collateral, priceFeed: overrides.feed ?? feedFor("BTC", A("2")), implementation: overrides.implementation ?? implementationFor("PUT"), strikes, isCall: overrides.isCall ?? false, isLong: overrides.isLong ?? true, orderExpiryTimestamp: overrides.orderExpiry ?? now + 5_000, extraOptionData: "0x", maxCollateralUsable: (overrides.available ?? 1_000_000n).toString() } };
+  return { order: { maker: A("1"), taker: A("0"), option: "", isBuyer: !(overrides.isLong ?? false), numContracts: 0n, price: overrides.price ?? 10_000_000n, expiry, nonce: 1n, optionType: overrides.isCall === false ? 1 : 0, strikes: strikes.map(BigInt), strikePrice: BigInt(strikes[0] ?? "0"), collateralToken: collateral, underlyingToken: A("0"), deadline: BigInt(overrides.orderExpiry ?? now + 5_000) }, signature: "0x12", availableAmount: overrides.available ?? 1_000_000n, makerAddress: A("1"), rawApiData: { collateral, priceFeed: overrides.feed ?? feedFor("BTC", A("2")), implementation: overrides.implementation ?? implementationFor("PUT"), strikes, isCall: overrides.isCall ?? false, isLong: overrides.isLong ?? false, orderExpiryTimestamp: overrides.orderExpiry ?? now + 5_000, extraOptionData: "0x", maxCollateralUsable: (overrides.available ?? 1_000_000n).toString() } };
 }
 
 describe("markets", () => {
@@ -55,7 +62,7 @@ describe("quote", () => {
   const preview = (maxContracts: bigint) => ({ optionBook: { previewFillOrder: (row: OrderWithSignature, budget?: bigint, referrer?: string) => { const price = row.order.price; const requested = (budget ?? 0n) * 100_000_000n / price; const numContracts = requested > maxContracts ? maxContracts : requested; return { numContracts, maxContracts, collateralToken: row.rawApiData?.collateral ?? A("0"), pricePerContract: price, totalCollateral: budget ?? 0n, referrer: referrer ?? A("0"), maker: row.order.maker, expiry: row.order.expiry, isCall: row.rawApiData?.isCall ?? false, strikes: row.rawApiData?.strikes.map(BigInt) ?? [] }; } } });
   test("rounds and caps while recomputing premium", () => { const row = order({ price: 30_000_000n }); const uncapped = quoteFill({ client: preview(100n), order: row, budget: 2n, now }); expect(uncapped.numContracts).toBe(6n); expect(uncapped.premium).toBe(1n); expect(uncapped.capped).toBe(false); const capped = quoteFill({ client: preview(4n), order: row, budget: 2n, now }); expect(capped.numContracts).toBe(4n); expect(capped.capped).toBe(true); });
   test("marks the exact cap uncapped and one requested contract above capped", () => { const row = order({ price: 100_000_000n }); expect(quoteFill({ client: preview(5n), order: row, budget: 5n }).capped).toBe(false); expect(quoteFill({ client: preview(5n), order: row, budget: 6n }).capped).toBe(true); });
-  test("gates taker sell", () => { const row = order({ isLong: false }); expect(() => quoteFill({ client: preview(10n), order: row, budget: 1n })).toThrow(ThetanutsLogicError); expect(() => quoteFill({ client: preview(10n), order: row, budget: 1n, allowUnverifiedTakerSell: true })).toThrowError(expect.objectContaining({ code: "TAKER_SELL_UNVERIFIED" })); });
+  test("gates taker sell", () => { const row = order({ isLong: true }); expect(() => quoteFill({ client: preview(10n), order: row, budget: 1n })).toThrow(ThetanutsLogicError); expect(() => quoteFill({ client: preview(10n), order: row, budget: 1n, allowUnverifiedTakerSell: true })).toThrowError(expect.objectContaining({ code: "TAKER_SELL_UNVERIFIED" })); });
   test("matches the real SDK pure preview", () => { const client = createReadClient({ rpcUrl: "http://127.0.0.1:1" }); const row = order({ price: 123_456_789n, available: 1_000_000_000_000n }); const quote = quoteFill({ client, order: row, budget: 10_000_000n }); expect(quote.numContracts).toBe(8_100_000n); expect(quote.premium).toBe(9_999_999n); });
   test("rejects non-fillable quotes", () => {
     expect(() => quoteFill({ client: preview(10n), order: order({}), budget: 0n, now })).toThrowError(expect.objectContaining({ code: "ZERO_CONTRACTS" }));
@@ -106,7 +113,7 @@ describe("fill", () => {
   function client(allowance: bigint) { const real = createReadClient({ rpcUrl: "http://127.0.0.1:1" }); return { optionBook: real.optionBook, erc20: { getAllowance: async () => allowance, encodeApprove: real.erc20.encodeApprove.bind(real.erc20) } }; }
   test("uses original budget for calldata and approves recomputed premium", async () => { const budget = 10_000_000n; const row = order({ price: 123_456_789n, available: 1_000_000_000_000n }); const result = await buildFillTransactions({ client: client(0n), order: row, budget, account: A("5") as Address, now }); const decoded = decodeFunctionData({ abi: OPTION_BOOK_ABI, data: result.fill.data }); const encodedOrder = decoded.args?.[0]; expect(typeof encodedOrder === "object" && encodedOrder !== null && "numContracts" in encodedOrder ? encodedOrder.numContracts : -1n).toBe(8_100_000n); expect(result.expected).toMatchObject({ budget, numContracts: 8_100_000n, premium: 9_999_999n }); expect(result.approve).toBeDefined(); expect(result.fill.value).toBe(0n); const high = await buildFillTransactions({ client: client(9_999_999n), order: row, budget, account: A("5") as Address, now }); expect(high.approve).toBeUndefined(); });
   test("rejects a nonzero contract count with zero recomputed premium", async () => { await expect(buildFillTransactions({ client: client(0n), order: order({ price: 30_000_000n, available: 1_000_000_000_000n }), budget: 1n, account: A("5") as Address, now })).rejects.toMatchObject({ code: "ZERO_PREMIUM" }); });
-  test("rejects expiry and gates taker sell", async () => { await expect(buildFillTransactions({ client: client(0n), order: order({ expiry: 1n, orderExpiry: 1 }), budget: 1n, account: A("5") as Address, now })).rejects.toBeInstanceOf(ThetanutsLogicError); const sell = order({ isLong: false }); await expect(buildFillTransactions({ client: client(0n), order: sell, budget: 1n, account: A("5") as Address, now })).rejects.toMatchObject({ code: "TAKER_SELL_UNVERIFIED" }); });
+  test("rejects expiry and gates taker sell", async () => { await expect(buildFillTransactions({ client: client(0n), order: order({ expiry: 1n, orderExpiry: 1 }), budget: 1n, account: A("5") as Address, now })).rejects.toBeInstanceOf(ThetanutsLogicError); const sell = order({ isLong: true }); await expect(buildFillTransactions({ client: client(0n), order: sell, budget: 1n, account: A("5") as Address, now })).rejects.toMatchObject({ code: "TAKER_SELL_UNVERIFIED" }); });
 });
 
 test("parses the canonical r12 OrderFilled event", () => {
@@ -144,16 +151,66 @@ test("filters OrderFilled events by zero and nonzero nonce", () => {
 
 describe("round 5 side and production evidence", () => {
   const client = () => createReadClient({ rpcUrl: "http://127.0.0.1:1" });
+  const verifiedSellPair = { implementation: VERIFIED_SELL_PAIRS[0]!.implementation, collateral: VERIFIED_SELL_PAIRS[0]!.collateral };
   test("raw maker side maps to the opposite taker side", () => {
-    expect(takerSide(order({ isLong: true }))).toBe("buy");
-    expect(takerSide(order({ isLong: false }))).toBe("sell");
+    expect(takerSide(order({ isLong: false }))).toBe("buy");
+    expect(takerSide(order({ isLong: true }))).toBe("sell");
     const missing = { ...order({}), rawApiData: undefined };
     expect(() => takerSide(missing)).toThrowError(expect.objectContaining({ code: "INVALID_ORDER" }));
   });
 
+  // ─── round 9: the taker side, pinned to decoded Base mainnet fills ────────────
+  // Decoded 2026-09-05 from OptionBook 0x1bDff855d6811728acaDC00989e79143a2bdfDed with viem
+  // (calldata + OrderFilled + ERC-20 transfers). Both rows carry the REAL on-chain isLong.
+  // Flipping src/side.ts back turns every expectation below RED.
+  const TX_TAKER_BUYS = {
+    hash: "0x9c4bb145a85740323a14f99cfbbf69c7da18bef1a8fa8f087d2330d095828f8c",
+    isLong: false, sellerWasMaker: true, side: "buy" as const,
+    strikes: ["234000000000"], price: 256458427n, contracts: 389926n, available: 912426840n,
+  };
+  const TX_TAKER_SELLS = {
+    hash: "0xdf3323fefb54cd040a0e86cca3733e4c469a77e33c85a0351e9e987dcfda76f3",
+    isLong: true, sellerWasMaker: false, side: "sell" as const,
+    strikes: ["220000000000"], price: 212682750n, contracts: 10000n, available: 22000000n,
+  };
+
+  test("round 9: each decoded fill's own isLong maps to the side its money flow proves", () => {
+    for (const tx of [TX_TAKER_BUYS, TX_TAKER_SELLS]) {
+      // The contract's own OrderFilled flag is the maker's seller flag, so it is always
+      // the negation of the maker's long flag. A fill that broke this would break the rule.
+      expect(tx.sellerWasMaker).toBe(!tx.isLong);
+      const row = order({ isLong: tx.isLong, strikes: tx.strikes, price: tx.price, available: tx.available });
+      expect(takerSide(row)).toBe(tx.side);
+      console.log(`round 9 ${tx.hash}: isLong=${tx.isLong} sellerWasMaker=${tx.sellerWasMaker} -> taker ${takerSide(row)}`);
+    }
+  });
+
+  test("round 9: the buy API accepts the decoded taker-BUY order and refuses the taker-SELL one", () => {
+    const buy = order({ isLong: TX_TAKER_BUYS.isLong, strikes: TX_TAKER_BUYS.strikes, price: TX_TAKER_BUYS.price, available: TX_TAKER_BUYS.available });
+    expect(quoteFill({ client: client(), order: buy, budget: 999999n, now })).toMatchObject({ numContracts: TX_TAKER_BUYS.contracts, premium: 999998n });
+    const sell = order({ ...verifiedSellPair, isLong: TX_TAKER_SELLS.isLong, strikes: TX_TAKER_SELLS.strikes, price: TX_TAKER_SELLS.price, available: TX_TAKER_SELLS.available });
+    expect(() => quoteFill({ client: client(), order: sell, budget: 100n, now })).toThrowError(expect.objectContaining({ code: "TAKER_SELL_UNVERIFIED" }));
+  });
+
+  test("round 9: the sell API accepts the decoded taker-SELL order and refuses the taker-BUY one", () => {
+    const sell = order({ ...verifiedSellPair, isLong: TX_TAKER_SELLS.isLong, strikes: TX_TAKER_SELLS.strikes, price: TX_TAKER_SELLS.price, available: TX_TAKER_SELLS.available });
+    // The decoded fill itself: 10000 contracts, 22000000 collateral, 21268 gross premium.
+    expect(quoteSellFill({ client: client(), order: sell, collateralBudget: TX_TAKER_SELLS.available, now }))
+      .toMatchObject({ numContracts: TX_TAKER_SELLS.contracts, collateralRequired: 22000000n, premiumGross: 21268n, premiumNet: 18610n });
+    const buy = order({ ...verifiedSellPair, isLong: TX_TAKER_BUYS.isLong, strikes: TX_TAKER_SELLS.strikes, price: TX_TAKER_SELLS.price, available: TX_TAKER_SELLS.available });
+    expect(() => quoteSellFill({ client: client(), order: buy, collateralBudget: 100n, now })).toThrowError(expect.objectContaining({ code: "INVALID_SIDE" }));
+  });
+
+  test("round 9: markets report the MAKER side, the opposite of the taker side", () => {
+    for (const tx of [TX_TAKER_BUYS, TX_TAKER_SELLS]) {
+      const market = deriveMarkets([order({ isLong: tx.isLong, strikes: tx.strikes, price: tx.price, available: tx.available })], now)[0]!;
+      expect(market.makerSide).toBe(tx.side === "buy" ? "seller" : "buyer");
+    }
+  });
+
   test("legacy opt-in cannot bypass the buy fill gate, including calls", async () => {
     for (const isCall of [false, true]) {
-      const row = order({ isLong: false, isCall });
+      const row = order({ isLong: true, isCall });
       const real = client();
       const offline = { optionBook: real.optionBook, erc20: {
         getAllowance: async () => { throw new Error("Gate must precede allowance access"); },
@@ -184,13 +241,13 @@ describe("round 5 side and production evidence", () => {
       expect(premium - fee).toBe(f.net);
       console.log(`${f.tx}: contracts=${f.contracts} premium=${premium} fee=${fee} collateral=${collateral} net=${premium - fee}`);
     }
-    const buy = order({ isLong: true, strikes: ["234000000000"], price: 256458427n, available: 912426840n });
+    const buy = order({ isLong: false, strikes: ["234000000000"], price: 256458427n, available: 912426840n });
     expect(quoteFill({ client: client(), order: buy, budget: 999999n, now })).toMatchObject({ numContracts: 389926n, premium: 999998n });
   });
 
   test("real SDK sell-put cap contradicts the proposed premium-based cap", () => {
     // Hypothetical remaining amount, not a claimed field of the production order.
-    const row = order({ isLong: false, strikes: ["220000000000"], price: 212682750n, available: 22000000n });
+    const row = order({ isLong: true, strikes: ["220000000000"], price: 212682750n, available: 22000000n });
     const real = client();
     const preview = real.optionBook.previewFillOrder(row, 22000000n);
     const proposedCap = BigInt(row.rawApiData!.maxCollateralUsable) * 100000000n / row.order.price;
@@ -199,7 +256,7 @@ describe("round 5 side and production evidence", () => {
     const encoded = real.optionBook.encodeFillOrder(row, 22000000n);
     const decoded = decodeFunctionData({ abi: OPTION_BOOK_ABI, data: encoded.data as Hex });
     expect(decoded.functionName).toBe("fillOrder");
-    expect(decoded.args?.[0]).toMatchObject({ numContracts: 10000n, isLong: false });
+    expect(decoded.args?.[0]).toMatchObject({ numContracts: 10000n, isLong: true });
     console.log(`SDK sell PUT: preview cap=${preview.maxContracts}; requested premium-based cap=${proposedCap}; encoded contracts=10000`);
   });
 
@@ -229,7 +286,7 @@ describe("round 5 side and production evidence", () => {
 describe("sell collateral quote and encoding", () => {
   const client = createReadClient({ rpcUrl: "http://127.0.0.1:1" });
   const verifiedPair = { implementation: implementationFor("PHYSICAL_PUT"), collateral: "0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB" };
-  const row = () => order({ ...verifiedPair, isLong: false, strikes: ["220000000000"], price: 212682750n, available: 22000000n });
+  const row = () => order({ ...verifiedPair, isLong: true, strikes: ["220000000000"], price: 212682750n, available: 22000000n });
   const quote = (collateralBudget: bigint) => quoteSellFill({ client, order: row(), collateralBudget, now });
   test("decoded sell put transfers with hypothetical maker availableAmount", () => {
     expect(quote(22000000n)).toMatchObject({ numContracts: 10000n, collateralRequired: 22000000n, premiumGross: 21268n, feeEstimate: 2658n, premiumNet: 18610n, capped: false });
@@ -238,7 +295,7 @@ describe("sell collateral quote and encoding", () => {
   });
   test("verified pair rejects WETH and unknown tokens", () => {
     for (const collateral of ["0x4200000000000000000000000000000000000006", A("7")]) {
-      expect(() => quoteSellFill({ client, order: order({ ...verifiedPair, collateral, isLong: false }), collateralBudget: 22000000n, now })).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED", message: expect.stringContaining(collateral) }));
+      expect(() => quoteSellFill({ client, order: order({ ...verifiedPair, collateral, isLong: true }), collateralBudget: 22000000n, now })).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED", message: expect.stringContaining(collateral) }));
     }
   });
   test("RANGER wide-gap and PUT match SDK helper and supplied maker collateral", () => {
@@ -249,7 +306,7 @@ describe("sell collateral quote and encoding", () => {
       const strikes = values.map(value => BigInt(value) * 100000000n);
       const expected = client.utils.calculateCollateral({ type, strikes, numContracts: contracts, priceDecimals: 8, sizeDecimals: usdc.decimals, collateralDecimals: usdc.decimals });
       expect(expected).toBe(type === "ranger" ? 43333000n : 912426840n);
-      const testOrder = order({ implementation: implementationFor(type === "ranger" ? "RANGER" : "PUT"), collateral: usdc.address, strikes: strikes.map(String), isCall: type === "ranger", isLong: false, available: 1000000000000n, price: type === "ranger" ? 23077332818n : 256458427n });
+      const testOrder = order({ implementation: implementationFor(type === "ranger" ? "RANGER" : "PUT"), collateral: usdc.address, strikes: strikes.map(String), isCall: type === "ranger", isLong: true, available: 1000000000000n, price: type === "ranger" ? 23077332818n : 256458427n });
       const params = { client, order: testOrder, collateralBudget: expected, now };
       expect(() => quoteSellFill(params)).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" }));
       const q = quoteSellFill({ ...params, allowUnverifiedStructureCollateral: true });
@@ -261,7 +318,7 @@ describe("sell collateral quote and encoding", () => {
   test("side and call opt-in gates", () => {
     expect(() => quoteSellFill({ client, order: order({}), collateralBudget: 22000000n, now })).toThrowError(expect.objectContaining({ code: "INVALID_SIDE" }));
     expect(() => quoteFill({ client, order: row(), budget: 22000000n, now })).toThrowError(expect.objectContaining({ code: "TAKER_SELL_UNVERIFIED" }));
-    expect(() => quoteSellFill({ client, order: order({ ...verifiedPair, isLong: false, isCall: true }), collateralBudget: 22000000n, now })).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" }));
+    expect(() => quoteSellFill({ client, order: order({ ...verifiedPair, isLong: true, isCall: true }), collateralBudget: 22000000n, now })).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" }));
   });
   test("SDK capacity caps stay separate from implementation collateral", () => {
     for (const name of ["PUT", "LINEAR_CALL", "PUT_SPREAD", "CALL_SPREAD", "CALL_FLY", "PUT_FLY", "CALL_CONDOR", "PUT_CONDOR", "IRON_CONDOR"]) {
@@ -269,7 +326,7 @@ describe("sell collateral quote and encoding", () => {
       const info = getOptionImplementationInfo(8453, implementation)!;
       const strikes = ["220000000000", "230000000000", "240000000000", "250000000000"].slice(0, info.numStrikes);
       if (name === "PUT_FLY") strikes.reverse();
-      const testOrder = order({ implementation, strikes, isCall: name.includes("CALL"), isLong: false, available: 1000000000000000000n, price: 212682750n });
+      const testOrder = order({ implementation, strikes, isCall: name.includes("CALL"), isLong: true, available: 1000000000000000000n, price: 212682750n });
       const q = quoteSellFill({ client, order: testOrder, collateralBudget: testOrder.availableAmount / 2n, allowUnverifiedStructureCollateral: true, now });
       expect(q.maxContracts).toBe(client.optionBook.calculateMaxContracts(testOrder));
       expect(q.collateralRequired).toBeLessThanOrEqual(testOrder.availableAmount / 2n);
@@ -285,7 +342,7 @@ describe("sell collateral quote and encoding", () => {
       { implementation: ranger, isCall: true, strikes: ["7950000000000", "8000000000000", "8100000000000", "8150000000000"], price: 23077332818n, available: 86666000n, budget: 43333000n, contracts: 43333n, collateral: 43333000n, premium: 10000100n, fee: 1250012n },
       { implementation: implementationFor("PUT_FLY"), isCall: false, strikes: ["240000000000", "230000000000", "220000000000"], price: 100000000n, available: 2000000n, budget: 2000000n, contracts: 10000n, collateral: 1000000n, premium: 10000n, fee: 1250n },
     ]) {
-      const testOrder = order({ implementation: f.implementation, isCall: f.isCall, strikes: f.strikes, price: f.price, available: f.available, isLong: false });
+      const testOrder = order({ implementation: f.implementation, isCall: f.isCall, strikes: f.strikes, price: f.price, available: f.available, isLong: true });
       const params = { client, order: testOrder, collateralBudget: f.budget, now };
       expect(() => quoteSellFill(params)).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" }));
       const q = quoteSellFill({ ...params, allowUnverifiedStructureCollateral: true });
@@ -302,12 +359,12 @@ describe("sell collateral quote and encoding", () => {
       { implementation: implementationFor("INVERSE_CALL_SPREAD"), strikes: ["220000000000", "230000000000"] },
       { implementation: implementationFor("PHYSICAL_CALL"), strikes: ["220000000000"] },
       { implementation: "0x6a1d5ce9e3bdef110a06d8d025c171189d926d72", strikes: ["220000000000", "230000000000"] },
-    ]) expect(() => quoteSellFill({ client, order: order({ ...fixture, isLong: false, isCall: true }), collateralBudget: 1000000n, now, allowUnverifiedStructureCollateral: true })).toThrowError(expect.objectContaining({ code: "STRUCTURE_UNSUPPORTED" }));
+    ]) expect(() => quoteSellFill({ client, order: order({ ...fixture, isLong: true, isCall: true }), collateralBudget: 1000000n, now, allowUnverifiedStructureCollateral: true })).toThrowError(expect.objectContaining({ code: "STRUCTURE_UNSUPPORTED" }));
   });
   test("unknown implementations and incompatible strikes fail closed", () => {
     for (const allowUnverifiedStructureCollateral of [false, true]) {
-      expect(() => quoteSellFill({ client, order: order({ ...verifiedPair, isLong: false, implementation: A("9") }), collateralBudget: 100n, now, allowUnverifiedStructureCollateral })).toThrowError(expect.objectContaining({ code: "STRUCTURE_UNSUPPORTED" }));
-      expect(() => quoteSellFill({ client, order: order({ ...verifiedPair, isLong: false, strikes: ["100", "200", "300"] }), collateralBudget: 100n, now, allowUnverifiedStructureCollateral })).toThrowError(expect.objectContaining({ code: "INVALID_ORDER" }));
+      expect(() => quoteSellFill({ client, order: order({ ...verifiedPair, isLong: true, implementation: A("9") }), collateralBudget: 100n, now, allowUnverifiedStructureCollateral })).toThrowError(expect.objectContaining({ code: "STRUCTURE_UNSUPPORTED" }));
+      expect(() => quoteSellFill({ client, order: order({ ...verifiedPair, isLong: true, strikes: ["100", "200", "300"] }), collateralBudget: 100n, now, allowUnverifiedStructureCollateral })).toThrowError(expect.objectContaining({ code: "INVALID_ORDER" }));
     }
   });
   test("encodes exact sell count and collateral approval for SDK target", async () => {
@@ -317,7 +374,7 @@ describe("sell collateral quote and encoding", () => {
         encodeApprove: client.erc20.encodeApprove.bind(client.erc20),
       } };
       const result = await buildSellFillTransactions({ client: offline, order: row(), collateralBudget, account: A("5") as Address, now });
-      expect(decodeFunctionData({ abi: OPTION_BOOK_ABI, data: result.fill.data }).args?.[0]).toMatchObject({ numContracts: quote(collateralBudget).numContracts, isLong: false });
+      expect(decodeFunctionData({ abi: OPTION_BOOK_ABI, data: result.fill.data }).args?.[0]).toMatchObject({ numContracts: quote(collateralBudget).numContracts, isLong: true });
       expect(result.expected).toMatchObject({ collateralRequired: quote(collateralBudget).collateralRequired, premiumGross: quote(collateralBudget).premiumGross });
       expect(result.approve?.data).toBe(client.erc20.encodeApprove(result.expected.collateralToken, result.fill.to, result.expected.collateralRequired).data as Hex);
     }
@@ -327,15 +384,15 @@ describe("sell collateral quote and encoding", () => {
       getAllowance: async () => { throw new Error("must not access allowance"); },
       encodeApprove: client.erc20.encodeApprove.bind(client.erc20),
     } };
-    await expect(buildSellFillTransactions({ client: offline, order: order({ ...verifiedPair, isLong: false, price: 30000000n, available: 1000000n }), collateralBudget: 400n, account: A("5") as Address, now })).rejects.toMatchObject({ code: "ENCODE_MISMATCH" });
+    await expect(buildSellFillTransactions({ client: offline, order: order({ ...verifiedPair, isLong: true, price: 30000000n, available: 1000000n }), collateralBudget: 400n, account: A("5") as Address, now })).rejects.toMatchObject({ code: "ENCODE_MISMATCH" });
   });
   test("expiry and zero guards", () => {
     for (const [testOrder, collateralBudget, code] of [
       [row(), 0n, "ZERO_CONTRACTS"],
-      [order({ ...verifiedPair, isLong: false, expiry: BigInt(now) }), 100n, "ORDER_EXPIRED"],
-      [order({ ...verifiedPair, isLong: false, orderExpiry: now }), 100n, "ORDER_EXPIRED"],
-      [order({ ...verifiedPair, isLong: false, price: 1n }), 100n, "ZERO_PREMIUM"],
-      [order({ ...verifiedPair, isLong: false, strikes: ["1"], available: 1n, price: 100000000n }), 1n, "ZERO_COLLATERAL"],
+      [order({ ...verifiedPair, isLong: true, expiry: BigInt(now) }), 100n, "ORDER_EXPIRED"],
+      [order({ ...verifiedPair, isLong: true, orderExpiry: now }), 100n, "ORDER_EXPIRED"],
+      [order({ ...verifiedPair, isLong: true, price: 1n }), 100n, "ZERO_PREMIUM"],
+      [order({ ...verifiedPair, isLong: true, strikes: ["1"], available: 1n, price: 100000000n }), 1n, "ZERO_COLLATERAL"],
     ] as const) {
       const guardClient = code === "ZERO_COLLATERAL" ? { utils: client.utils, chainConfig: client.chainConfig, optionBook: { previewFillOrder: client.optionBook.previewFillOrder.bind(client.optionBook), calculateMaxContracts: () => 1n } } : client;
       expect(() => quoteSellFill({ client: guardClient, order: testOrder, collateralBudget, now })).toThrowError(expect.objectContaining({ code }));
@@ -362,7 +419,7 @@ describe("round 8 address-pinned exemption and separated decimals", () => {
     for (const implementation of implementationAddresses) {
       const info = getOptionImplementationInfo(8453, implementation)!;
       for (const collateral of collateralAddresses) {
-        const testOrder = order({ implementation, collateral, isLong: false, isCall: false, strikes: strikesFor(info.numStrikes), price: 212682750n, available: 22000000n });
+        const testOrder = order({ implementation, collateral, isLong: true, isCall: false, strikes: strikesFor(info.numStrikes), price: 212682750n, available: 22000000n });
         try {
           quoteSellFill({ client, order: testOrder, collateralBudget: 22000000n, now });
           passed.push(`${implementation} + ${collateral}`);
@@ -384,7 +441,7 @@ describe("round 8 address-pinned exemption and separated decimals", () => {
       encodeApprove: client.erc20.encodeApprove.bind(client.erc20),
     } };
     for (const implementation of historical) {
-      const testOrder = order({ implementation, collateral: "0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB", isLong: false, isCall: false, strikes: ["220000000000"], price: 212682750n, available: 22000000n });
+      const testOrder = order({ implementation, collateral: "0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB", isLong: true, isCall: false, strikes: ["220000000000"], price: 212682750n, available: 22000000n });
       const params = { client, order: testOrder, collateralBudget: 22000000n, now };
       expect(() => quoteSellFill(params)).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" }));
       await expect(buildSellFillTransactions({ ...params, client: offline, account: A("5") as Address })).rejects.toMatchObject({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" });
@@ -404,7 +461,7 @@ describe("round 8 address-pinned exemption and separated decimals", () => {
     ] as const) {
       const token = Object.values(config.tokens).find((item) => item.symbol === symbol)!;
       expect(token.decimals).toBe(decimals);
-      const testOrder = order({ implementation: implementationFor("PUT"), collateral: token.address, isLong: false, isCall: false, strikes: ["220000000000"], price: 212682750n, available });
+      const testOrder = order({ implementation: implementationFor("PUT"), collateral: token.address, isLong: true, isCall: false, strikes: ["220000000000"], price: 212682750n, available });
       const q = quoteSellFill({ client, order: testOrder, collateralBudget: available, now, allowUnverifiedStructureCollateral: true });
       expect(q.collateralDecimals).toBe(decimals);
       expect(q.contractSizeDecimals).toBe(decimals);
@@ -427,7 +484,7 @@ describe("round 8 address-pinned exemption and separated decimals", () => {
 
   test("a collateral token the SDK chain config does not know fails closed even with opt-in", () => {
     for (const allowUnverifiedStructureCollateral of [false, true]) {
-      const testOrder = order({ implementation: implementationFor("PUT"), collateral: A("7"), isLong: false, isCall: false, strikes: ["220000000000"], price: 212682750n, available: 22000000n });
+      const testOrder = order({ implementation: implementationFor("PUT"), collateral: A("7"), isLong: true, isCall: false, strikes: ["220000000000"], price: 212682750n, available: 22000000n });
       const code = allowUnverifiedStructureCollateral ? "STRUCTURE_UNSUPPORTED" : "STRUCTURE_COLLATERAL_UNVERIFIED";
       expect(() => quoteSellFill({ client, order: testOrder, collateralBudget: 22000000n, now, allowUnverifiedStructureCollateral })).toThrowError(expect.objectContaining({ code }));
     }
@@ -438,7 +495,7 @@ describe("round 8 address-pinned exemption and separated decimals", () => {
     // falls back to 18; only USDC, WETH and cbBTC are in it on Base.
     for (const [symbol, supported] of [["USDC", true], ["cbBTC", true], ["WETH", false], ["aBasUSDC", false], ["aBasWETH", false], ["cbXRP", false]] as const) {
       const token = Object.values(config.tokens).find((item) => item.symbol === symbol)!;
-      const testOrder = order({ implementation: implementationFor("LINEAR_CALL"), collateral: token.address, isLong: false, isCall: true, strikes: ["220000000000"], price: 212682750n, available: 22000000n * 10n ** BigInt(token.decimals - 6) });
+      const testOrder = order({ implementation: implementationFor("LINEAR_CALL"), collateral: token.address, isLong: true, isCall: true, strikes: ["220000000000"], price: 212682750n, available: 22000000n * 10n ** BigInt(token.decimals - 6) });
       const params = { client, order: testOrder, collateralBudget: testOrder.availableAmount, now, allowUnverifiedStructureCollateral: true };
       if (supported) {
         const q = quoteSellFill(params);
@@ -449,7 +506,7 @@ describe("round 8 address-pinned exemption and separated decimals", () => {
         expect(() => quoteSellFill(params)).toThrowError(expect.objectContaining({ code: "STRUCTURE_UNSUPPORTED" }));
       }
       // Multi-strike calls never reach that SDK branch, so they stay quotable with the opt-in.
-      const spread = order({ implementation: implementationFor("CALL_SPREAD"), collateral: token.address, isLong: false, isCall: true, strikes: ["220000000000", "230000000000"], price: 212682750n, available: 22000000n * 10n ** BigInt(token.decimals - 6) });
+      const spread = order({ implementation: implementationFor("CALL_SPREAD"), collateral: token.address, isLong: true, isCall: true, strikes: ["220000000000", "230000000000"], price: 212682750n, available: 22000000n * 10n ** BigInt(token.decimals - 6) });
       expect(quoteSellFill({ client, order: spread, collateralBudget: spread.availableAmount, now, allowUnverifiedStructureCollateral: true }).contractSizeDecimals).toBe(token.decimals);
     }
   });

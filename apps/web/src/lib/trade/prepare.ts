@@ -35,7 +35,7 @@ import { instrumentMismatch } from "./attachment";
 import { findThesis, findUnrecordedFill, unrecordedFillReason } from "./store";
 import { simulateFill } from "./chain";
 import { encodeTradeTicket, type TradeTicketPayload } from "./ticket";
-import { directionOfSide, rawOf, takerForSide } from "./view";
+import { directionOfSide, rawOf, takerFor } from "./view";
 import type { PrepareResult, TakerSide, TicketSide, TxRequest } from "./types";
 
 function fail(code: string, reason: string, needsSignIn = false): PrepareResult {
@@ -123,7 +123,16 @@ export async function prepareTradeFor(
 	// just re-read — the mapping from a direction word to a taker side is a
 	// property of the option, not of the word, so it cannot be computed before
 	// the structure is known.
-	const taker: TakerSide = input.taker ?? takerForSide(structure, input.side);
+	// `takerFor`, NOT `takerForSide`: a request that names no taker is the agent's
+	// (`lib/agent/execute.ts:205`) or a browser still running the pre-fold build,
+	// and both mean the LEGACY reading of the word. Resolving such a request
+	// through the new mapping would turn every agent BUY on a put into a
+	// collateral-posting SELL — measured, this exact line, before it was fixed:
+	//   [prepare agent-shaped] {"ok":false,"code":"NO_ORDER_ON_SIDE",
+	//    "reason":"No maker is buying this structure right now, so the Bull side
+	//    cannot be filled."}
+	// on an AVAX put whose only live order is the buy side.
+	const taker: TakerSide = input.taker ?? takerFor(input.side);
 	// The direction the RESULTING position will carry, which is the word every
 	// surface downstream prints. Derived from the taker side that is actually
 	// filled, so a request whose `side` and `taker` disagree can never mint a

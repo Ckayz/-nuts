@@ -17,7 +17,7 @@ import { parseTokenAmount } from "@/lib/market/units";
 import { isFeedUnavailable } from "@/lib/thetanuts/orders";
 import { prepareTrade as prepare, type PrepareTradeInput } from "./prepare";
 import { recordTrade as record, type RecordTradeInput } from "./record";
-import { directionOfSide, quoteView, takerForSide } from "./view";
+import { directionOfSide, quoteView, takerFor } from "./view";
 import type { PrepareResult, RecordResult, TakerSide, TicketQuoteView, TicketSide } from "./types";
 
 export interface QuoteTicketInput {
@@ -38,12 +38,16 @@ export interface QuoteTicketInput {
 	readonly budgetInput: string;
 }
 
-/** Which side of the book a request names, and the direction word that side earns. */
-function resolve(structure: Parameters<typeof takerForSide>[0], input: QuoteTicketInput): {
+/**
+ * Which side of the book a request names, and the direction word that side
+ * earns. A request that names no taker keeps the LEGACY mapping — see
+ * `prepare.ts`; the market ticket always names one.
+ */
+function resolve(structure: Parameters<typeof directionOfSide>[0], input: QuoteTicketInput): {
 	taker: TakerSide;
 	side: TicketSide;
 } {
-	const taker = input.taker ?? takerForSide(structure, input.side);
+	const taker = input.taker ?? takerFor(input.side);
 	return { taker, side: directionOfSide(structure, taker) };
 }
 

@@ -19,3 +19,18 @@ for (const mode of ["development", "production"] as const) {
 		});
 	}
 }
+
+test("the production build phase is exempt so mock pages can prerender; a production server is not", () => {
+	const run = (extra: Record<string, string>) =>
+		Bun.spawnSync([process.execPath, "--eval", 'const { dataSource } = await import("./src/lib/data/source.ts"); console.log(dataSource());'], {
+			cwd: new URL("../../..", import.meta.url).pathname,
+			env: { ...process.env, DATABASE_URL: "", SKIP_ENV_VALIDATION: "1", NODE_ENV: "production", DATA_SOURCE: "mock", ...extra },
+			stdout: "pipe", stderr: "pipe",
+		});
+	const build = run({ NEXT_PHASE: "phase-production-build" });
+	expect(build.exitCode).toBe(0);
+	expect(build.stdout.toString().trim()).toBe("mock");
+	const server = run({ NEXT_PHASE: "phase-production-server" });
+	expect(server.exitCode).not.toBe(0);
+	expect(server.stderr.toString()).toContain("Production requires DATA_SOURCE=db");
+});

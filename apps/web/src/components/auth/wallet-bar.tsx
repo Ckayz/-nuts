@@ -14,7 +14,7 @@ import { Avatar } from "@/components/primitives";
  */
 import "@/styles/thread.css";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAccount, useConnect, useDisconnect, useSignMessage } from "wagmi";
 import type { SignInSessionSummary } from "@/lib/auth/address";
 import {
@@ -23,6 +23,7 @@ import {
 	signOut,
 	verifySignInSignature,
 } from "@/lib/auth/actions";
+import { useSessionMismatch } from "./use-session-mismatch";
 import { config } from "@/lib/wagmi";
 import { readableError } from "@/lib/messages";
 
@@ -65,59 +66,6 @@ export function isWalletRejection(error: unknown): boolean {
 function networkLabel(chain: { name?: string } | undefined, chainId: number | undefined): string | null {
 	if (chainId === undefined) return null;
 	return chain?.name ?? `Chain ${chainId}`;
-}
-
-/**
- * B-m3. Is a signed-in session now looking at a DIFFERENT connected account?
- *
- * A disconnected wallet is NOT a mismatch: the server session is still a real
- * session for the address that signed it, and the person may simply have closed
- * their wallet. Only a wallet that is connected AS SOMEBODY ELSE contradicts it.
- */
-export function accountMismatch(
-	sessionWallet: string | null,
-	isConnected: boolean,
-	address: string | undefined,
-): boolean {
-	if (sessionWallet === null) return false;
-	if (!isConnected || address === undefined) return false;
-	return address.toLowerCase() !== sessionWallet.toLowerCase();
-}
-
-/**
- * B-m3. The header already dropped back to "Sign in" when the connected account
- * differed from the session, but the SERVER session stayed valid — so likes,
- * comments and follows kept acting as the old identity while the chip said
- * nobody was signed in. The two now agree: a mismatch signs the server session
- * out, and returning to the original account requires a fresh sign-in.
- *
- * TODO-OWNER: the owner may prefer to keep the old session alive and prompt
- * instead of signing out, or to sign out only when the person acts.
- *
- * `handled` is a ref, written BEFORE the await, so re-renders during the
- * in-flight action cannot fire a second sign-out. A FAILED sign-out clears the
- * ref again: the session really is still live, so a later render must retry
- * rather than pretend it was cleared. Nothing here sets state on failure, so
- * that retry cannot become a render loop.
- */
-export async function syncSessionToAccount(input: {
-	mismatched: boolean;
-	address: string | undefined;
-	handled: { current: string | null };
-	signOut: () => Promise<void>;
-	onSignedOut: () => void;
-}): Promise<void> {
-	const { mismatched, address, handled } = input;
-	if (!mismatched || address === undefined) return;
-	if (handled.current === address) return;
-	handled.current = address;
-	try {
-		await input.signOut();
-	} catch {
-		handled.current = null;
-		return;
-	}
-	input.onSignedOut();
 }
 
 export function WalletBar() {
@@ -187,21 +135,9 @@ export function WalletBar() {
 		setSession(null);
 	}, []);
 
-	// The session belongs to one address. If the wallet is now on a different
-	// account, the header must not keep showing the old identity — it drops back
-	// to the sign-in control so the connected account can sign for itself, AND
-	// the server session is signed out so the actions agree with the header.
-	const mismatched = accountMismatch(session?.walletAddress ?? null, isConnected, address);
-	const signedOutFor = useRef<string | null>(null);
-	useEffect(() => {
-		void syncSessionToAccount({
-			mismatched,
-			address,
-			handled: signedOutFor,
-			signOut,
-			onSignedOut: () => setSession(null),
-		});
-	}, [mismatched, address]);
+	// B-m3: a wallet connected as somebody else signs the stale server session
+	// out, so the chip and the actions can never disagree about who is signed in.
+	const mismatched = useSessionMismatch(session?.walletAddress ?? null, isConnected, address, () => setSession(null));
 
 	if (phase === "loading") return <span className="wallet mut">…</span>;
 

@@ -4,13 +4,13 @@
  *
  * `WalletBar` is a wagmi client component with no DOM harness in this repo (no
  * testing-library, and `useAccount` throws outside a provider), so the decision
- * and the once-only guard live in two exported pure functions and are exercised
- * here directly. The last block reads the component's own bytes to prove the
- * effect is actually wired to them.
+ * and the once-only guard live in two exported pure functions in
+ * `use-session-mismatch.ts` and are exercised here directly. The last two blocks
+ * read the hook's and the component's own bytes to prove the wiring.
  */
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { accountMismatch, syncSessionToAccount } from "./wallet-bar";
+import { accountMismatch, syncSessionToAccount } from "./use-session-mismatch";
 
 const A = "0x00000000000000000000000000000000000000aa";
 const B = "0x00000000000000000000000000000000000000bb";
@@ -101,13 +101,20 @@ test("switching to a THIRD account signs out again", async () => {
 	expect(h.signedOutCount()).toBe(2);
 });
 
-test("the component wires the effect to the guard and to the session state", () => {
-	const source = readFileSync(new URL("./wallet-bar.tsx", import.meta.url), "utf8");
-	expect(source).toContain("const mismatched = accountMismatch(session?.walletAddress ?? null, isConnected, address);");
+test("the hook runs the effect through the guard and the real signOut action", () => {
+	const source = readFileSync(new URL("./use-session-mismatch.ts", import.meta.url), "utf8");
 	expect(source).toContain("void syncSessionToAccount({");
-	expect(source).toContain("handled: signedOutFor,");
-	expect(source).toContain("onSignedOut: () => setSession(null),");
-	// The header's own decision reads the SAME predicate, so chip and actions
-	// can never disagree about who is signed in.
+	expect(source).toContain("handled,");
+	expect(source).toContain("signOut: signOutAction,");
+	expect(source).toContain('import { signOut as signOutAction } from "@/lib/auth/actions";');
+});
+
+test("WalletBar calls the hook and reads the SAME predicate for the header", () => {
+	// One import and one call: the wallet UI is being reworked in parallel, so
+	// this change must stay a one-line merge.
+	const source = readFileSync(new URL("./wallet-bar.tsx", import.meta.url), "utf8");
+	expect(source).toContain('import { useSessionMismatch } from "./use-session-mismatch";');
+	expect(source).toContain("const mismatched = useSessionMismatch(session?.walletAddress ?? null, isConnected, address, () => setSession(null));");
+	// The chip and the actions cannot disagree about who is signed in.
 	expect(source).toContain("const sessionMatchesAccount = session !== null && !mismatched;");
 });

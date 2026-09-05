@@ -8,9 +8,12 @@ const row: FarcasterRailCast = {
 	username: "dwr.eth",
 	displayName: "Dan Romero",
 	avatarUrl: "https://example.invalid/pfp.png",
-	text: "Basis on the Sep expiry finally looks sane again.",
+	text: "Basis on the Sep expiry is back to 4.1%.",
 	channelId: "base",
 	url: "https://farcaster.xyz/dwr.eth/0x029f7cce",
+	timestamp: "2026-09-06T01:00:00.000Z",
+	isReply: false,
+	followerCount: 1234,
 };
 
 test("the rail is labelled as somebody else's network, not this app's feed", () => {
@@ -26,7 +29,7 @@ test("a ready cast draws handle, display name, avatar, text and an outbound link
 	expect(html).toContain('src="https://example.invalid/pfp.png"');
 	// React 19 emits this attribute camel-cased in static markup; asserted as rendered.
 	expect(html).toContain('referrerPolicy="no-referrer"');
-	expect(html).toContain("Basis on the Sep expiry finally looks sane again.");
+	expect(html).toContain("Basis on the Sep expiry is back to 4.1%.");
 	expect(html).toContain('href="https://farcaster.xyz/dwr.eth/0x029f7cce"');
 	expect(html).toContain('rel="noreferrer noopener"');
 	expect(html).toContain("/base");

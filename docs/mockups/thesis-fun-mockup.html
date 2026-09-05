@@ -123,8 +123,6 @@
   .acts .sides .b2:hover{background:var(--bear-soft);border-color:var(--bear-fill);color:var(--bear)}
   .acts .ai{border:1px solid var(--l2);border-radius:999px;padding:3px 9px;font-family:var(--sans);font-weight:600}
   .acts .ai:hover{border-color:var(--acc);background:var(--acc-soft);color:var(--k)}
-  .earn{font-family:var(--mono);font-size:11px;color:var(--m)}
-  .earn b{color:var(--k);font-weight:500} .earn::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--acc);margin-right:6px;vertical-align:middle}
 
   /* ===== right rail: theses list ===== */
   .tl{display:flex;flex-direction:column}
@@ -220,7 +218,7 @@
   <div class="work" id="view-discover">
     <aside class="col l">
       <div class="sec">
-        <div class="sec-h"><h2 class="h2">Top P&amp;L<span class="alt">Top earners</span></h2></div>
+        <div class="sec-h"><h2 class="h2">Top P&amp;L</h2></div>
         <div style="display:flex;gap:6px"><span class="pill on">Net P&amp;L ▾</span><span class="pill">1W ▾</span></div>
         <div class="lb">
           <div class="row"><span class="rank top">1</span><span class="av">MK</span><span class="who"><span class="n">merkle_mike</span><span class="h">71% · 24 theses</span></span><span class="num bull">+$18,240</span></div>
@@ -233,11 +231,6 @@
           <div class="row"><span class="rank">8</span><span class="av">RH</span><span class="who"><span class="n">rekt_hedger</span><span class="h">49% · 19</span></span><span class="num bear">−$1,140</span></div>
         </div>
         <span class="note">All P&amp;L from onchain fills and settlements. Ranking formula <span class="todo">TODO-OWNER</span></span>
-      </div>
-      <div class="sec">
-        <div class="sec-h"><span class="lbl">Creator payouts · this week</span></div>
-        <dl class="kv"><dt>Paid to creators</dt><dd class="acc">$2,184</dd><dt>From follower fills</dt><dd>$412,900</dd><dt>Top earner</dt><dd>merkle_mike · $611</dd></dl>
-        <span class="note">Creators earn a share of every fill their callout brings in, like X pays creators. Rate <span class="todo">TODO-OWNER</span></span>
       </div>
     </aside>
 
@@ -262,7 +255,6 @@
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>142</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>17</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
-              <span class="earn">creator earned <b>$611</b> from 40 fills</span>
               <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
               <span class="sides"><button class="b1">Bull</button><button class="b2">Bear</button></span>
             </div>
@@ -284,7 +276,6 @@
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>9</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>3</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
-              <span class="earn">creator earned <b>$14</b> from 10 fills</span>
               <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
               <span class="sides"><button class="b1">Bull</button><button class="b2">Bear</button></span>
             </div>
@@ -307,7 +298,6 @@
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>88</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>12</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
-              <span class="earn">creator earned <b>$388</b> from 36 fills</span>
               <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
               <span class="sides"><button class="b1">Bull</button><button class="b2">Bear</button></span>
             </div>
@@ -329,7 +319,6 @@
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>210</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>41</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
-              <span class="earn">creator earned <b>$524</b> from 38 fills</span>
               <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
             </div>
           </div>
@@ -369,7 +358,7 @@
         <div class="lb">
           <div class="row" style="grid-template-columns:36px 1fr;padding:4px 0"><span class="av lg">MK</span><span class="who"><span class="n">merkle_mike</span><span class="h">0x7c44…5dEd · since Jun 26</span></span></div>
         </div>
-        <dl class="kv"><dt>Verified P&amp;L 30d</dt><dd class="bull">+$18,240</dd><dt>Win rate</dt><dd>71%</dd><dt>Theses</dt><dd>24</dd><dt>Followers</dt><dd>1,204</dd><dt>Creator payouts</dt><dd class="acc">$3,140</dd><dt>Biggest loss</dt><dd class="bear">−$2,000</dd></dl>
+        <dl class="kv"><dt>Verified P&amp;L 30d</dt><dd class="bull">+$18,240</dd><dt>Win rate</dt><dd>71%</dd><dt>Theses</dt><dd>24</dd><dt>Followers</dt><dd>1,204</dd><dt>Biggest loss</dt><dd class="bear">−$2,000</dd></dl>
         <span class="note">Every figure from onchain fills and settlements. Losing theses cannot be deleted.</span>
       </div>
       <div class="sec">
@@ -447,7 +436,7 @@
           <div class="inp"><span>$</span><span>250</span><span class="u">USDC</span></div>
           <div class="presets"><button>$50</button><button>$100</button><button>$500</button><button>$1,000</button></div>
           <span class="note">Preset values <span class="todo">TODO-OWNER</span></span></div>
-        <dl class="kv"><dt>Order</dt><dd>78000/74000-PS</dd><dt>Contracts</dt><dd>0.0031</dd><dt>Max loss</dt><dd class="bear">$250.00</dd><dt>Max payout</dt><dd class="big bull">+$1,153</dd><dt>Break-even</dt><dd>$77,287</dd><dt>Liquidity left</dt><dd>$41,200</dd><dt>To creator</dt><dd class="acc">rate <span class="todo" style="margin-left:0">TODO-OWNER</span></dd></dl>
+        <dl class="kv"><dt>Order</dt><dd>78000/74000-PS</dd><dt>Contracts</dt><dd>0.0031</dd><dt>Max loss</dt><dd class="bear">$250.00</dd><dt>Max payout</dt><dd class="big bull">+$1,153</dd><dt>Break-even</dt><dd>$77,287</dd><dt>Liquidity left</dt><dd>$41,200</dd></dl>
         <button class="btn primary block">Sign with wallet</button>
         <span class="note">Approve USDC once, then one fill on Base. You appear in the participants list when it confirms.</span>
       </div>

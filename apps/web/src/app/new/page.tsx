@@ -67,10 +67,6 @@ export default function NewThesisPage() {
 						<dd>{usd(ticket.breakEvenUsd)}</dd>
 						<dt>Liquidity left</dt>
 						<dd>{usd(ticket.liquidityLeftUsd)}</dd>
-						<dt>To creator</dt>
-						<dd className="acc">
-							rate <TodoOwner style={{ marginLeft: 0 }} />
-						</dd>
 					</dl>
 					<button type="button" className="btn primary block">
 						Sign with wallet

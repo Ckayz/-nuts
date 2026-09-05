@@ -7,7 +7,6 @@ import {
 	SparkIcon,
 } from "@/components/icons";
 import { Avatar, StatusChip } from "@/components/primitives";
-import { usd } from "@/lib/format";
 import type { Thesis } from "@/lib/display-types";
 
 export function CalloutPost({ thesis }: { thesis: Thesis }) {
@@ -42,10 +41,6 @@ export function CalloutPost({ thesis }: { thesis: Thesis }) {
 						<ShareIcon />
 						share
 					</button>
-					<span className="earn">
-						creator earned <b>{usd(thesis.earningsUsd)}</b> from {thesis.fills}{" "}
-						fills
-					</span>
 					<button type="button" className="ai">
 						<SparkIcon />
 						Explain

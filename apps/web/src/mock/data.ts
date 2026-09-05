@@ -8,7 +8,7 @@
 // Null provenance: rationale has no copy in the mockup; settledAgoMinutes/settledWinner
 // are null before settlement; soldStructure and activity side are not applicable to those rows.
 // Missing creator identity/statistics (displayName, mockWalletFragment, sinceLabel, winRatePct,
-// thesesCount, followers, netPnlUsd, verifiedPnl30dUsd, creatorPayoutsUsd, biggestLossUsd),
+// thesesCount, followers, netPnlUsd, verifiedPnl30dUsd, biggestLossUsd),
 // contracts, collateralSymbol, pooledUsd, currentSpotPriceUsd, entrySpotPriceUsd and economics
 // remain null where the mockup supplies no value. This includes entryPremiumUsd, entryFeesUsd,
 // maximumPayoutUsd, estimatedPnlUsd, finalPnlUsd and settlementPriceUsd; never substitute zero.
@@ -17,7 +17,7 @@
 // TODO-OWNER: endingSoon flags reproduce chips, not an approved time window.
 // TODO-OWNER: fixture directions follow headlines; only BTC direction is explicitly owner-specified.
 // TODO-OWNER: preset amounts reproduce the mockup, not approved product defaults.
-// Creator rates, ranking, trending, remaining thesis details and connected-user identity stay TODO-OWNER.
+// Ranking, trending, remaining thesis details and connected-user identity stay TODO-OWNER.
 import type { Creator, Thesis, Position, ThesisDetail, TrendingItem } from "@/types";
 export const merkleMike: Creator = {
     "handle": "merkle_mike",
@@ -32,7 +32,6 @@ export const merkleMike: Creator = {
     "followers": 1204,
     "netPnlUsd": "18240",
     "verifiedPnl30dUsd": "18240",
-    "creatorPayoutsUsd": "3140",
     "biggestLossUsd": "-2000"
 };
 export const nutsauce: Creator = {
@@ -48,7 +47,6 @@ export const nutsauce: Creator = {
     "followers": null,
     "netPnlUsd": "11905",
     "verifiedPnl30dUsd": null,
-    "creatorPayoutsUsd": null,
     "biggestLossUsd": null
 };
 export const gammaEth: Creator = {
@@ -64,7 +62,6 @@ export const gammaEth: Creator = {
     "followers": null,
     "netPnlUsd": "7310",
     "verifiedPnl30dUsd": null,
-    "creatorPayoutsUsd": null,
     "biggestLossUsd": null
 };
 export const deltaVega: Creator = {
@@ -80,7 +77,6 @@ export const deltaVega: Creator = {
     "followers": null,
     "netPnlUsd": "4082",
     "verifiedPnl30dUsd": null,
-    "creatorPayoutsUsd": null,
     "biggestLossUsd": null
 };
 export const jlin: Creator = {
@@ -96,7 +92,6 @@ export const jlin: Creator = {
     "followers": null,
     "netPnlUsd": "2915",
     "verifiedPnl30dUsd": null,
-    "creatorPayoutsUsd": null,
     "biggestLossUsd": null
 };
 export const oxsable: Creator = {
@@ -112,7 +107,6 @@ export const oxsable: Creator = {
     "followers": null,
     "netPnlUsd": "1740",
     "verifiedPnl30dUsd": null,
-    "creatorPayoutsUsd": null,
     "biggestLossUsd": null
 };
 export const tailbet: Creator = {
@@ -128,7 +122,6 @@ export const tailbet: Creator = {
     "followers": null,
     "netPnlUsd": "1212",
     "verifiedPnl30dUsd": null,
-    "creatorPayoutsUsd": null,
     "biggestLossUsd": null
 };
 export const rektHedger: Creator = {
@@ -144,7 +137,6 @@ export const rektHedger: Creator = {
     "followers": null,
     "netPnlUsd": "-1140",
     "verifiedPnl30dUsd": null,
-    "creatorPayoutsUsd": null,
     "biggestLossUsd": null
 };
 export const currentUser: Creator = {
@@ -160,7 +152,6 @@ export const currentUser: Creator = {
     "followers": null,
     "netPnlUsd": null,
     "verifiedPnl30dUsd": null,
-    "creatorPayoutsUsd": null,
     "biggestLossUsd": null
 };
 export const allCreators = [merkleMike, nutsauce, gammaEth, deltaVega, jlin, oxsable, tailbet, rektHedger, currentUser];
@@ -238,7 +229,6 @@ export const btcNfp: Thesis = {
         "transactionFragment": null
     },
     "pooledUsd": "9420",
-    "earningsUsd": "611",
     "fills": 40,
     "likes": 142,
     "commentCount": 17,
@@ -320,7 +310,6 @@ export const solLoses100: Thesis = {
         "transactionFragment": null
     },
     "pooledUsd": null,
-    "earningsUsd": "14",
     "fills": 10,
     "likes": 9,
     "commentCount": 3,
@@ -406,7 +395,6 @@ export const ethFusaka: Thesis = {
         "transactionFragment": null
     },
     "pooledUsd": null,
-    "earningsUsd": "388",
     "fills": 36,
     "likes": 88,
     "commentCount": 12,
@@ -492,7 +480,6 @@ export const ethPrints2500: Thesis = {
         "transactionFragment": "0x91ab…4f2e"
     },
     "pooledUsd": null,
-    "earningsUsd": "524",
     "fills": 38,
     "likes": 210,
     "commentCount": 41,
@@ -922,12 +909,6 @@ export const btcNfpDetail: ThesisDetail = {
     }
 };
 export const thesisDetails = [btcNfpDetail];
-export const creatorPayouts = {
-    "paidToCreatorsUsd": "2184",
-    "fromFollowerFillsUsd": "412900",
-    "topEarner": merkleMike,
-    "topEarnerUsd": "611"
-};
 export const newCallouts = { count: 9, avatars: [tailbet, jlin, nutsauce] };
 export const wallet = { mockAddressFragment: "0x7c4a…e10b", network: "Base" };
 export const marketPrices = [

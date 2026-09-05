@@ -3,9 +3,7 @@ import { NewCalloutsBar } from "@/components/feed/new-callouts-bar";
 import { PositionList, TrendingList } from "@/components/feed/thesis-list";
 import { Leaderboard } from "@/components/creator/leaderboard";
 import { Pill, TodoOwner } from "@/components/primitives";
-import { usd } from "@/lib/format";
 import {
-	creatorPayouts,
 	leaderboard,
 	theses,
 	trending,
@@ -19,7 +17,7 @@ export default function DiscoverPage() {
 				<div className="sec">
 					<div className="sec-h">
 						<h2 className="h2">
-							Top P&amp;L<span className="alt">Top earners</span>
+							Top P&amp;L
 						</h2>
 					</div>
 					<div style={{ display: "flex", gap: "6px" }}>
@@ -30,26 +28,6 @@ export default function DiscoverPage() {
 					<span className="note">
 						All P&amp;L from onchain fills and settlements. Ranking formula{" "}
 						<TodoOwner />
-					</span>
-				</div>
-				<div className="sec">
-					<div className="sec-h">
-						<span className="lbl">Creator payouts · this week</span>
-					</div>
-					<dl className="kv">
-						<dt>Paid to creators</dt>
-						<dd className="acc">{usd(creatorPayouts.paidToCreatorsUsd)}</dd>
-						<dt>From follower fills</dt>
-						<dd>{usd(creatorPayouts.fromFollowerFillsUsd)}</dd>
-						<dt>Top earner</dt>
-						<dd>
-							{creatorPayouts.topEarner.displayName} ·{" "}
-							{usd(creatorPayouts.topEarnerUsd)}
-						</dd>
-					</dl>
-					<span className="note">
-						Creators earn a share of every fill their callout brings in, like X
-						pays creators. Rate <TodoOwner />
 					</span>
 				</div>
 			</aside>

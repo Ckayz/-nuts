@@ -58,7 +58,7 @@ export function creator(value: Domain.Creator): View.Creator {
         walletAddress: value.walletAddress ? fragment(value.walletAddress) : value.mockWalletFragment ?? undefined,
         sinceLabel: value.sinceLabel ?? undefined, winRatePct: value.winRatePct ?? undefined, thesesCount: value.thesesCount ?? undefined,
         followers: value.followers === null ? undefined : new Intl.NumberFormat("en-US").format(value.followers),
-        netPnlUsd: optionalAmount(value.netPnlUsd), verifiedPnl30dUsd: optionalAmount(value.verifiedPnl30dUsd), creatorPayoutsUsd: optionalAmount(value.creatorPayoutsUsd), biggestLossUsd: optionalAmount(value.biggestLossUsd) };
+        netPnlUsd: optionalAmount(value.netPnlUsd), verifiedPnl30dUsd: optionalAmount(value.verifiedPnl30dUsd), biggestLossUsd: optionalAmount(value.biggestLossUsd) };
 }
 export function thesis(value: Domain.Thesis): View.Thesis {
     // TODO-OWNER: the mockup specifies no presentation for other PRD lifecycle states.
@@ -89,7 +89,7 @@ export function thesis(value: Domain.Thesis): View.Thesis {
     return { id: value.id, slug: value.slug, headline: value.thesis.headline, note: value.thesis.rationale, asset: value.market.underlyingAsset, chainId: value.market.chainId, creator: creator(value.creator), status, statusLabel,
         postedLabel: settled ? `· settled ${value.mock.settledAgoMinutes}m` : `· ${elapsed(value.thesis.createdAt, value.market.dataAsOf)}`,
         structure: { ...value.structure, expiryAt: value.market.expiryAt, expiryLabel: expiryLabel(value.market.expiryAt), strikesLabel: `${value.structure.strikesUsd.map(v => group(v)).join(" / ")} ${value.structure.isCall ? "C" : "P"}`, side: "bull", venueLabel: "Base · OptionBook" },
-        detailParts: details, detailTx: tx(value.verification.transactionHash, value.mock.transactionFragment), creatorRiskedUsd: amount(value.economics.maximumLossUsd), creatorLivePnlUsd: amount(settled ? value.economics.finalPnlUsd : value.economics.estimatedPnlUsd), creatorPnlLabel: settled ? "Result" : "Live P&L", pooledUsd: amount(value.pooledUsd), bull: stats(value.bull), bear: stats(value.bear), earningsUsd: amount(value.earningsUsd), fills: value.fills, likes: value.likes, commentCount: value.commentCount };
+        detailParts: details, detailTx: tx(value.verification.transactionHash, value.mock.transactionFragment), creatorRiskedUsd: amount(value.economics.maximumLossUsd), creatorLivePnlUsd: amount(settled ? value.economics.finalPnlUsd : value.economics.estimatedPnlUsd), creatorPnlLabel: settled ? "Result" : "Live P&L", pooledUsd: amount(value.pooledUsd), bull: stats(value.bull), bear: stats(value.bear), fills: value.fills, likes: value.likes, commentCount: value.commentCount };
 }
 export function position(value: Domain.Position): View.Position {
     return { thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(value.status === "settled" ? value.economics.finalPnlUsd : value.economics.estimatedPnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled: value.status === "settled" };

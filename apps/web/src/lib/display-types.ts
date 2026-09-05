@@ -28,7 +28,6 @@ export interface Creator {
     /** Leaderboard net P&L over the selected window. */
     netPnlUsd?: DisplayAmount;
     verifiedPnl30dUsd?: DisplayAmount;
-    creatorPayoutsUsd?: DisplayAmount;
     biggestLossUsd?: DisplayAmount;
 }
 export interface StructureLeg {
@@ -86,8 +85,6 @@ export interface Thesis {
     pooledUsd: DisplayAmount;
     bull: SideStats;
     bear: SideStats;
-    /** Creator payout earned so far, in dollars. */
-    earningsUsd: DisplayAmount;
     fills: number;
     likes: number;
     commentCount: number;

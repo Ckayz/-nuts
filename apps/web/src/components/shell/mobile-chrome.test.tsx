@@ -97,3 +97,50 @@ test("the feed renders ONE Top traders card, so the anchor id stays unique", () 
 	expect(feedPage).toContain('className="rail-desktop-only"');
 	expect(phone).toContain(".rail-desktop-only{display:none}");
 });
+
+/* ---------- decision 3: the mockup is the spec, and it now matches ---------- */
+
+const mockup = readFileSync(new URL("../../../../../docs/mockups/thesis-fun-mockup.html", import.meta.url), "utf8");
+
+/**
+ * Owner decision 3 (2026-09-06): the teammate's shipped feed design IS the spec,
+ * so the mockup was folded forward to it. CLAUDE.md's rule is "pixels before
+ * prose" — the mockup leads the code — and a mockup that no longer draws what
+ * ships is worse than no mockup. These cases fail if the two drift apart again.
+ */
+test("the mockup draws the shipped feed: hairline post rows and the type badge", () => {
+	expect(mockup).toContain('<div class="post-rows">');
+	expect(mockup).toContain(".post-rows > .post + .post{border-top:1px solid var(--line-soft)}");
+	// Every one of the six feed posts is marked, and the dots are the only
+	// coloured part — the DATED exception to "colour only on money".
+	expect(mockup.match(/class="ptype/g)?.length).toBe(6);
+	expect(mockup).toContain(".ptype.bull .dot{background:var(--gain)}");
+	expect(mockup).toContain(".ptype.bear .dot{background:var(--loss)}");
+	// The pill itself stays neutral.
+	expect(mockup.match(/\.ptype\{[^}]*\}/)?.[0]).toContain("color:var(--muted)");
+});
+
+test("the mockup's stat tiles are bordered and unfilled, as the market header draws them", () => {
+	const rule = mockup.match(/\.stats \.tile\{[^}]*\}/)?.[0] ?? "";
+	expect(rule).toContain("border:1px solid var(--line)");
+	expect(rule).toContain("background:none");
+	expect(rule).toContain("border-radius:var(--r-row)");
+	// The strip no longer draws a divider line of its own.
+	expect(mockup.match(/\.stats\{[^}]*\}/)?.[0]).not.toContain("border-top");
+});
+
+test("the mockup carries decisions 5, 6 and 7 too", () => {
+	// 5: Create in the top bar, before the wallet chip.
+	const create = mockup.indexOf('class="btn acc top-create"');
+	const chip = mockup.indexOf('id="walletChip"');
+	expect(create).toBeGreaterThan(0);
+	expect(chip).toBeGreaterThan(create);
+	// 6: the bio, under the handle and above the address line.
+	const handle = mockup.indexOf('<div class="handle">@merkle_mike</div>');
+	const bio = mockup.indexOf('<p class="meta bio">');
+	const address = mockup.indexOf('<div class="meta num">0x7c44');
+	expect(bio).toBeGreaterThan(handle);
+	expect(address).toBeGreaterThan(bio);
+	// 7: the feed's left column stays in the flow on a phone.
+	expect(mockup).toContain(".cols.feed>.col-left{display:block;order:1}");
+});

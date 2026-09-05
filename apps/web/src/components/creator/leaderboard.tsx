@@ -1,30 +1,47 @@
 import Link from "next/link";
+import { FollowButton } from "@/components/creator/follow-button";
 import { Avatar } from "@/components/primitives";
 import { pnlClass, signedUsd } from "@/lib/format";
-import type { Creator } from "@/lib/display-types";
+import type { LeaderboardEntry } from "@/lib/page-data";
 
 /**
  * The feed's left rail: the traders to follow, ranked, with their window P&L in
- * money colour (docs/mockups/thesis-fun-mockup.html, `#tpl-traders`).
+ * money colour and a Follow control on every row
+ * (docs/mockups/thesis-fun-mockup.html, `#tpl-traders`).
  *
- * DIVERGENCE, reported: the mockup puts a Follow button on every row. There is
- * none here because the feed read carries no per-creator follow state — a
- * button that always says "Follow" would state something false about people the
- * viewer already follows, and the wired control lives on the profile the row
- * links to. Wiring it needs `following` per creator from `lib/page-data.ts`,
- * outside this round's fence.
+ * Round-1 fold item 6: the control is real. `discoverData` now reads each
+ * creator's follow state for the viewer, so a row the viewer already follows
+ * says "Following" instead of stating something false; a signed-out visitor
+ * still sees the control and is routed to sign-in, exactly as the like button
+ * is.
  */
-export function Leaderboard({ creators }: { creators: Creator[] }) {
+export function Leaderboard({
+	entries,
+	signedIn,
+	databaseMode,
+}: {
+	entries: LeaderboardEntry[];
+	signedIn: boolean;
+	databaseMode: boolean;
+}) {
 	return (
 		<div className="card-b">
-			{creators.map((c) => (
-				<Link className="row" href={`/u/${c.handle}`} key={c.handle}>
-					<Avatar initials={c.initials} size={34} />
+			{entries.map(({ creator, following }) => (
+				<div className="row" key={creator.handle}>
+					<Avatar initials={creator.initials} size={34} />
 					<span className="t">
-						<b>{c.displayName}</b>
-						<i className={`num ${pnlClass(c.netPnlUsd)}`}>{signedUsd(c.netPnlUsd)}</i>
+						<Link href={`/u/${creator.handle}`}>
+							<b>{creator.displayName}</b>
+						</Link>
+						<i className={`num ${pnlClass(creator.netPnlUsd)}`}>{signedUsd(creator.netPnlUsd)}</i>
 					</span>
-				</Link>
+					<FollowButton
+						creatorId={creator.id}
+						following={following}
+						signedIn={signedIn}
+						databaseMode={databaseMode}
+					/>
+				</div>
 			))}
 		</div>
 	);

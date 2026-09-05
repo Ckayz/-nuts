@@ -16,7 +16,7 @@
  */
 import type * as Domain from "@/types";
 import type * as View from "@/lib/display-types";
-import { amount, creator, expiryLabel, marketSlug, quantity, strikesLabel, tx } from "@/lib/display";
+import { amount, dateLabel, expiryLabel, marketSlug, percentLabel, pnlCard, quantity, strikeSide, strikesLabel, tx } from "@/lib/display";
 import { decimalFromBaseUnits } from "@/lib/data/decimal";
 import { STRIKE_DECIMALS, type PositionInstrument } from "./instrument";
 import type { PositionPageDetail } from "./types";
@@ -37,22 +37,6 @@ export interface PositionViewInput {
 	readonly asOf: Date;
 }
 
-/**
- * TODO-OWNER: `ThesisStatus` display mapping is an open owner item (CLAUDE.md).
- * These reuse the three chip tones the mockup already defines and take their
- * words from the PRD, not from invention: 8.5.3 "settlement pending", 13
- * "confirmed but not indexed: show syncing", 13 "failed transaction: do not
- * publish or count the position".
- */
-const STATUS_DISPLAY: Record<Domain.PositionStatus, { label: string; tone: View.ThesisStatus }> = {
-	pending: { label: "Pending", tone: "settled" },
-	confirmed: { label: "Open · syncing", tone: "live" },
-	indexed: { label: "Open", tone: "live" },
-	expired: { label: "Settlement pending", tone: "ending" },
-	settled: { label: "Settled", tone: "settled" },
-	failed: { label: "Failed", tone: "ending" },
-};
-
 /** SDK implementation name as product wording, e.g. `PUT_SPREAD` -> `put spread`. */
 function productLabel(implementationName: string | null): string | null {
 	return implementationName === null ? null : implementationName.toLowerCase().replace(/_/g, " ");
@@ -63,12 +47,6 @@ function addressFragment(value: string): string {
 	return value.length > 11 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
 }
 
-function dateLabel(iso: string): string {
-	const date = new Date(iso);
-	const month = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" }).format(date);
-	return `${date.getUTCDate()} ${month} ${date.getUTCFullYear()}`;
-}
-
 /** A plain decimal, or null. Every recorded column passes through this before it is printed. */
 function decimalOrNull(value: string | null): string | null {
 	if (value === null) return null;
@@ -76,38 +54,9 @@ function decimalOrNull(value: string | null): string | null {
 	return /^-?\d+(?:\.\d+)?$/.test(trimmed) ? trimmed : null;
 }
 
-/** Decimal string -> scaled BigInt pair, for exact ratio arithmetic. */
-function scaled(value: string): { units: bigint; scale: bigint } {
-	const negative = value.startsWith("-");
-	const [integer = "0", fraction = ""] = (negative ? value.slice(1) : value).split(".");
-	const units = BigInt(integer + fraction);
-	return { units: negative ? -units : units, scale: 10n ** BigInt(fraction.length) };
-}
-
-/**
- * `numerator / denominator` as a signed percentage with one decimal place,
- * rounded half-up in integer arithmetic. Null when the denominator is zero or
- * either side is not a plain decimal — a percentage of nothing is not zero.
- */
-export function percentLabel(numerator: string, denominator: string): string | null {
-	const top = scaled(numerator);
-	const bottom = scaled(denominator);
-	if (bottom.units === 0n) return null;
-	// (top/topScale) / (bottom/bottomScale) * 100, carried to one decimal:
-	//   1000 * top.units * bottom.scale / (bottom.units * top.scale)
-	const numeratorUnits = 1000n * top.units * bottom.scale;
-	const denominatorUnits = bottom.units * top.scale;
-	if (denominatorUnits === 0n) return null;
-	const negative = numeratorUnits < 0n !== denominatorUnits < 0n;
-	const absoluteTop = numeratorUnits < 0n ? -numeratorUnits : numeratorUnits;
-	const absoluteBottom = denominatorUnits < 0n ? -denominatorUnits : denominatorUnits;
-	// Round half-up on the magnitude, then reapply the sign.
-	const tenths = (absoluteTop * 2n + absoluteBottom) / (absoluteBottom * 2n);
-	const whole = tenths / 10n;
-	const decimal = tenths % 10n;
-	const sign = tenths === 0n ? "" : negative ? "−" : "+";
-	return `${sign}${whole}.${decimal}%`;
-}
+/** Re-exported: the one implementation lives in `lib/display.ts` with the card
+ *  builder that uses it, so the percent under every card rounds identically. */
+export { percentLabel };
 
 /**
  * Everything the risk model needs, or null with the reason it cannot be built.
@@ -177,17 +126,30 @@ function tokenUsd(
 	return decimalFromBaseUnits(units.toString(), USD_DECIMALS);
 }
 
-function instrumentLabel(instrument: PositionInstrument | null, asset: string): string {
-	if (instrument === null) return asset === "" ? "Position" : asset;
-	const strikes = strikesLabel(
-		instrument.strikesUsd8.map((strike) => decimalFromBaseUnits(strike, STRIKE_DECIMALS)),
-		instrument.isCall,
-	);
-	const ticker = instrument.asset ?? (asset === "" ? null : asset);
+/**
+ * The card's three instrument slots, as the mockup splits them
+ * (docs/mockups/thesis-fun-mockup.html): a title ("BTC put spread"), the strikes
+ * on their own sub-line ("78,000 / 74,000 P") and the expiry in the top-right
+ * chip. A record that names none of it still gets an honest title.
+ */
+function instrumentParts(
+	instrument: PositionInstrument | null,
+	asset: string,
+): { title: string; strikes: string | null; expiry: string | null; expiryFull: string | null } {
+	if (instrument === null) {
+		return { title: asset === "" ? "Position" : asset, strikes: null, expiry: null, expiryFull: null };
+	}
 	const product = productLabel(instrument.implementationName);
-	return [ticker, product, strikes, expiryLabel(instrument.expiryAt)]
-		.filter((part): part is string => part !== null)
-		.join(" · ");
+	const ticker = instrument.asset ?? (asset === "" ? null : asset);
+	return {
+		title: [ticker, product].filter((part): part is string => part !== null).join(" ") || "Position",
+		strikes: strikesLabel(
+			instrument.strikesUsd8.map((strike) => decimalFromBaseUnits(strike, STRIKE_DECIMALS)),
+			strikeSide(product, instrument.isCall),
+		),
+		expiry: expiryLabel(instrument.expiryAt),
+		expiryFull: expiryLabel(instrument.expiryAt, true),
+	};
 }
 
 export function positionPage(input: PositionViewInput): View.PositionPage {
@@ -237,44 +199,29 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 				: tokenUsd(quantities.premium, quantities.premiumDecimals, collateralUsdPrice8)));
 	const entryLabel = sells ? "Collateral locked" : "Premium paid";
 
-	const status = STATUS_DISPLAY[position.status];
-	const settled = position.status === "settled";
 	const asset = instrument?.asset ?? (position.underlyingAsset === "" ? null : position.underlyingAsset);
+	const parts = instrumentParts(instrument, position.underlyingAsset);
 
-	const card: View.PnlCard = {
+	const card = pnlCard({
 		id: position.id,
-		owner: creator(detail.owner),
-		statusLabel: status.label,
-		statusTone: status.tone,
-		dateLabel: dateLabel(position.createdAt),
-		instrumentLabel: instrumentLabel(instrument, position.underlyingAsset),
+		owner: detail.owner,
+		status: position.status,
+		createdAt: position.createdAt,
+		instrumentLabel: parts.title,
 		asset,
-		side: position.side === "back" ? "bull" : "bear",
-		sideLabel: position.side === "back" ? "Bull" : "Bear",
-		pnl: amount(pnl.pnlUsd),
-		pnlLabel: settled ? "Result" : "Live P&L",
-		// TODO-OWNER: the denominator. Max loss is the money genuinely at stake, and
-		// for a bought option it equals the premium paid, so the two coincide on the
-		// common case. The tile it refers to is named in the label so the reader is
-		// never left guessing which number it is a percentage of.
-		pnlPctLabel:
-			pnl.pnlUsd === null || maxLossUsd === null
-				? null
-				: (() => {
-						const percent = percentLabel(pnl.pnlUsd, maxLossUsd);
-						return percent === null ? null : `${percent} of max loss`;
-					})(),
-		pnlBasisLabel: pnl.detail,
-		basis: pnl.basis,
-		stats: [
-			{ label: entryLabel, value: amount(entryUsd).usd2 },
-			{ label: "Max loss", value: amount(maxLossUsd).usd2 },
-			{ label: "Max payout", value: amount(maxPayoutUsd).usd2 },
-		],
+		strikesLabel: parts.strikes,
+		expiryLabel: parts.expiry,
+		expiryFullLabel: parts.expiryFull,
+		side: position.side,
+		pnl: { usd: pnl.pnlUsd, detail: pnl.detail, basis: pnl.basis },
+		entryLabel,
+		entryUsd,
+		maxLossUsd,
+		maxPayoutUsd,
 		tx: tx(position.verification.transactionHash, position.mockTransactionFragment),
 		// PRD 7.3: the badge is shown only after a verified Base mainnet receipt.
 		verified: position.verification.confirmedOnchain,
-	};
+	});
 
 	const facts: { label: string; value: string }[] = [
 		{ label: "Break-even", value: breakEvenUsd === null ? "—" : amount(breakEvenUsd).usd2 },
@@ -329,4 +276,113 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
  */
 export function pnlCardFor(input: PositionViewInput): View.PnlCard {
 	return positionPage(input).card;
+}
+
+/**
+ * The card for a position a post's text LINKS to (owner 2026-09-05: "trade is
+ * just trade" — the linked position need not be the author's).
+ *
+ * The feed reads no order snapshot and no raw fill amounts, so there is no
+ * instrument to price and no risk model to run: `instrument` and `quantities`
+ * are null, which routes `resolvePnl` down its recorded-value branches (PRD 14:
+ * a settled row shows its recorded result or nothing; an open one shows the
+ * recorded estimate or nothing). Every field the feed cannot know renders "—".
+ */
+export function linkedPositionCard(value: Domain.LinkedPosition, asOf: Date = new Date()): View.PnlCard {
+	return pnlCardFor({
+		detail: {
+			position: value.position,
+			owner: value.owner,
+			instrument: null,
+			quantities: null,
+			thesis: null,
+		},
+		spotUsd8: null,
+		collateralUsdPrice8: null,
+		asOf,
+	});
+}
+
+/**
+ * The card for the creator's OWN fill under a post.
+ *
+ * A post carries its backing as economics plus the structure it names, not as a
+ * `Domain.Position` row, so this shapes those columns into one and hands it to
+ * the same builder — the post's card and that position's own page then cannot
+ * state different numbers about the same fill. What the post DOES know and a
+ * bare linked position does not is the structure, so the strikes and the expiry
+ * are filled in here.
+ *
+ * Null when the post is not backed. `Domain.Thesis.status` is a POST lifecycle,
+ * not a fill's, and a backing carries no status column of its own, so the post's
+ * is the only lifecycle there is: a settled post's fill reads "Settled", an open
+ * post's reads "Open". Whether the receipt was verified is a SEPARATE fact and
+ * stays where PRD 7.3 puts it — `verified`, which drives the share card's
+ * "Base · not confirmed yet" footer. Mapping an unconfirmed receipt to "Pending"
+ * here would hide the recorded P&L of every fixture and every un-reindexed fill.
+ */
+export function backingCard(value: Domain.Thesis): View.PnlCard | null {
+	const back = value.backing;
+	if (back === null) return null;
+	const settled = value.thesis.status === "settled";
+	const status: Domain.PositionStatus = settled ? "settled" : "indexed";
+	const asset = value.market?.underlyingAsset ?? null;
+	const structure = value.structure;
+	const expiryAt = value.market?.expiryAt ?? null;
+	const economics = back.economics;
+	return pnlCard({
+		id: back.creatorPositionId,
+		owner: value.creator,
+		status,
+		createdAt: value.thesis.createdAt,
+		instrumentLabel:
+			[asset, structure?.productType ?? null].filter((part): part is string => part !== null).join(" ") ||
+			"Position",
+		asset,
+		strikesLabel:
+			structure === null
+				? null
+				: strikesLabel(structure.strikesUsd, strikeSide(structure.productType, structure.isCall)),
+		expiryLabel: expiryAt === null ? null : expiryLabel(expiryAt),
+		expiryFullLabel: expiryAt === null ? null : expiryLabel(expiryAt, true),
+		// The creator backs their own thesis, so their fill is the "back" side.
+		side: "back",
+		pnl: (() => {
+			const resolved = resolvePnl({
+				status,
+				finalPnlUsd: economics.finalPnlUsd,
+				estimatedPnlUsd: economics.estimatedPnlUsd,
+				settlementPriceUsd: economics.settlementPriceUsd,
+				derivation: null,
+				spotUsd8: null,
+				unavailableReason:
+					"No P&L: this post records no fill amounts for the creator's position, so nothing can be valued.",
+			});
+			return { usd: resolved.pnlUsd, detail: resolved.detail, basis: resolved.basis };
+		})(),
+		// A post stores no taker side, so the money that went in is named by the
+		// column that holds it rather than by a side this record cannot prove.
+		entryLabel: "Premium paid",
+		entryUsd: decimalOrNull(economics.entryPremiumUsd),
+		maxLossUsd: decimalOrNull(economics.maximumLossUsd),
+		maxPayoutUsd: decimalOrNull(economics.maximumPayoutUsd),
+		tx: tx(back.verification.transactionHash, back.mock.transactionFragment),
+		verified: back.verification.confirmedOnchain,
+	});
+}
+
+/**
+ * Attach the cards a rendered post shows: the creator's backing fill and every
+ * position the text links.
+ *
+ * ONE card per object: when the post's text links the position that ALSO backs
+ * it, the two cards are the same fill and only one is rendered (round-1 fold
+ * item 8) — the backing card, because it is the one that carries the structure.
+ */
+export function withCards(view: View.Thesis, domain: Domain.Thesis, asOf: Date = new Date()): View.Thesis {
+	const backing = backingCard(domain);
+	const linked = (domain.linkedPositions ?? [])
+		.filter((entry) => entry.position.id !== domain.backing?.creatorPositionId)
+		.map((entry) => linkedPositionCard(entry, asOf));
+	return { ...view, backingCard: backing, tradeCards: linked };
 }

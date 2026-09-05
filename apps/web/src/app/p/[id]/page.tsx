@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { PositionPage } from "@/components/position/position-page";
-import { positionPageData } from "@/lib/page-data";
+import { positionPageData, railTheses } from "@/lib/page-data";
 
 /**
  * One position's own page (owner 2026-09-05: "trade is just trade. post(thesis)
@@ -36,5 +36,5 @@ export async function generateMetadata({
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
 	const page = await positionPageData((await params).id);
 	if (!page) notFound();
-	return <PositionPage page={page} />;
+	return <PositionPage page={page} rail={await railTheses()} />;
 }

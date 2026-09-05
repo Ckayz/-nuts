@@ -343,8 +343,12 @@ describeLive("recordTrade against decoded Base production fills", () => {
 		expect(row.maximumPayout === null ? null : BigInt(row.maximumPayout)).toBe(
 			expectation.premium - expectation.fee,
 		);
-		expect(result.card?.tiles[0]?.label).toBe("Locked");
-		expect(result.card?.tiles[0]?.value).toBe(`22 ${expectation.collateralSymbol}`);
+		// Round-1 fold item 16: the dialog's card IS `View.PnlCard`, so the tiles
+		// are the shared set and the money is USD at the collateral's peg.
+		expect(result.card?.stats[0]?.label).toBe("Collateral locked");
+		expect(result.card?.stats[0]?.value).toBe("$22.00");
+		expect(result.card?.owner.initials.length).toBeGreaterThan(0);
+		expect(result.card?.dateLabel).toMatch(/^\d{1,2} \w{3} \d{4}$/);
 		console.log(
 			[
 				`[record sell ${fill.hash.slice(0, 12)}] stored standalone`,
@@ -352,7 +356,7 @@ describeLive("recordTrade against decoded Base production fills", () => {
 				`  premium   ${row.premium} fees ${row.fees}`,
 				`  collateral ${row.collateral} = ${formatBaseUnits(BigInt(row.collateral), 6)} aBasUSDC`,
 				`  max loss  ${row.maximumLoss}  max payout ${row.maximumPayout}`,
-				`  share card tiles: ${result.card?.tiles.map((t) => `${t.label}=${t.value}`).join(", ")}`,
+				`  share card tiles: ${result.card?.stats.map((t: { label: string; value: string }) => `${t.label}=${t.value}`).join(", ")}`,
 			].join("\n"),
 		);
 	}, 60_000);

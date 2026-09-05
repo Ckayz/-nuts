@@ -207,7 +207,9 @@ export const btcNfp: Thesis = {
         ]
     },
     "backing": {
-        "creatorPositionId": "mock-creator-position-btc-nfp-4a2c",
+        // The rationale below links this very fill ("Here is the fill: /p/…"), so
+        // the id is the linked position's: one object, one card (round-1 fold item 8).
+        "creatorPositionId": "9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01",
         "economics": {
             "entryPremiumUsd": null,
             "entryFeesUsd": null,
@@ -582,7 +584,9 @@ export const ethPrints2500: Thesis = {
     "likedByViewer": false,
     "commentCount": 41
 };
-export const theses = [btcNfp, nfpSetup, solLoses100, ethCallsCheap, ethFusaka, ethPrints2500];
+/** The six posts written out above. `theses` below adds the promoted rail-only
+ *  posts, which are declared after the ranking fixtures they are derived from. */
+const writtenTheses = [btcNfp, nfpSetup, solLoses100, ethCallsCheap, ethFusaka, ethPrints2500];
 export const trending: TrendingItem[] = [
     {
         "slug": "btc-nfp-4a2c",
@@ -747,7 +751,7 @@ export const btcNfpDetail: ThesisDetail = {
     "participantCount": 40,
     "participants": [
         {
-            "id": "mock-creator-position-btc-nfp-4a2c",
+            "id": "9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01",
             "thesisId": "btc-nfp-4a2c",
             "userId": "mock-user-merkle_mike",
             "role": "creator",
@@ -988,28 +992,26 @@ function bareDetail(thesis: Thesis, settlementLabel: string | null, comments: Co
 }
 // EXAMPLE DATA: complete the rail-only posts using their existing headline and
 // creator. No structure, fill or economics is inferred from a rail summary.
-const railOnlyTheses: Thesis[] = trending.filter(item => !theses.some(thesis => thesis.slug === item.slug)).map(item => {
+//
+// Round-1 fold item 4: the Trending / Ending / Settled pills now filter the POST
+// feed, so a thesis that existed only as a ranking summary would silently drop
+// out of the product. These are appended to `theses` below and are ordinary
+// posts everywhere.
+const railOnlyTheses: Thesis[] = trending.filter(item => !writtenTheses.some(thesis => thesis.slug === item.slug)).map(item => {
     const creator = allCreators.find(creator => creator.handle === item.creatorHandle);
     if (!creator) throw new Error(`Missing example creator: ${item.creatorHandle}`);
     return { ...nfpSetup, id: item.slug, slug: item.slug, creatorUserId: creator.id, creator,
         thesis: { ...nfpSetup.thesis, id: item.slug, headline: item.headline, rationale: null, direction: null },
         likes: 0, commentCount: 0 };
 });
+export const theses: Thesis[] = [...writtenTheses, ...railOnlyTheses];
 // EXAMPLE following cohort, not a connected wallet's follow state.
 export const following = theses.filter(thesis => allCreators.slice(0, 2).some(creator => creator.id === thesis.creatorUserId));
 // TODO-OWNER: offline Top is the brief's example likes ordering.
 export const top = [...theses].sort((a, b) => b.likes - a.likes);
-// TODO-OWNER: example Ending uses the existing rail's remaining days.
-export const ending = [...trending].sort((a, b) => a.remainingDays - b.remainingDays);
-export const settled: TrendingItem[] = theses.filter(thesis => thesis.thesis.status === "settled").flatMap(thesis => {
-    const pnl = thesis.backing?.economics.finalPnlUsd;
-    if (pnl == null) return [];
-    return [{
-    slug: thesis.slug, underlyingAsset: thesis.market?.underlyingAsset ?? "", headline: thesis.thesis.headline,
-    creatorHandle: thesis.creator.handle, remainingDays: 0,
-    estimatedPnlUsd: pnl, bullPct: thesis.backing?.bull.pct ?? 0,
-}];
-});
+// The Ending and Settled summary lists are gone with the ranking rail (round-1
+// fold item 4): the pills now filter the POST feed and `lib/page-data.ts` ranks
+// the posts above with the SAME `rankTheses` rule the database reads use.
 export const thesisDetails: ThesisDetail[] = [
     btcNfpDetail,
     ...railOnlyTheses.map(thesis => bareDetail(thesis, null)),

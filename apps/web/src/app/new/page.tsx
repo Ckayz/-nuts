@@ -29,6 +29,11 @@ export default async function NewThesisPage({
 		<div className="wrap">
 			<main className="compose stack lg">
 				<Composer {...data} />
+				{/* The mockup puts this line OUTSIDE the card, centred under it. */}
+				<p className="mut compose-foot">
+					A thesis is text first. Tag a market if you want, link one of your positions if
+					you have one — the verified badge only appears once your own fill confirms.
+				</p>
 			</main>
 		</div>
 	);

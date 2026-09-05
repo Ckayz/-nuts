@@ -15,7 +15,8 @@ import { useActionState, useState } from "react";
 import { Textarea } from "@nuts/ui/components/textarea";
 import { TodoOwner } from "@/components/primitives";
 import { TradeCards } from "@/components/feed/trade-card";
-import type { TradeCard } from "@/lib/display-types";
+import type { PnlCard } from "@/lib/display-types";
+import type { AssetTag } from "@/lib/thesis/composer-data";
 import { publishPostFromForm } from "@/lib/thesis/actions";
 import type { PublishFormState } from "@/lib/thesis/form-state";
 import { extractTradeLinks } from "@/lib/thesis/links";
@@ -39,14 +40,14 @@ export function Composer({
 	signedIn,
 	databaseMode,
 }: {
-	/** Tickers offered as tag pills; they come from live book data, never a list. */
-	assets: string[];
+	/** Tag pills; they come from live book data, never a hardcoded list. */
+	assets: AssetTag[];
 	/** `?asset=` from the URL, already validated; null when absent. */
 	presetAsset: string | null;
 	/** `?link=` turned into rationale text, so the card unfurls immediately. */
 	presetRationale: string;
 	/** Cards for the positions `presetRationale` links, resolved server-side. */
-	previewCards: TradeCard[];
+	previewCards: PnlCard[];
 	signedIn: boolean;
 	databaseMode: boolean;
 }) {
@@ -57,7 +58,7 @@ export function Composer({
 	// The preview only needs to know WHETHER the text still links the position
 	// the page resolved; it never resolves anything itself.
 	const linked = new Set(extractTradeLinks(rationale));
-	const cards = previewCards.filter((card) => linked.has(card.positionId));
+	const cards = previewCards.filter((card) => linked.has(card.id));
 
 	const message = state.error === null ? null : (MESSAGES[state.error] ?? state.error);
 	const disabled = pending || !signedIn || !databaseMode;
@@ -67,7 +68,9 @@ export function Composer({
 			<div className="card-h"><h3>New thesis</h3><span className="x">Text is required. A trade is optional.<TodoOwner /></span></div>
 			<div className="field compose-field">
 				<span className="av av-40 av-asset compose-avatar" aria-hidden="true">{signedIn ? "•" : "?"}</span>
-				<label className="lbl" htmlFor="post-headline">
+				{/* The mockup shows the text itself, not a label above it; the field
+				    keeps its accessible name for a screen reader. */}
+				<label className="lbl lbl-hidden" htmlFor="post-headline">
 					What's your read?
 				</label>
 				<Textarea
@@ -112,7 +115,7 @@ export function Composer({
 				<span className="lbl">Tag a market (optional)</span>
 				<input type="hidden" name="taggedAsset" value={tag ?? ""} />
 				<div className="pills">
-					{assets.map((asset) => (
+					{assets.map(({ asset, name }) => (
 						<button
 							key={asset}
 							className="pill"
@@ -120,7 +123,7 @@ export function Composer({
 							aria-pressed={tag === asset}
 							onClick={() => setTag(tag === asset ? null : asset)}
 						>
-							<span className="av av-asset" aria-hidden="true">{asset}</span>{asset}
+							<span className="av av-asset" aria-hidden="true">{asset}</span>{name}
 						</button>
 					))}
 				</div>
@@ -152,10 +155,6 @@ export function Composer({
 				{message}
 			</p>
 
-			<span className="mut compose-note">
-				A post is text. It shows the verified badge only after your own fill on the
-				market page confirms onchain.
-			</span>
 		</form>
 	);
 }

@@ -40,44 +40,6 @@
 	color: var(--accent-lift);
 }
 
-/* The compact size used inside a feed post. Same card, same values, tightened —
-   nothing that changes what the number means is dropped. */
-.frame.compact {
-	padding: 12px 12px 9px;
-}
-.frame.compact .sc {
-	padding: 14px 15px 13px;
-	border-radius: var(--r-panel);
-}
-.frame.compact .sc-name {
-	font-size: 15px;
-}
-.frame.compact .sc-inst {
-	margin-top: 14px;
-}
-.frame.compact .sc-pnl b {
-	font-size: 28px;
-}
-.frame.compact .sc-pnl span {
-	font-size: 14px;
-}
-.frame.compact .sc .tiles {
-	margin-top: 14px;
-	padding-top: 13px;
-}
-.frame.compact .sc .tile b {
-	font-size: 14px;
-}
-.frame.compact .frame-f {
-	padding: 9px 4px 1px;
-}
-.frame.compact .frame-f .wm {
-	font-size: 13px;
-}
-.frame.compact .frame-f .fine {
-	font-size: 11.5px;
-}
-
 /* ---------- dialog additions (mockup lines 1044-1047, inline there) ---------- */
 .dlg-acts {
 	display: flex;
@@ -178,28 +140,6 @@
 		overflow: visible;
 		text-overflow: clip;
 	}
-}
-
-/* Person avatars come from `components/primitives.tsx`'s `Avatar`, which the
-   shell lane owns. It emits the size as a class (`.av-34` by default) and the
-   colour as one of the mockup's eight `.a-*` tones; these two rules set the
-   sizes this card and this page need without depending on the prop shape.
-   MERGE: once the shell's `Avatar` (with its numeric `size`) is in this tree,
-   pass `size={40}` / `size={30}` and delete both rules. */
-.sc-top .av {
-	width: 40px;
-	height: 40px;
-	font-size: 14px;
-}
-.frame.compact .sc-top .av {
-	width: 30px;
-	height: 30px;
-	font-size: 11.5px;
-}
-.owner-row .av {
-	width: 40px;
-	height: 40px;
-	font-size: 14px;
 }
 
 /* The hero figure when there is no number to show. At 48px an em dash reads as

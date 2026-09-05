@@ -10,15 +10,10 @@
  * share card as the whole body, then "Copy link" and "Write a post about it"
  * side by side.
  *
- * WHY NOT `PnlCard`: the brief asks for the position card here if its view type
- * can be built from the fill result. It cannot. `FillCard` (`lib/trade/types.ts`
- * 158-176, produced by `lib/trade/record.ts:231`) carries a truncated wallet and
- * three label/value tiles; `PnlCard` (`lib/display-types.ts` 322-354) needs a
- * whole `Creator`, a `dateLabel`, a `DisplayAmount` P&L, a `PnlBasis` and a
- * verification flag, and none of them exists at the moment a fill confirms.
- * Widening `FillCard` means editing `src/lib/trade`, which is outside this
- * round's fence. So the same markup is rendered from what the fill result does
- * have, and the gap is in the report.
+ * The body is the SAME `PnlCard` share card `/p/[id]` renders (round-1 fold
+ * item 16): `lib/trade/record.ts` now builds a `View.PnlCard` through the one
+ * builder in `lib/position/view.ts`, so the dialog gained the avatar, the date
+ * and the shared status vocabulary instead of a hand-copied lookalike.
  *
  * `packages/ui/src/components` has no dialog (checked 2026-09-05: attachment,
  * bubble, button, card, checkbox, dropdown-menu, empty, input-group, input,
@@ -29,6 +24,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { PnlCard } from "@/components/position/pnl-card";
 import { TodoOwner } from "@/components/primitives";
 import type { FillCard } from "@/lib/trade/types";
 import "@/styles/position.css";
@@ -90,9 +86,6 @@ export function FillDialog({
 			.catch(() => setCopied(false));
 	}, [card.positionPath]);
 
-	const tone = card.pnlClass;
-	const arrow = tone === "bull" ? "▲" : tone === "bear" ? "▼" : null;
-
 	return (
 		// The backdrop click is a convenience; Escape and the close button are the
 		// keyboard paths, and both are wired above.
@@ -114,51 +107,11 @@ export function FillDialog({
 					</button>
 				</div>
 
-				<div className="frame">
-					<div className="sc">
-						<div className="sc-top">
-							{/* No avatar and no date: the fill result carries a truncated
-							    wallet and nothing else about its owner. See the note above. */}
-							<div style={{ minWidth: 0 }}>
-								<div className="sc-name num">{card.ownerLabel}</div>
-								<span className="chip">{card.statusLabel}</span>
-							</div>
-						</div>
-						<div className="sc-inst">
-							<b>{card.instrumentLabel}</b>
-						</div>
-						<div className="sc-strikes">{card.sideLabel} · Base · Thetanuts OptionBook</div>
-						<div className="sc-pnl">
-							<b className={`${tone} num${card.pnlLabel === "—" ? " none" : ""}`}>{card.pnlLabel}</b>
-							{card.pnlPercentLabel === "—" ? null : (
-								<span className="num">
-									({arrow === null ? null : <em className={tone}>{arrow} </em>}
-									{card.pnlPercentLabel})
-								</span>
-							)}
-						</div>
-						<p className="sc-basis">
-							Live P&amp;L needs a mark for this option and nothing published one at the moment this fill
-							confirmed, so no number is shown rather than a guess. Mark source
-							<TodoOwner />
-						</p>
-						<div className="tiles">
-							{card.tiles.map((tile) => (
-								<span className="tile" key={tile.label}>
-									<i>{tile.label}</i>
-									<b className="num">{tile.value}</b>
-								</span>
-							))}
-						</div>
-						<a className="sc-tx num" href={txHref} rel="noreferrer" target="_blank">
-							{txLabel}
-						</a>
-					</div>
-					<div className="frame-f">
-						<span className="wm">thesis.fun</span>
-						<span className="fine">Verified onchain · Base</span>
-					</div>
-				</div>
+				<PnlCard card={card} />
+
+				<a className="sc-tx num dlg-tx" href={txHref} rel="noreferrer noopener" target="_blank">
+					{txLabel}
+				</a>
 
 				<div className="dlg-acts">
 					<button type="button" className="btn sec" onClick={copy}>

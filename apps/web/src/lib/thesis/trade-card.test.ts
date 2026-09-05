@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import * as display from "../display";
+import { backingCard, linkedPositionCard, withCards } from "../position/view";
 import type * as Domain from "@/types";
 import { attachLinkedPositions, enrichWithTradeLinks, linkedPositionIds } from "./enrich";
 
@@ -39,45 +40,112 @@ function post(rationale: string | null): Domain.Thesis {
 	};
 }
 
-test("tradeCard maps an open position: signed P&L, percent of risked, three tiles", () => {
-	const card = display.tradeCard({ position: position(), owner });
+test("linkedPositionCard maps an open position through the ONE card builder", () => {
+	const card = linkedPositionCard({ position: position(), owner });
 	expect(card).toMatchObject({
-		positionId: P1,
-		href: `/p/${P1}`,
-		statusLabel: "INDEXED",
-		settled: false,
+		id: P1,
+		// Round-1 fold item 7: the chip is the shared vocabulary, never the raw
+		// status uppercased ("INDEXED" used to reach users here).
+		statusLabel: "Open",
+		statusTone: "live",
 		instrumentLabel: "BTC",
 		side: "bull",
 		sideLabel: "Bull",
 		pnlLabel: "Live P&L",
-		pnlPct: { value: "+61.2%", basis: "of risked" },
+		pnlPctLabel: "+61.2% of max loss",
+		// Round-1 fold item 10: the date the builder has, not "@owner".
+		dateLabel: "4 Sep 2026",
 	});
-	expect(card.pnlUsd.signed).toBe("+$612");
-	expect(card.pnlUsd.pnlClass).toBe("bull");
+	expect(card.pnl.signed).toBe("+$612");
+	expect(card.pnl.pnlClass).toBe("bull");
+	// Round-1 fold item 11: ONE tile set, produced by the card builder.
 	expect(card.stats).toEqual([
-		{ label: "Risked", value: "$1,000" },
-		{ label: "Premium", value: "$1,000" },
-		{ label: "Max payout", value: "$4,612" },
+		{ label: "Premium paid", value: "$1,000.00" },
+		{ label: "Max loss", value: "$1,000.00" },
+		{ label: "Max payout", value: "$4,612.00" },
 	]);
 });
 
+test("the backing card and a linked card of the same fill agree", () => {
+	const backed: Domain.Thesis = {
+		...post(null),
+		backing: {
+			creatorPositionId: P1,
+			economics: position().economics,
+			verification: { transactionHash: null, optionAddress: null, confirmedOnchain: true },
+			pooledUsd: null,
+			bull: { pct: 0, count: 0, amountUsd: null, signed: false },
+			bear: { pct: 0, count: 0, amountUsd: null, signed: false },
+			mock: {
+				settledAgoMinutes: null, settledWinner: null, maxPayoutMultiple: null,
+				premiumPerContractUsd: null, payoutPerContractUsd: null, transactionFragment: null,
+			},
+		},
+		market: { chainId: 8453, underlyingAsset: "BTC", currentSpotPriceUsd: null, expiryAt: "2026-09-11T08:00:00Z" },
+		structure: {
+			productType: "put spread", isCall: false, isLong: true,
+			strikesUsd: ["78000", "74000"], collateralSymbol: null, contracts: null,
+			legs: [],
+		},
+	};
+	const card = backingCard(backed)!;
+	const linked = linkedPositionCard({ position: position(), owner });
+	expect(card.pnl.signed).toBe(linked.pnl.signed);
+	expect(card.stats).toEqual(linked.stats);
+	expect(card.statusLabel).toBe("Open");
+	// The post knows its structure, so the card carries the mockup's split lines.
+	expect(card.instrumentLabel).toBe("BTC put spread");
+	expect(card.strikesLabel).toBe("78,000 / 74,000 P");
+	expect(card.expiryLabel).toBe("11 Sep");
+	expect(card.expiryFullLabel).toBe("11 Sep 26 08:00 UTC");
+});
+
+test("a post that links the position that backs it renders ONE card", () => {
+	const backed: Domain.Thesis = {
+		...post(`my trade: /p/${P1}`),
+		backing: {
+			creatorPositionId: P1,
+			economics: position().economics,
+			verification: { transactionHash: null, optionAddress: null, confirmedOnchain: true },
+			pooledUsd: null,
+			bull: { pct: 0, count: 0, amountUsd: null, signed: false },
+			bear: { pct: 0, count: 0, amountUsd: null, signed: false },
+			mock: {
+				settledAgoMinutes: null, settledWinner: null, maxPayoutMultiple: null,
+				premiumPerContractUsd: null, payoutPerContractUsd: null, transactionFragment: null,
+			},
+		},
+		linkedPositions: [
+			{ position: position({ id: P1 }), owner },
+			{ position: position({ id: P2 }), owner },
+		],
+	};
+	const view = withCards(display.thesis(backed), backed);
+	expect(view.backingCard?.id).toBe(P1);
+	// P1 is the backing fill and is not drawn twice; P2 is somebody's other trade.
+	expect(view.tradeCards?.map((card) => card.id)).toEqual([P2]);
+});
+
 test("a settled position reads its final P&L and says Result", () => {
-	const card = display.tradeCard({
+	const card = linkedPositionCard({
 		position: position({
 			status: "settled",
 			economics: { ...position().economics, estimatedPnlUsd: "612", finalPnlUsd: "-250" },
 		}),
 		owner,
 	});
-	expect(card.settled).toBe(true);
+	expect(card.statusLabel).toBe("Settled");
+	expect(card.statusTone).toBe("settled");
 	expect(card.pnlLabel).toBe("Result");
-	expect(card.pnlUsd.signed).toBe("−$250");
-	expect(card.pnlUsd.pnlClass).toBe("bear");
-	expect(card.pnlPct).toEqual({ value: "−25.0%", basis: "of risked" });
+	expect(card.pnl.signed).toBe("−$250");
+	expect(card.pnl.pnlClass).toBe("bear");
+	expect(card.pnlPctLabel).toBe("−25.0% of max loss");
+	// PRD 14: a settled row never promotes the estimate into the result.
+	expect(card.basis).toBe("settled");
 });
 
 test("missing figures render as em dashes and no percent, never as zero", () => {
-	const card = display.tradeCard({
+	const card = linkedPositionCard({
 		position: position({
 			side: "counter",
 			economics: {
@@ -88,28 +156,28 @@ test("missing figures render as em dashes and no percent, never as zero", () => 
 		}),
 		owner,
 	});
-	expect(card.pnlUsd.signed).toBe("—");
-	expect(card.pnlPct).toBeNull();
+	expect(card.pnl.signed).toBe("—");
+	expect(card.pnlPctLabel).toBeNull();
 	expect(card.sideLabel).toBe("Bear");
 	expect(card.side).toBe("bear");
-	expect(card.stats.map((stat) => stat.value)).toEqual(["—", "—", "—"]);
+	expect(card.stats.map((stat: { value: string }) => stat.value)).toEqual(["—", "—", "—"]);
 });
 
 test("a zero risked base yields no percent rather than a division", () => {
-	const card = display.tradeCard({
+	const card = linkedPositionCard({
 		position: position({ economics: { ...position().economics, maximumLossUsd: "0" } }),
 		owner,
 	});
-	expect(card.pnlPct).toBeNull();
-	expect(card.pnlUsd.signed).toBe("+$612");
+	expect(card.pnlPctLabel).toBeNull();
+	expect(card.pnl.signed).toBe("+$612");
 });
 
 test("a zero P&L is signless", () => {
-	const card = display.tradeCard({
+	const card = linkedPositionCard({
 		position: position({ economics: { ...position().economics, estimatedPnlUsd: "0" } }),
 		owner,
 	});
-	expect(card.pnlPct).toEqual({ value: "0.0%", basis: "of risked" });
+	expect(card.pnlPctLabel).toBe("0.0% of max loss");
 });
 
 test("linkedPositionIds collects across posts, in order, without duplicates", () => {
@@ -130,7 +198,7 @@ test("an unresolved link yields no card and leaves the post untouched", () => {
 	const original = post(`/p/${P1}`);
 	const [attached] = attachLinkedPositions([original], new Map());
 	expect(attached).toBe(original);
-	expect(display.thesis(attached!).tradeCards).toEqual([]);
+	expect(withCards(display.thesis(attached!), attached!).tradeCards).toEqual([]);
 });
 
 test("cards follow the order the text links them, not the lookup order", async () => {
@@ -141,7 +209,7 @@ test("cards follow the order the text links them, not the lookup order", async (
 		]);
 	const [enriched] = await enrichWithTradeLinks([post(`/p/${P2} then /p/${P1}`)], lookup);
 	expect(enriched?.linkedPositions?.map((entry) => entry.position.id)).toEqual([P2, P1]);
-	expect(display.thesis(enriched!).tradeCards?.map((card) => card.positionId)).toEqual([P2, P1]);
+	expect(withCards(display.thesis(enriched!), enriched!).tradeCards?.map((card) => card.id)).toEqual([P2, P1]);
 });
 
 test("a post with no links never calls the lookup", async () => {
@@ -164,14 +232,16 @@ test("display.thesis turns the rationale into tokens with a clickable link", () 
 });
 
 test("a post with no rationale carries no tokens and no cards", () => {
-	const view = display.thesis(post(null));
+	const source = post(null);
+	const view = withCards(display.thesis(source), source);
 	expect(view.noteTokens).toBeUndefined();
 	expect(view.tradeCards).toEqual([]);
+	expect(view.backingCard).toBeNull();
 });
 
 test("an absolute link only unfurls when the origin is supplied", () => {
 	const text = `https://thesis.fun/p/${P1}`;
-	expect(display.thesis(post(text)).tradeCards).toEqual([]);
+	expect(withCards(display.thesis(post(text)), post(text)).tradeCards).toEqual([]);
 	expect(linkedPositionIds([post(text)])).toEqual([]);
 	expect(linkedPositionIds([post(text)], "https://thesis.fun")).toEqual([P1]);
 });

@@ -4,14 +4,16 @@ import { notFound, permanentRedirect } from "next/navigation";
 
 import { CreatorStats } from "@/components/creator/creator-stats";
 import Link from "next/link";
-import { Avatar } from "@/components/primitives";
+import { Avatar, TodoOwner } from "@/components/primitives";
+import { Leaderboard } from "@/components/creator/leaderboard";
 import { LikeButton } from "@/components/feed/like-button";
 import { CommentIcon, ShareIcon } from "@/components/icons";
 import { PositionRows } from "@/components/thesis/position-rows";
 import { ProfileTabs } from "@/components/thesis/profile-tabs";
-import { PagesFrame } from "@/components/thesis/pages-frame";
+import { FeedRail } from "@/components/shell/feed-rail";
+import { PageFrame } from "@/components/shell/page-frame";
 import "@/styles/profile.css";
-import { creatorPageData } from "@/lib/page-data";
+import { creatorPageData, discoverData, railTheses } from "@/lib/page-data";
 
 /**
  * Rendered per request, never from a build-time cache. Same reason as
@@ -53,9 +55,14 @@ export default async function CreatorPage({
 	if (!data) notFound();
 	const { creator, callouts, positions } = data;
 
- return <PagesFrame>
+ const [rail, discover] = await Promise.all([railTheses(), discoverData()]);
+ return <PageFrame left={<FeedRail posts={rail} />} right={<section className="card" id="top-traders">
+  <div className="card-h"><h3>Follow top traders</h3><span className="x">1W</span></div>
+  <Leaderboard entries={discover.leaderboard} signedIn={discover.signedIn} databaseMode={discover.databaseMode} />
+  <div className="card-f">P&amp;L is 1W, from onchain fills and settlements. Ranking formula<TodoOwner /></div>
+ </section>}>
   <CreatorStats creator={creator} signedIn={data.signedIn} databaseMode={data.databaseMode} following={data.following} self={data.self} profile />
   {data.isOwner && data.editableProfile ? <ProfileEditor key={JSON.stringify(data.editableProfile)} profile={data.editableProfile} walletAddress={data.editableProfile.walletAddress} /> : null}
-  <ProfileTabs positions={<PositionRows rows={positions} />} posts={<section className="card profile-posts"><div className="card-h"><h3>Recent posts</h3><span className="x num">{callouts.length}</span></div><div className="card-b">{callouts.map(t => <article className="post" key={t.slug}><Avatar initials={t.creator.initials} size="s" /><div className="post-main"><div className="p-head"><span className="p-name">{t.creator.displayName}</span><span className="p-time">{t.postedLabel}</span>{t.backing ? <span className="chip flat">Backed</span> : null}</div><p className="p-body"><Link href={`/t/${t.slug}`}>{t.headline}</Link></p><div className="p-acts"><LikeButton thesisId={t.id} likes={t.likes} liked={t.likedByViewer} signedIn={data.signedIn} databaseMode={data.databaseMode} /><Link className="act" href={`/t/${t.slug}`} aria-label={`Comments, ${t.commentCount}`}><CommentIcon />{t.commentCount}</Link><button className="act" type="button"><ShareIcon />Share</button></div></div></article>)}</div></section>} />
- </PagesFrame>;
+  <ProfileTabs positions={<PositionRows rows={positions} />} posts={<section className="card profile-posts"><div className="card-h"><h3>Recent posts</h3><span className="x num">{callouts.length}</span></div><div className="card-b">{callouts.map(t => <article className="post" key={t.slug}><Avatar initials={t.creator.initials} size="s" /><div className="post-main"><div className="p-head"><span className="p-name">{t.creator.displayName}</span><span className="p-time">{t.postedLabel}</span>{t.backingCard ? <span className="chip">Backed</span> : null}</div><p className="p-body"><Link href={`/t/${t.slug}`}>{t.headline}</Link></p><div className="p-acts"><LikeButton thesisId={t.id} likes={t.likes} liked={t.likedByViewer} signedIn={data.signedIn} databaseMode={data.databaseMode} /><Link className="act" href={`/t/${t.slug}`} aria-label={`Comments, ${t.commentCount}`}><CommentIcon />{t.commentCount}</Link><button className="act" type="button"><ShareIcon />Share</button></div></div></article>)}</div></section>} />
+ </PageFrame>;
 }

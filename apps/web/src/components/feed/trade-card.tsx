@@ -1,5 +1,5 @@
-import { Avatar, Chip } from "@/components/primitives";
-import type { TextToken, TradeCard as TradeCardView } from "@/lib/display-types";
+import { PnlCard } from "@/components/position/pnl-card";
+import type { PnlCard as PnlCardView, TextToken } from "@/lib/display-types";
 
 /**
  * A post's rationale with its `/p/<uuid>` links left clickable.
@@ -45,74 +45,22 @@ export function PostText({
 	);
 }
 
-/** The coloured arrow beside a percent; the number itself stays neutral. */
-export function PnlArrow({ pnlClass }: { pnlClass: string }) {
-	if (pnlClass === "") return null;
-	return <em className={pnlClass}>{pnlClass === "bear" ? "▼" : "▲"}</em>;
-}
-
 /**
- * The compact trade card a post's `/p/<uuid>` link unfurls into, X-style: the
- * link stays in the text and the position it points at renders as a clickable
- * card underneath (owner 2026-09-05).
+ * The cards a post's `/p/<uuid>` links unfurl into, X-style: the link stays in
+ * the text and the position it points at renders as a clickable card underneath
+ * (owner 2026-09-05).
  *
- * Shape is the mockup's `.tcard` (docs/mockups/thesis-fun-mockup.html): asset
- * avatar, instrument, status chip and date on top; one sub-line; the big signed
- * P&L with its percent; three stat tiles. No chart and no price line —
- * Thetanuts publishes no price history and the owner removed the charts.
- *
- * DIVERGENCE, reported: the mockup's top-right slot is the expiry date, and
- * `View.TradeCard` carries no date. It shows the position's OWNER instead,
- * which the shape does carry and which matters here — a post can link somebody
- * else's position.
+ * The card itself is `components/position/pnl-card.tsx` at its compact size —
+ * ONE component and ONE builder for every card in the product (round-1 fold
+ * item 9), so an unfurled position and its own `/p/[id]` page cannot state
+ * different numbers about the same fill. Renders nothing when there are none.
  */
-export function TradeCard({ card }: { card: TradeCardView }) {
-	return (
-		<a
-			className="tcard"
-			href={card.href}
-			aria-label={`Position by ${card.owner.displayName}: ${card.instrumentLabel}, ${card.pnlLabel} ${card.pnlUsd.signed}`}
-		>
-			<div className="tc-top">
-				{/* The owner, not the asset: `View.TradeCard`'s instrument label IS
-				    the ticker, so an asset avatar beside it would print it twice —
-				    and an unfurled link can point at somebody else's position. */}
-				<Avatar initials={card.owner.initials} size={26} />
-				<span className="tc-inst">{card.instrumentLabel}</span>
-				<Chip flat={card.settled}>{card.statusLabel}</Chip>
-				<span className="tc-date">@{card.owner.handle}</span>
-			</div>
-			<div className="tc-sub">
-				{card.sideLabel} · {card.pnlLabel}
-			</div>
-			<div className="tc-pnl">
-				<b className={`num ${card.pnlUsd.pnlClass}`}>{card.pnlUsd.signed}</b>
-				{card.pnlPct === null ? null : (
-					<span className="num">
-						<PnlArrow pnlClass={card.pnlUsd.pnlClass} /> {card.pnlPct.value}{" "}
-						<span className="mut">{card.pnlPct.basis}</span>
-					</span>
-				)}
-			</div>
-			<div className="tiles">
-				{card.stats.map((stat) => (
-					<span className="tile" key={stat.label}>
-						<i>{stat.label}</i>
-						<b className="num">{stat.value}</b>
-					</span>
-				))}
-			</div>
-		</a>
-	);
-}
-
-/** The linked cards under a post's text; renders nothing when there are none. */
-export function TradeCards({ cards }: { cards: readonly TradeCardView[] | undefined }) {
+export function TradeCards({ cards }: { cards: readonly PnlCardView[] | undefined }) {
 	if (cards === undefined || cards.length === 0) return null;
 	return (
 		<>
 			{cards.map((card) => (
-				<TradeCard key={card.positionId} card={card} />
+				<PnlCard key={card.id} card={card} compact href />
 			))}
 		</>
 	);

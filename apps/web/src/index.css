@@ -207,7 +207,13 @@ em{font-style:normal}
 .p-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;line-height:1.2}
 .p-name{font-size:15px;font-weight:700;letter-spacing:-.01em}
 .p-name:hover{color:var(--accent-lift)}
-.p-handle,.p-time{font-size:13px;color:var(--muted);font-weight:500}
+/* Adaptation: a user who has not set a handle is routed by their WALLET ADDRESS
+   (lib/data/identity.ts `creatorHandle`), so `@0x…` is a 43-character unbreakable
+   token. Without these two the byline pushed the whole document sideways in
+   database mode (measured on /m/btc at 390px: documentElement.scrollWidth 419
+   before, 390 after). `min-width:0` because a flex item's automatic minimum is
+   its min-content width. */
+.p-handle,.p-time{font-size:13px;color:var(--muted);font-weight:500;min-width:0;overflow-wrap:anywhere}
 .p-body{font-size:16px;line-height:1.5;max-width:62ch;font-weight:400}
 .p-body .second{display:block;margin-top:8px;color:#c9c9d4}
 .p-acts{display:flex;align-items:center;gap:4px;margin-top:2px;flex-wrap:wrap}
@@ -253,6 +259,10 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
   background:var(--accent-tint);color:var(--accent-lift)}
 .chip.flat{background:var(--surface);color:var(--muted);border:1px solid var(--line)}
 .tc-pnl{margin-top:14px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+/* Adaptation: one sentence saying what kind of number the figure is. An estimate
+   must never read as a settled result (PRD 14), so the basis is on the card at
+   BOTH sizes; the compact card gets the short form. */
+.tc-basis{margin-top:6px;font-size:12px;color:var(--muted);font-weight:500}
 .tc-pnl b{font-size:28px;font-weight:800;letter-spacing:-.025em;line-height:1.05}
 .tc-pnl span{font-size:14px;font-weight:700}
 .tiles{margin-top:14px;padding-top:13px;border-top:1px solid var(--line);
@@ -274,6 +284,9 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 .sc-strikes{margin-top:6px;font-size:13px;color:var(--muted);font-weight:500}
 .sc-pnl{margin-top:16px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .sc-pnl b{font-size:48px;font-weight:800;letter-spacing:-.035em;line-height:1}
+/* The compact card's figure is the mockup's `.tc-pnl` size; the "no number"
+   state is set at the sub-line's size at both sizes (see `.sc-pnl b.none`). */
+.tc-pnl b.none{font-size:15px;font-weight:700;color:var(--muted);letter-spacing:0}
 .sc-pnl span{font-size:19px;font-weight:700;color:var(--text)}
 .sc .tiles{margin-top:20px;padding-top:16px}
 .sc .tile b{font-size:16px}
@@ -374,6 +387,9 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
   animation:rise .2s var(--ease)}
 .dlg-h{display:flex;align-items:center;gap:10px;padding:2px 4px 16px}
 .dlg-h h3{font-size:16px}
+/* The fill's transaction, under the card rather than inside it: the card is the
+   shared `PnlCard` and this receipt belongs to the dialog. */
+.dlg-tx{display:block;margin-top:12px;text-align:center}
 .dlg-x{margin-left:auto;width:32px;height:32px;border-radius:50%;color:var(--muted);
   display:grid;place-items:center;font-size:18px;transition:background-color .16s var(--ease),color .16s var(--ease)}
 .dlg-x:hover{background:var(--surface2);color:var(--text)}
@@ -400,15 +416,6 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 .tx:hover{color:var(--accent-lift)}
 .acts{display:inline-flex;align-items:center;gap:10px;font-size:12.5px;font-weight:600;color:var(--muted)}
 .acts:hover{color:var(--text)}
-/* RETIRED by the round-1 mockup (it draws no bars; colour is for money only).
-   Kept neutral so `components/primitives.tsx`'s Bar / SplitBar do not render as
-   invisible artefacts on `/t/[slug]`, which another lane rebuilds this round.
-   Delete both the rules and the components with that page. */
-.sent{display:flex;flex-direction:column;gap:6px;margin-top:4px}
-.row2{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
-.bar{height:4px;border-radius:2px;overflow:hidden;background:var(--line)}
-.bar i{display:block;height:100%;border-radius:2px;background:var(--muted)}
-
 /* ---------- responsive ---------- */
 @media (max-width:1180px){
   .cols.feed,.cols.page{grid-template-columns:264px minmax(0,1fr)}
@@ -421,7 +428,14 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
   .search{display:none}
   .wrap{padding:16px 14px 48px}
   .top{gap:12px;padding:0 14px}
-  .nav{padding:0 14px;gap:20px}
+  /* The mockup's mobile nav scrolls horizontally inside `.nav`, which keeps the
+     DOCUMENT at the viewport width (measured: /m/btc at 390px, scrollWidth 390 =
+     clientWidth 390). But `Create` then sits past the right edge and has to be
+     found by scrolling, so the row is tightened here until all five items fit.
+     Measured at 390px after this rule: `.nav` scrollWidth 362 = clientWidth 362,
+     i.e. nothing is hidden. */
+  .nav{padding:0 12px;gap:14px}
+  .nav a.btn{padding:0 11px}
   .post{padding:16px 16px;border-radius:16px;gap:12px}
   .p-body{font-size:15.5px}
   .sc-pnl b{font-size:36px}

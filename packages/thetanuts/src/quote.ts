@@ -26,7 +26,7 @@ export function quoteFill({ client, order, budget, referrer, now }: QuoteFillPar
 
 export interface SellQuoteClient {
   readonly utils: Pick<ThetanutsClient["utils"], "calculateCollateral">;
-  readonly chainConfig: Pick<ThetanutsClient["chainConfig"], "collateralTokens">;
+  readonly chainConfig: Pick<ThetanutsClient["chainConfig"], "tokens">;
   readonly optionBook: Pick<ThetanutsClient["optionBook"], "previewFillOrder" | "calculateMaxContracts">;
 }
 export interface QuoteSellFillParams {
@@ -46,11 +46,9 @@ export interface SellFillQuote extends Omit<FillQuote, "premium"> {
   readonly premiumNet: bigint;
 }
 
-/** Implementation collateral is separate from the SDK capacity cap.
- * Only single-strike PUT collateral and the specified RANGER inner-width formula
- * have supplied decoded-fill evidence. RANGER still requires opt-in: the supplied
- * fill was taker BUY, not a verification of the complete taker-SELL path.
- * Contract units and on-chain rounding remain UNVERIFIED outside supplied fills.
+/** Only PHYSICAL_PUT + Base aBasUSDC has supplied decoded taker-SELL evidence.
+ * Other pairs require opt-in; contract units and rounding outside supplied fills
+ * remain UNVERIFIED. The SDK collateral helper is separate from its capacity cap.
  */
 export function quoteSellFill({ client, order, collateralBudget, referrer, now, allowUnverifiedStructureCollateral }: QuoteSellFillParams): SellFillQuote {
   if (takerSide(order) !== "sell") throw new ThetanutsLogicError("INVALID_SIDE", "Sell quotes require a taker-sell order");
@@ -59,50 +57,41 @@ export function quoteSellFill({ client, order, collateralBudget, referrer, now, 
   if (order.order.expiry <= timestamp || BigInt(raw.orderExpiryTimestamp) <= timestamp) throw new ThetanutsLogicError("ORDER_EXPIRED", "Option or signed order has expired");
   const info = getOptionImplementationInfo(8453, raw.implementation);
   const unverified = (message: string): never => { throw new ThetanutsLogicError("STRUCTURE_COLLATERAL_UNVERIFIED", message); };
-  if (!info) return unverified("Unknown implementation: no supported collateral formula");
+  const pair = `${info?.name ?? raw.implementation} + ${raw.collateral}`;
+  if (!info) throw new ThetanutsLogicError("STRUCTURE_UNSUPPORTED", `Unknown implementation: ${pair}`);
   const strikes = raw.strikes.map(BigInt);
   if (strikes.length !== info.numStrikes || strikes.some(strike => strike <= 0n)) throw new ThetanutsLogicError("INVALID_ORDER", "Implementation strike count or strike value is invalid");
-  const verifiedPut = info.type === "VANILLA" && info.name === "PUT" && info.numStrikes === 1 && !raw.isCall;
-  if (!verifiedPut && !allowUnverifiedStructureCollateral) return unverified("Structure collateral requires explicit unverified opt-in (including calls)");
-  const sorted = [...strikes].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+  const verified = info.name === "PHYSICAL_PUT" && !raw.isCall &&
+    raw.collateral.toLowerCase() === "0x4e65fe4dba92790696d040ac24aa414708f5c0ab";
+  if (!verified && !allowUnverifiedStructureCollateral) return unverified(`Unverified sell collateral pair: ${pair}`);
+  const decimals = Object.values(client.chainConfig.tokens).find(token => token.address.toLowerCase() === raw.collateral.toLowerCase())?.decimals;
+  if (decimals === undefined) throw new ThetanutsLogicError("STRUCTURE_UNSUPPORTED", `Missing SDK collateral decimals: ${pair}`);
+  // SDK 0.3.0 CollateralParams accepts PayoutType, not implementation names.
+  // Do not map inverse/physical calls to linear calls: their collateral differs.
+  const types: Readonly<Record<string, PayoutType>> = {
+    PHYSICAL_PUT: "put", PUT: "put", LINEAR_CALL: "call",
+    CALL_SPREAD: "call_spread", PUT_SPREAD: "put_spread",
+    CALL_FLY: "call_fly", PUT_FLY: "put_fly",
+    CALL_CONDOR: "call_condor", PUT_CONDOR: "put_condor",
+    IRON_CONDOR: "iron_condor", RANGER: "ranger",
+  };
+  const type = types[info.name];
+  if (!type) throw new ThetanutsLogicError("STRUCTURE_UNSUPPORTED", `No SDK bigint collateral mapping: ${pair}`);
+  const collateralFor = (numContracts: bigint): bigint => {
+    try {
+      return client.utils.calculateCollateral({ type, strikes, numContracts, priceDecimals: 8, sizeDecimals: decimals, collateralDecimals: decimals });
+    } catch (cause) {
+      throw new ThetanutsLogicError("STRUCTURE_UNSUPPORTED", `SDK rejected collateral for ${pair}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  };
   const scale = 100_000_000n;
-  let collateralPerContract: bigint;
-  if (info.type === "RANGER") {
-    if (raw.implementation.toLowerCase() !== "0x9980ec85bc6fe07340adb36c76fa093bb6d4fcbc" || info.numStrikes !== 4) return unverified("RANGER collateral is supported only for the supplied decoded implementation");
-    // VERIFIED formula only: 0xa2edb8… seller transfer 43,333,000.
-    // SDK utils uses twice the outer wing; do not substitute its capacity cap.
-    collateralPerContract = sorted[2]! - sorted[1]!;
-  } else if (info.name === "INVERSE_CALL" && info.type === "VANILLA") {
-    // SDK calculateCollateralRequired: one underlying per contract; bigint units.
-    const decimals = Object.values(client.chainConfig.collateralTokens).find(token => token.address.toLowerCase() === raw.collateral.toLowerCase())?.decimals;
-    if (decimals === undefined || decimals < 6) return unverified("Inverse call collateral token units are unsupported");
-    collateralPerContract = scale * 10n ** BigInt(decimals - 6);
-  } else if (info.name === "INVERSE_CALL_SPREAD") {
-    return unverified("Inverse spread collateral has no exact bigint SDK helper; unsupported even with opt-in");
-  } else {
-    const types: Record<string, { structure: string; payout: PayoutType }> = {
-      PUT: { structure: "VANILLA", payout: "put" },
-      LINEAR_CALL: { structure: "VANILLA", payout: "call" },
-      CALL_SPREAD: { structure: "SPREAD", payout: "call_spread" },
-      PUT_SPREAD: { structure: "SPREAD", payout: "put_spread" },
-      CALL_FLY: { structure: "BUTTERFLY", payout: "call_fly" },
-      PUT_FLY: { structure: "BUTTERFLY", payout: "put_fly" },
-      CALL_CONDOR: { structure: "CONDOR", payout: "call_condor" },
-      PUT_CONDOR: { structure: "CONDOR", payout: "put_condor" },
-      IRON_CONDOR: { structure: "IRON_CONDOR", payout: "iron_condor" },
-    };
-    const mapped = types[info.name];
-    if (!mapped || mapped.structure !== info.type) return unverified("Implementation has no supported bigint collateral helper");
-    // SDK utils.calculateCollateral, with equal size/collateral decimals, returns
-    // per-contract price units when numContracts=1e8. PUT_FLY requires descending.
-    collateralPerContract = client.utils.calculateCollateral({ type: mapped.payout, strikes: info.name === "PUT_FLY" ? [...sorted].reverse() : sorted, numContracts: scale, priceDecimals: 8, sizeDecimals: 6, collateralDecimals: 6 });
-  }
+  const collateralPerContract = collateralFor(scale);
   if (collateralPerContract <= 0n || order.order.price <= 0n) throw new ThetanutsLogicError("INVALID_ORDER", "Collateral divisor and price must be positive");
   const requested = collateralBudget * scale / collateralPerContract;
   const maxContracts = client.optionBook.calculateMaxContracts(order);
   const numContracts = requested < maxContracts ? requested : maxContracts;
   if (numContracts <= 0n) throw new ThetanutsLogicError("ZERO_CONTRACTS", "Collateral budget produces zero contracts");
-  const collateralRequired = numContracts * collateralPerContract / scale;
+  const collateralRequired = collateralFor(numContracts);
   if (collateralRequired === 0n) throw new ThetanutsLogicError("ZERO_COLLATERAL", "Nonzero contracts produce zero collateral");
   const premiumGross = numContracts * order.order.price / 100_000_000n;
   if (premiumGross === 0n) throw new ThetanutsLogicError("ZERO_PREMIUM", "Nonzero contracts produce zero premium");

@@ -14,7 +14,7 @@ Framework-neutral Thetanuts OptionBook logic for Base mainnet.
 ## UNVERIFIED
 
 - Contract-size decimals vary ambiguously across the SDK material; every risk call requires a verified `contractSizeDecimals`.
-- All structures except single-strike PUT require `allowUnverifiedStructureCollateral: true`; otherwise they throw `STRUCTURE_COLLATERAL_UNVERIFIED`. RANGER has evidence only for the specified implementation’s inner-width formula, not its complete taker-SELL path. Non-USDC contract units and on-chain collateral/fee/budget rounding remain UNVERIFIED. The notional fee branch remains UNVERIFIED.
+- Only PHYSICAL_PUT + aBasUSDC (`0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB`) has supplied decoded taker-SELL evidence. Every other pair requires `allowUnverifiedStructureCollateral: true`; otherwise `STRUCTURE_COLLATERAL_UNVERIFIED` names the pair. Contract units and on-chain collateral/fee/budget rounding outside supplied fills remain UNVERIFIED. The notional fee branch remains UNVERIFIED.
 - Budget-cap premium rounding must be verified on-chain; quotes deliberately recompute the floored premium.
 - The SDK's browser bundle retains `FileStorageProvider` dynamic `fs/promises` imports; the target Next.js client-boundary build is UNVERIFIED.
 - ERC-20 approval quirks, minimum/cancellation preflight, and settlement operations remain outside this pure package's guarantees.
@@ -55,8 +55,8 @@ premium. With zero premium it returns the full gross exposure.
 
 `quoteSellFill({ client, order, collateralBudget, referrer?, now?, allowUnverifiedStructureCollateral? })`
 returns contracts, collateral required, gross premium, fee estimate, estimated net
-premium, and cap metadata. Buy orders throw `INVALID_SIDE`; all structures except
-single-strike PUT require
+premium, and cap metadata. Buy orders throw `INVALID_SIDE`; all pairs except
+PHYSICAL_PUT + aBasUSDC require
 `allowUnverifiedStructureCollateral: true`. Budgets are collateral-token base units.
 
 `buildSellFillTransactions({ client, order, collateralBudget, account, referrer?, now?, allowUnverifiedStructureCollateral? })`
@@ -73,23 +73,23 @@ unchanged and is **not** the seller collateral formula. Implementation metadata
 unsupported implementations fail closed even with opt-in; strike counts must
 match metadata.
 
-Seller sizing uses `budget × 1e8 / collateralPerContract`; collateral and exact
-approval use `contracts × collateralPerContract / 1e8`. The SDK bigint
-`utils.calculateCollateral` supplies PUT/linear-call, spread, butterfly and
-condor formulas, with equal size/collateral decimals. PUT_FLY uses one wing
-(2400/2300/2200 → 100), not the capacity cap's outer width (200).
-Inverse calls use the SDK's one-underlying-per-contract formula in bigint units;
-unknown token units fail closed. Inverse spreads and physical implementations
-remain unsupported even with opt-in rather than using a floating-point helper.
+Seller sizing uses `budget × 1e8 / collateralPerContract`. Both collateral per
+contract and final collateral required come exclusively from SDK bigint
+`utils.calculateCollateral`. Implementation names map to supported payout types;
+raw strikes pass unchanged. Size and collateral decimals come from SDK chain
+token configuration. Unknown decimals, unsupported mappings (including inverse
+calls/spreads), and helper rejections throw `STRUCTURE_UNSUPPORTED` with opt-in.
 
-For RANGER, only `0x9980ec85bc6fE07340adb36c76FA093bb6D4FcBc` is supported:
-collateral per contract is sorted `strikes[2] - strikes[1]`. The supplied fill
-supports this formula at that address: 43333 contracts → 43333000 collateral,
-10000100 gross premium, 1250012 fee. Its complete taker-SELL path remains behind
-the explicit flag. Other RANGER addresses fail closed. The SDK bigint RANGER
-helper uses twice the first wing; this package deliberately uses the supplied
-implementation formula instead. No other structure is marked verified by this
-fixture.
+The RANGER helper uses wing widths, not the inner gap. Tests compare three strike
+sets directly against it. PUT + USDC (389926 contracts → 912426840) and RANGER +
+USDC (43333 → 43333000) have supplied taker-BUY evidence for maker collateral
+only; their taker-SELL debits still require opt-in.
+
+PHYSICAL_PUT is deployed on Base: supplied sell fill `0xdf33…` uses
+`0x6aD53DD058bea004829cCf58a282C21a7Df02DcA` with aBasUSDC. This corrects
+a blanket physical-implementation exclusion inferred from the teammate's
+handover note about seven physical multi-leg implementations; it does not
+verify those multi-leg implementations.
 
 `feeEstimate = premiumGross × 1250 / 10000` matches all supplied decoded fills;
 the notional branch is unverified. The local Referrer Fees export states the

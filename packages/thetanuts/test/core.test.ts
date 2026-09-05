@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { OPTION_BOOK_ABI, buildPriceFeedSymbolMap, getChainConfigById, type OrderWithSignature } from "@thetanuts-finance/thetanuts-client";
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, type Address, type Hex, type Log } from "viem";
-import { buildFillTransactions, createReadClient, deriveMarkets, expectOrderFilled, fetchLiveOrders, listAssets, listExpiries, listStructures, parseOrderFilled, premiumUsd8From, quoteFill, payoffAtExpiry, payoffCurve, maxLoss, maxPayout, breakEven, ThetanutsLogicError } from "../src";
+import { takerSide, buildFillTransactions, createReadClient, deriveMarkets, expectOrderFilled, fetchLiveOrders, listAssets, listExpiries, listStructures, parseOrderFilled, premiumUsd8From, quoteFill, payoffAtExpiry, payoffCurve, maxLoss, maxPayout, breakEven, ThetanutsLogicError } from "../src";
 
 const A = (digit: string) => `0x${digit.repeat(40)}`;
 const now = 2_000_000_000;
@@ -55,7 +55,7 @@ describe("quote", () => {
   const preview = (maxContracts: bigint) => ({ optionBook: { previewFillOrder: (row: OrderWithSignature, budget?: bigint, referrer?: string) => { const price = row.order.price; const requested = (budget ?? 0n) * 100_000_000n / price; const numContracts = requested > maxContracts ? maxContracts : requested; return { numContracts, maxContracts, collateralToken: row.rawApiData?.collateral ?? A("0"), pricePerContract: price, totalCollateral: budget ?? 0n, referrer: referrer ?? A("0"), maker: row.order.maker, expiry: row.order.expiry, isCall: row.rawApiData?.isCall ?? false, strikes: row.rawApiData?.strikes.map(BigInt) ?? [] }; } } });
   test("rounds and caps while recomputing premium", () => { const row = order({ price: 30_000_000n }); const uncapped = quoteFill({ client: preview(100n), order: row, budget: 2n, now }); expect(uncapped.numContracts).toBe(6n); expect(uncapped.premium).toBe(1n); expect(uncapped.capped).toBe(false); const capped = quoteFill({ client: preview(4n), order: row, budget: 2n, now }); expect(capped.numContracts).toBe(4n); expect(capped.capped).toBe(true); });
   test("marks the exact cap uncapped and one requested contract above capped", () => { const row = order({ price: 100_000_000n }); expect(quoteFill({ client: preview(5n), order: row, budget: 5n }).capped).toBe(false); expect(quoteFill({ client: preview(5n), order: row, budget: 6n }).capped).toBe(true); });
-  test("gates taker sell", () => { const row = order({ isLong: false }); expect(() => quoteFill({ client: preview(10n), order: row, budget: 1n })).toThrow(ThetanutsLogicError); expect(quoteFill({ client: preview(10n), order: row, budget: 1n, allowUnverifiedTakerSell: true }).numContracts).toBeGreaterThan(0n); });
+  test("gates taker sell", () => { const row = order({ isLong: false }); expect(() => quoteFill({ client: preview(10n), order: row, budget: 1n })).toThrow(ThetanutsLogicError); expect(() => quoteFill({ client: preview(10n), order: row, budget: 1n, allowUnverifiedTakerSell: true })).toThrowError(expect.objectContaining({ code: "TAKER_SELL_UNVERIFIED" })); });
   test("matches the real SDK pure preview", () => { const client = createReadClient({ rpcUrl: "http://127.0.0.1:1" }); const row = order({ price: 123_456_789n, available: 1_000_000_000_000n }); const quote = quoteFill({ client, order: row, budget: 10_000_000n }); expect(quote.numContracts).toBe(8_100_000n); expect(quote.premium).toBe(9_999_999n); });
   test("rejects non-fillable quotes", () => {
     expect(() => quoteFill({ client: preview(10n), order: order({}), budget: 0n, now })).toThrowError(expect.objectContaining({ code: "ZERO_CONTRACTS" }));
@@ -140,4 +140,87 @@ test("filters OrderFilled events by zero and nonzero nonce", () => {
   const logs = [log(0n, 0), log(1n, 1)];
   expect(expectOrderFilled(logs, { optionBook, nonce: 0n }).nonce).toBe(0n);
   expect(expectOrderFilled(logs, { optionBook, nonce: 1n }).nonce).toBe(1n);
+});
+
+describe("round 5 side and production evidence", () => {
+  const client = () => createReadClient({ rpcUrl: "http://127.0.0.1:1" });
+  test("raw maker side maps to the opposite taker side", () => {
+    expect(takerSide(order({ isLong: true }))).toBe("buy");
+    expect(takerSide(order({ isLong: false }))).toBe("sell");
+    const missing = { ...order({}), rawApiData: undefined };
+    expect(() => takerSide(missing)).toThrowError(expect.objectContaining({ code: "INVALID_ORDER" }));
+  });
+
+  test("legacy opt-in cannot bypass the buy fill gate, including calls", async () => {
+    for (const isCall of [false, true]) {
+      const row = order({ isLong: false, isCall });
+      const real = client();
+      const offline = { optionBook: real.optionBook, erc20: {
+        getAllowance: async () => { throw new Error("Gate must precede allowance access"); },
+        encodeApprove: real.erc20.encodeApprove.bind(real.erc20),
+      } };
+      expect(() => quoteFill({ client: real, order: row, budget: 1n, now, allowUnverifiedTakerSell: true })).toThrowError(expect.objectContaining({ code: "TAKER_SELL_UNVERIFIED" }));
+      await expect(buildFillTransactions({ client: offline, order: row, budget: 1n, account: A("5") as Address, now, allowUnverifiedTakerSell: true })).rejects.toMatchObject({ code: "TAKER_SELL_UNVERIFIED" });
+    }
+  });
+
+  // Source: supplied decoded transfers, not new chain observations. The four-strike
+  // implementation is intentionally unspecified: no implementation address was supplied.
+  test("reproduces supplied production premium, fee and collateral to the unit", () => {
+    const fixtures = [
+      { tx: "0x9c4bb145a85740323a14f99cfbbf69c7da18bef1a8fa8f087d2330d095828f8c", contracts: 389926n, price: 256458427n, collateralPerContract: 234000000000n, premium: 999998n, fee: 124999n, collateral: 912426840n, net: 874999n },
+      { tx: "0xdf3323fefb54cd040a0e86cca3733e4c469a77e33c85a0351e9e987dcfda76f3", contracts: 10000n, price: 212682750n, collateralPerContract: 220000000000n, premium: 21268n, fee: 2658n, collateral: 22000000n, net: 18610n },
+      { tx: "0xa2edb8b2f6ad2df3435934a59227e988e840472248ec7810532602302489be46", contracts: 43333n, price: 23077332818n, collateralPerContract: 100000000000n, premium: 10000100n, fee: 1250012n, collateral: 43333000n, net: 8750088n },
+    ];
+    for (const f of fixtures) {
+      const premium = f.contracts * f.price / 100000000n;
+      const collateral = f.collateralPerContract * f.contracts / 100000000n;
+      expect(premium).toBe(f.premium);
+      // Observed premium-percentage branch only; does NOT validate the notional
+      // branch of the documented fee estimate or establish a production fee policy.
+      const fee = premium / 8n;
+      expect(fee).toBe(f.fee);
+      expect(collateral).toBe(f.collateral);
+      expect(premium - fee).toBe(f.net);
+      console.log(`${f.tx}: contracts=${f.contracts} premium=${premium} fee=${fee} collateral=${collateral} net=${premium - fee}`);
+    }
+    const buy = order({ isLong: true, strikes: ["234000000000"], price: 256458427n, available: 912426840n });
+    expect(quoteFill({ client: client(), order: buy, budget: 999999n, now })).toMatchObject({ numContracts: 389926n, premium: 999998n });
+  });
+
+  test("real SDK sell-put cap contradicts the proposed premium-based cap", () => {
+    // Hypothetical remaining amount, not a claimed field of the production order.
+    const row = order({ isLong: false, strikes: ["220000000000"], price: 212682750n, available: 22000000n });
+    const real = client();
+    const preview = real.optionBook.previewFillOrder(row, 22000000n);
+    const proposedCap = BigInt(row.rawApiData!.maxCollateralUsable) * 100000000n / row.order.price;
+    expect(preview.maxContracts).toBe(10000n);
+    expect(proposedCap).toBeGreaterThan(preview.maxContracts);
+    const encoded = real.optionBook.encodeFillOrder(row, 22000000n);
+    const decoded = decodeFunctionData({ abi: OPTION_BOOK_ABI, data: encoded.data as Hex });
+    expect(decoded.functionName).toBe("fillOrder");
+    expect(decoded.args?.[0]).toMatchObject({ numContracts: 10000n, isLong: false });
+    console.log(`SDK sell PUT: preview cap=${preview.maxContracts}; requested premium-based cap=${proposedCap}; encoded contracts=10000`);
+  });
+
+  test("SDK four-strike preview uses outer range, not supplied collateral width", () => {
+    const row = order({ isCall: true, strikes: ["7950000000000", "8000000000000", "8100000000000", "8150000000000"], price: 23077332818n, available: 43333000n });
+    const preview = client().optionBook.previewFillOrder(row);
+    expect(preview.maxContracts).toBe(21666n);
+    console.log(`SDK four-strike cap with 43333000 available=${preview.maxContracts}; supplied fill contracts=43333`);
+  });
+
+  test("short put and spreads distinguish full exposure from net maximum loss", () => {
+    const put = { kind: "put" as const, positionSide: "short" as const, strikes: [220000000000n], numContracts: 10000n, premiumUsd8: 0n, contractSizeDecimals: 6 };
+    expect(maxLoss(put)).toBe(2200000000n);
+    expect(payoffAtExpiry(put, 0n)).toBe(-2200000000n);
+    const net = { ...put, premiumUsd8: 1861000n };
+    expect(maxLoss(net)).toBe(2198139000n);
+    expect(payoffAtExpiry(net, 0n)).toBe(-2198139000n);
+    for (const kind of ["call-spread", "put-spread"] as const) {
+      const spread = { ...put, kind, strikes: [220000000000n, 230000000000n] };
+      expect(maxLoss(spread)).toBe(100000000n);
+      expect(maxLoss({ ...spread, premiumUsd8: 1861000n })).toBe(98139000n);
+    }
+  });
 });

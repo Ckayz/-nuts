@@ -34,9 +34,9 @@ if (!databaseUrl) {
   console.log("schema concurrency skipped: DATABASE_URL is not set");
   test.skip("creator invariant concurrency requires DATABASE_URL", () => {});
 } else describe("creator invariant concurrency", () => {
-  for (const isolation of ["READ COMMITTED", "REPEATABLE READ"] as const) {
+  for (const isolation of ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] as const) {
     for (const variant of ["position", "wallet"] as const) {
-      for (const first of ["publication", "mutation", ...(isolation === "REPEATABLE READ" ? ["publication-committed" as const] : [])] as const) {
+      for (const first of ["publication", "mutation", ...(isolation !== "READ COMMITTED" ? ["publication-committed" as const] : [])] as const) {
         test(`${isolation} ${variant}: ${first} validates first`, async () => {
           const a = new Client({ connectionString: databaseUrl });
           const b = new Client({ connectionString: databaseUrl });
@@ -57,7 +57,7 @@ if (!databaseUrl) {
             const bPid = (await b.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
             await a.query("BEGIN ISOLATION LEVEL READ COMMITTED");
             await b.query(`BEGIN ISOLATION LEVEL ${isolation}`);
-            // BEGIN alone does not open a REPEATABLE READ snapshot. Pin it before
+            // BEGIN alone does not open a REPEATABLE READ/SERIALIZABLE snapshot. Pin it before
             // A publishes, including the schedule where B mutates after A commits.
             const snapshot = await b.query("SELECT status,creator_position_id FROM public.theses WHERE id=$1", [ids.t1]);
             expect(snapshot.rows).toEqual([{ status: "draft", creator_position_id: null }]);
@@ -99,7 +99,7 @@ if (!databaseUrl) {
               results = [await pending, { committed: true }];
             }
             expect(results.filter((result) => result.committed)).toHaveLength(1);
-            expect(results.filter((result) => !result.committed)).toEqual([{ committed: false, code: isolation === "REPEATABLE READ" && first !== "mutation" ? "40001" : "23514" }]);
+            expect(results.filter((result) => !result.committed)).toEqual([{ committed: false, code: isolation !== "READ COMMITTED" && first !== "mutation" ? "40001" : "23514" }]);
             const invalid = await a.query(`SELECT t.id FROM public.theses t
               LEFT JOIN public.positions p ON p.id=t.creator_position_id
               JOIN public.users u ON u.id=t.creator_user_id

@@ -144,6 +144,24 @@ if (!databaseUrl) {
     await client.query("SET CONSTRAINTS ALL DEFERRED");
     await rejects(client, "UPDATE public.users SET wallet_address='0xaaa' WHERE id=$1", [u1], { code: "23514", message: "cannot change wallet of a public thesis creator" });
   });
+  probe("thesis link then unlink then position delete accepts final state", async (client) => {
+    await client.query("UPDATE public.theses SET creator_position_id=$1 WHERE id=$2", [p1, t1]);
+    await client.query("UPDATE public.theses SET creator_position_id=NULL WHERE id=$1", [t1]);
+    await client.query("DELETE FROM public.positions WHERE id=$1", [p1]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    expect((await client.query("SELECT creator_position_id FROM public.theses WHERE id=$1", [t1])).rows).toEqual([{ creator_position_id: null }]);
+    expect((await client.query("SELECT id FROM public.positions WHERE id=$1", [p1])).rows).toEqual([]);
+  });
+  probe("thesis intermediate-invalid creator then final-valid accepts current row", async (client) => {
+    await client.query("UPDATE public.theses SET creator_position_id=$1,creator_user_id=$2 WHERE id=$3", [p1, u2, t1]);
+    await client.query("UPDATE public.theses SET creator_user_id=$1 WHERE id=$2", [u1, t1]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    expect((await client.query("SELECT creator_user_id,creator_position_id FROM public.theses WHERE id=$1", [t1])).rows).toEqual([{ creator_user_id: u1, creator_position_id: p1 }]);
+  });
+  probe("thesis final-invalid creator rejects current row", async (client) => {
+    await client.query("UPDATE public.theses SET creator_position_id=$1 WHERE id=$2", [p1, t1]);
+    await rejects(client, "UPDATE public.theses SET creator_user_id=$1 WHERE id=$2", [u2, t1], { code: "23514", message: `invalid creator position for thesis ${t1}` });
+  });
   for (const variant of ["position", "wallet"] as const) {
     for (const alreadyPublished of [false, true]) {
       probe(`${variant} intermediate-invalid final-valid (published=${alreadyPublished})`, async (client) => {

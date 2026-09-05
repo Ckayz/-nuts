@@ -58,10 +58,23 @@ export function PositionPage({ page, rail }: { page: PositionPageView; rail: The
 						>
 							Open the {page.card.asset ?? page.marketSlug.toUpperCase()} market
 						</Link>
+						{/*
+						 * I-1 (owner 2026-09-06, decision 1). This line used to read
+						 * "Bull buys the structure, Bear sells it." — the ticket's old
+						 * shorthand. It became FALSE the moment Bull started naming the
+						 * ASSET's direction: measured on this very page, the tab title
+						 * says "Bear · ETH put" for a BOUGHT put while the sentence a
+						 * card away still said Bull buys it
+						 * (.research/thetanuts/ui-fold-shots/final-fold-I1-position.png).
+						 * Which word each side earns depends on the instrument, and this
+						 * panel has no quote to resolve it from, so it names the two
+						 * TAKER actions, which are true for every structure.
+						 * TODO-OWNER: the wording.
+						 */}
 						<p className="fine">
 							{page.structureId
-								? "Bull buys the structure, Bear sells it. Both fills happen on the market page, which opens with this one selected if the book still has it."
-								: "Bull buys the structure, Bear sells it. This option has expired, so the market page opens on the live book instead."}
+								? "The market page carries both sides of this structure, buying it and selling it, and opens with this one selected if the book still has it."
+								: "The market page carries both sides of this structure, buying it and selling it. This option has expired, so it opens on the live book instead."}
 						</p>
 					</section>
 				) : null}

@@ -501,7 +501,23 @@ export function TakeASide({
 		if (trade === undefined) return;
 		if (!structureChanged(quotedStructure.current, trade.structureId)) return;
 		quotedStructure.current = trade.structureId;
-		requote(side, budgetInput);
+		// I-1. The panel keeps the visitor's chosen SIDE across a structure change,
+		// and since Bull and Bear now map to different sides of the book per
+		// instrument, the kept side can be one this new structure has no maker on.
+		// Measured on `/m/eth` before this line: selecting an ETH put spread from a
+		// call left the ticket on
+		//   {"text":"Bull · sell","checked":true,"disabled":true}
+		//   {"text":"Bear · buy","checked":false,"disabled":false}
+		// i.e. a checked, disabled button and a ticket that cannot be traded.
+		// This is the SAME rule the server already applies on a fresh load —
+		// `lib/market/page.ts`: "With no side named, open on the one that can
+		// actually be filled" — applied after a client-side navigation, not a new
+		// product rule. It never moves off a side that IS available.
+		const kept = trade.sides[side];
+		const other: Side = side === "bull" ? "bear" : "bull";
+		const next: Side = !kept.available && trade.sides[other].available ? other : side;
+		if (next !== side) setSide(next);
+		requote(next, budgetInput);
 	}, [budgetInput, requote, side, trade]);
 
 	/**

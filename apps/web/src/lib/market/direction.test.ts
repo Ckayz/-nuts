@@ -235,3 +235,46 @@ describe("the sentence under the buttons names the same direction as the button"
 		expect(sell).not.toContain("Bear");
 	});
 });
+
+// ------------------------------------------------- no component spells its own rule
+
+/**
+ * FENCE. The defect this fold removes was a hardcoded direction word in a
+ * component: `take-a-side.tsx` printed "Bull · buy" and `position-page.tsx`
+ * printed "Bull buys the structure, Bear sells it." on every instrument,
+ * including the puts where both sentences are false.
+ *
+ * Direction words may now only reach a component through the server
+ * (`SideAvailability.word`, `sideNoteFor`, `directionLabel`), so no component
+ * may contain one of these literals in code. Comments are stripped first —
+ * they quote the old copy on purpose, and quoting the defect is how the next
+ * reader knows what happened.
+ */
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
+function withoutComments(source: string): string {
+	return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
+
+function componentFiles(dir: string): string[] {
+	const out: string[] = [];
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		const path = join(dir, entry.name);
+		if (entry.isDirectory()) out.push(...componentFiles(path));
+		else if (entry.name.endsWith(".tsx") && !entry.name.includes(".test.")) out.push(path);
+	}
+	return out;
+}
+
+test("no component hardcodes a direction word onto a taker side", () => {
+	const banned = ["Bull · buy", "Bear · sell", "Bull buys", "Bear sells", "Bull sells", "Bear buys"];
+	const offenders: string[] = [];
+	for (const file of componentFiles(new URL("../../components", import.meta.url).pathname)) {
+		const body = withoutComments(readFileSync(file, "utf8"));
+		for (const phrase of banned) {
+			if (body.includes(phrase)) offenders.push(`${file}: ${phrase}`);
+		}
+	}
+	expect(offenders).toEqual([]);
+});

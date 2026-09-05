@@ -41,7 +41,7 @@ function body(state: FarcasterRailState) {
 		return <p className="note">The Farcaster feed could not be read just now. Nothing here is a stand-in for it.</p>;
 	}
 	if (state.casts.length === 0) {
-		return <p className="note">No casts came back from the channels this rail watches.</p>;
+		return <p className="note">Nothing on Farcaster matched the markets this rail watches.</p>;
 	}
 	return state.casts.map((cast) => {
 		const name = cast.displayName ?? cast.username;

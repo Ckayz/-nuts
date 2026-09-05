@@ -37,3 +37,4 @@ export async function marketSummariesData(): Promise<MarketSummariesData> {
 		async () => (await import("@/lib/market/live")).getLiveMarkets(),
 		async () => (await import("../view-data")).marketSummaries);
 }
+

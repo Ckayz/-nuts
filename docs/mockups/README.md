@@ -34,6 +34,10 @@ The top-right wallet chip toggles between the connected and signed-out states wh
 - **Colour only on money.** `--gain` / `--loss` are used on numbers. Never on bars,
   backgrounds, labels or names. The percent beside a P&L is neutral text with a coloured
   arrow, so one number carries the colour, not two.
+  - **EXCEPTION, 2026-09-06** (owner: "go with defaults for the 9 decisions"): a post's
+    DIRECTION DOT may carry `--gain` / `--loss`. The pill around it — `.ptype`, a label —
+    stays neutral, so the colour sits on a 6px dot and nowhere else. This is the same
+    compromise the rule already makes for the percent beside a P&L.
 - **Radius varies by role**: frame 24 · card 18 · panel/field 14–16 · row 12 · chip 999.
   Nothing is uniform.
 - **Hairlines, not shadows.** The only blurred shadow in the file is the dialog's. The
@@ -42,6 +46,30 @@ The top-right wallet chip toggles between the connected and signed-out states wh
 - **Manrope only**, five weights, `tabular-nums` on every number. No mono font.
 - **No charts.** Thetanuts has no price history, so the product never draws one.
 - No gradients, no glassmorphism, no ticker tape, no icon rail.
+
+## Shape decided 2026-09-06 (owner defaults 3, 5, 6, 7)
+
+The teammate's shipped feed design is the spec, and this file was updated to match it:
+
+- **The feed's posts are hairline-separated ROWS**, not six cards: `.post-rows > .post`
+  drops the border, the radius and the fill, and one `border-top` sits between siblings.
+  A thread's hero post is still a card — it IS that page's object.
+- **Every feed post carries a type badge** (`.ptype`): `Thesis` for a pure text opinion,
+  `Bull` / `Bear` for the direction it names. See the colour exception above.
+- **The market header's stat tiles are bordered and unfilled**, each drawing its own
+  hairline, so the strip has no divider line of its own. Which tiles exist is decided by
+  what the OptionBook actually publishes: 24h change, market cap, volume, liquidity and
+  holders are absent because there is no price history and no supply — the same fact that
+  removed the chart. Implied vol takes the slot fomo gives 24h volume.
+- **"Create" lives in the TOP BAR**, beside the wallet chip, at every width (`.top-create`).
+  It used to sit at the end of the nav, which scrolls horizontally, and it was clipped
+  below ~500px — and it is the only route to the composer.
+- **The profile bio** renders under the name and handle, in the same muted `.meta` text
+  the address line uses (`.prof .bio`).
+- **On phones (≤900px) the FEED's left column stays in the flow** and `order` puts the Top
+  traders card in the single stacked column directly under the posts: the nav's
+  "Leaderboard" is an in-page anchor to it, and the blanket `.col-left{display:none}` had
+  been scrolling to something hidden. Every other page's left rail is still hidden.
 
 ## Content
 

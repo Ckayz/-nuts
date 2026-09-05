@@ -65,7 +65,7 @@ export default async function RootLayout({
 					    TODO-OWNER: "Skip to content" is provisional wording. */}
 					<a className="skip-link" href="#main">Skip to content</a>
 					<TopBar />
-					<Nav firstMarketSlug={markets.markets[0]?.slug} unavailable={markets.unavailable} />
+					<Nav marketSlug={markets.navMarketSlug} unavailable={markets.unavailable} />
 					<main className="wrap" id="main">{children}</main>
 					<AgentLauncher />
 					{/* The mockup's footer line, minus its "mockup only". The

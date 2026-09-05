@@ -225,8 +225,6 @@ export interface ThesisDetail {
     shareHeadline: string;
     /** Null when no settlement wording is available for this thesis. */
     settlementLabel: string | null;
-    /** Null when no spot series is available; the database holds no price feed. */
-    spotChangePct: string | null;
     participants: Participant[];
     comments: Comment[];
     activity: ActivityItem[];

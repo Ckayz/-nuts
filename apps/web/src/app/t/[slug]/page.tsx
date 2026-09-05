@@ -10,7 +10,6 @@ import { CommentsList } from "@/components/thesis/comments-list";
 import { ParticipantsTable } from "@/components/thesis/participants-table";
 import { PayoffChart } from "@/components/thesis/payoff-chart";
 import { SharePanel } from "@/components/thesis/share-panel";
-import { SpotChart } from "@/components/thesis/spot-chart";
 import { ThesisTabs } from "@/components/thesis/thesis-tabs";
 import { signedUsd, usd } from "@/lib/format";
 import { thesisDetailData, socialPageState } from "@/lib/page-data";
@@ -179,58 +178,8 @@ export default async function ThesisPage({
 					/>
 				) : null}
 
-				{backing && t.asset && detail.spotChangeLabel ? (
+				{backing && t.asset ? (
 					<div className="charts">
-						<div className="chartbox">
-							<div className="hh">
-								<span className="lbl">
-									{t.asset} spot · 7d · entries pinned
-								</span>
-								<span className="v">
-									{usd(detail.spotUsd)}{" "}
-									<span className="bull" style={{ fontSize: "12px" }}>
-										{detail.spotChangeLabel}
-									</span>
-								</span>
-							</div>
-							<SpotChart label="BTC spot price, 7 days, with participant entries marked" />
-							<div className="legend">
-								<span>
-									<i style={{ background: "var(--tn-k)" }} />
-									spot
-								</span>
-								<span>
-									<i style={{ background: "var(--tn-bear)" }} />
-									78,000 long put
-								</span>
-								<span>
-									<i style={{ background: "var(--tn-dim)" }} />
-									74,000 short put
-								</span>
-								<span>
-									<i
-										style={{
-											background: "var(--tn-bull)",
-											width: "8px",
-											height: "8px",
-											borderRadius: "50%",
-										}}
-									/>
-									bull entry
-								</span>
-								<span>
-									<i
-										style={{
-											background: "var(--tn-bear)",
-											width: "8px",
-											height: "8px",
-											borderRadius: "50%",
-										}}
-									/>
-									bear entry
-								</span>
-							</div>
-						</div>
 						<div className="chartbox">
 							<div className="hh">
 								<span className="lbl">Payoff at expiry · per $1,000</span>

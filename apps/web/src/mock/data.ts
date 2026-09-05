@@ -17,7 +17,7 @@
 // TODO-OWNER: endingSoon flags reproduce chips, not an approved time window.
 // TODO-OWNER: fixture directions follow headlines; only BTC direction is explicitly owner-specified.
 // TODO-OWNER: preset amounts reproduce the mockup, not approved product defaults.
-// Ranking, trending, remaining thesis details and connected-user identity stay TODO-OWNER.
+// Ranking, trending, connected-user identity stay TODO-OWNER.
 // Round 6: a thesis is a post (CLAUDE.md, owner 2026-09-05). Three states are
 // fixtured: text only (nfpSetup: no market, no structure, no backing), tagged
 // (ethCallsCheap: market + structure, no backing) and backed (the rest). The
@@ -745,7 +745,6 @@ export const btcNfpDetail: ThesisDetail = {
     "settlementLabel": "settles on Thetanuts TWAP",
     "activityCount": 40,
     "participantCount": 40,
-    "spotChangePct": "1.65",
     "participants": [
         {
             "id": "mock-creator-position-btc-nfp-4a2c",
@@ -983,23 +982,48 @@ export const btcNfpDetail: ThesisDetail = {
  * empty participant / comment / activity lists rather than invented rows. A post
  * thread page must exist for every post, backed or not.
  */
-function bareDetail(thesis: Thesis, settlementLabel: string, spotChangePct: string | null, comments: Comment[] = []): ThesisDetail {
+function bareDetail(thesis: Thesis, settlementLabel: string | null, comments: Comment[] = []): ThesisDetail {
     return { thesis, shareUrl: `thesis.fun/t/${thesis.slug}`, shareHeadline: `${thesis.thesis.headline.slice(0, 28)}…`,
-        settlementLabel, spotChangePct, participants: [], comments, activity: [], activityCount: 0, participantCount: 0 };
+        settlementLabel, participants: [], comments, activity: [], activityCount: 0, participantCount: 0 };
 }
+// EXAMPLE DATA: complete the rail-only posts using their existing headline and
+// creator. No structure, fill or economics is inferred from a rail summary.
+const railOnlyTheses: Thesis[] = trending.filter(item => !theses.some(thesis => thesis.slug === item.slug)).map(item => {
+    const creator = allCreators.find(creator => creator.handle === item.creatorHandle);
+    if (!creator) throw new Error(`Missing example creator: ${item.creatorHandle}`);
+    return { ...nfpSetup, id: item.slug, slug: item.slug, creatorUserId: creator.id, creator,
+        thesis: { ...nfpSetup.thesis, id: item.slug, headline: item.headline, rationale: null, direction: null },
+        likes: 0, commentCount: 0 };
+});
+// EXAMPLE following cohort, not a connected wallet's follow state.
+export const following = theses.filter(thesis => allCreators.slice(0, 2).some(creator => creator.id === thesis.creatorUserId));
+// TODO-OWNER: offline Top is the brief's example likes ordering.
+export const top = [...theses].sort((a, b) => b.likes - a.likes);
+// TODO-OWNER: example Ending uses the existing rail's remaining days.
+export const ending = [...trending].sort((a, b) => a.remainingDays - b.remainingDays);
+export const settled: TrendingItem[] = theses.filter(thesis => thesis.thesis.status === "settled").flatMap(thesis => {
+    const pnl = thesis.backing?.economics.finalPnlUsd;
+    if (pnl == null) return [];
+    return [{
+    slug: thesis.slug, underlyingAsset: thesis.market?.underlyingAsset ?? "", headline: thesis.thesis.headline,
+    creatorHandle: thesis.creator.handle, remainingDays: 0,
+    estimatedPnlUsd: pnl, bullPct: thesis.backing?.bull.pct ?? 0,
+}];
+});
 export const thesisDetails: ThesisDetail[] = [
     btcNfpDetail,
-    bareDetail(nfpSetup, "no structure named", null, [
+    ...railOnlyTheses.map(thesis => bareDetail(thesis, null)),
+    bareDetail(nfpSetup, "no structure named", [
         { "creator": merkleMike, "createdAt": "2026-09-04T17:56:00Z", "body": "Same read. I put the 78k / 74k spread behind mine, it is on the BTC market." },
         { "creator": oxsable, "createdAt": "2026-09-04T17:58:00Z", "body": "Talk is cheap. Tag a structure." }
     ]),
-    bareDetail(solLoses100, "settles on Thetanuts TWAP", "3.18"),
-    bareDetail(ethCallsCheap, "settles on Thetanuts TWAP", "2.46", [
+    bareDetail(solLoses100, "settles on Thetanuts TWAP"),
+    bareDetail(ethCallsCheap, "settles on Thetanuts TWAP", [
         { "creator": gammaEth, "createdAt": "2026-09-04T22:31:00Z", "body": "The 2,600 / 2,800 is the cleanest one on the board right now." },
         { "creator": deltaVega, "createdAt": "2026-09-04T22:44:00Z", "body": "Vol is asleep because nobody wants to hold through the upgrade. Fair." }
     ]),
-    bareDetail(ethFusaka, "settles on Thetanuts TWAP", "2.46"),
-    bareDetail(ethPrints2500, "settled on Thetanuts TWAP", null),
+    bareDetail(ethFusaka, "settles on Thetanuts TWAP"),
+    bareDetail(ethPrints2500, "settled on Thetanuts TWAP"),
 ];
 export const newCallouts = { count: 9, avatars: [tailbet, jlin, nutsauce] };
 export const wallet = { mockAddressFragment: "0x7c4a…e10b", network: "Base" };

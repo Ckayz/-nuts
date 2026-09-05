@@ -10,6 +10,20 @@
 				"$TURBO_DEFAULT$",
 				".env*"
 			],
+			"env": [
+				"NODE_ENV",
+				"DATABASE_URL",
+				"DIRECT_DATABASE_URL",
+				"SESSION_SECRET",
+				"DATA_SOURCE",
+				"OPENROUTER_API_KEY",
+				"AGENT_MODEL",
+				"AGENT_GATE_MODEL",
+				"BASE_RPC_URL",
+				"THESIS_REFERRER",
+				"THETANUTS_ORDERS_URL",
+				"SKIP_ENV_VALIDATION"
+			],
 			"outputs": [
 				"dist/**",
 				".next/**",

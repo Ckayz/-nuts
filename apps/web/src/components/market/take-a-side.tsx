@@ -1,12 +1,17 @@
 "use client";
 import { useCallback, useRef, useState, useTransition } from "react";
-import { useChainId, useConnection, useSendTransaction, useSwitchChain } from "wagmi";
+import { useConfig, useConnection, useSendTransaction, useSwitchChain } from "wagmi";
+import { waitForTransactionReceipt } from "wagmi/actions";
 import { TodoOwner } from "@/components/primitives";
 import { signedUsd, usd, usd2 } from "@/lib/format";
+// F19: the ticket printed the raw ISO instant ("2026-09-05T10:47:58.000Z").
+// `expiryLabel(iso, true)` is the app-wide instant format ("05 Sep 26 10:47
+// UTC"); the payload keeps the ISO string. TODO-OWNER: the format itself.
+import { expiryLabel as instantLabel } from "@/lib/display";
 import type { Side, Ticket } from "@/lib/display-types";
 import { prepareTrade, quoteTicket, recordTrade } from "@/lib/trade/actions";
 import { FillDialog } from "@/components/market/fill-dialog";
-import type { FillCard, TicketQuoteView, TradePanelContext } from "@/lib/trade/types";
+import type { FillCard, QuoteRaw, TicketQuoteView, TradePanelContext } from "@/lib/trade/types";
 
 /**
  * The Bull/Bear ticket. Owner 2026-09-05: trading lives on the market page, so
@@ -25,6 +30,84 @@ import type { FillCard, TicketQuoteView, TradePanelContext } from "@/lib/trade/t
  * and arrow keys (the mockup's `role="group"` + `aria-pressed` would announce
  * two independent toggles for what is one choice).
  */
+/**
+ * C5. The figures a wallet is asked to sign for must be the figures the panel
+ * showed. Every field below decides what the user pays, receives or risks, so
+ * ANY difference stops the send and asks again.
+ *
+ * TODO-OWNER: any tolerance at all. Exact equality is used because no allowed
+ * drift has been decided; a tolerance is a product number, not this file's.
+ */
+const ECONOMIC_FIELDS = [
+	"numContracts",
+	"contractSizeDecimals",
+	"pricePerContract",
+	"premiumGross",
+	"feeEstimate",
+	"collateralPosted",
+	"debit",
+	"credit",
+	"collateralDecimals",
+	"collateralSymbol",
+	"collateralAddress",
+	"maxLossUsd8",
+	"maxPayoutUsd8",
+	"breakEvenUsd8",
+] as const satisfies readonly (keyof QuoteRaw)[];
+
+export function sameEconomics(a: QuoteRaw | null, b: QuoteRaw | null): boolean {
+	if (a === null || b === null) return false;
+	return ECONOMIC_FIELDS.every((field) => a[field] === b[field]);
+}
+
+/** The fields that actually moved, for the sentence shown to the user. */
+export function changedEconomics(a: QuoteRaw | null, b: QuoteRaw | null): readonly string[] {
+	if (a === null || b === null) return [];
+	return ECONOMIC_FIELDS.filter((field) => a[field] !== b[field]);
+}
+
+/**
+ * F14 / C4. Everything that must hold before a wallet is asked to sign.
+ *
+ * Pure so it can be tested: the component has no DOM test harness here, and the
+ * bug this replaces was precisely a guard that could never fire.
+ *
+ * `walletChainId` is the CONNECTED wallet's chain. It used to be read from
+ * `useChainId()`, which returns the CONFIG's chain — Base only in
+ * `lib/wagmi.ts` — so the comparison was `8453 !== 8453` for every user and a
+ * wallet on Ethereum went straight to `eth_sendTransaction`.
+ */
+export type SendGuard =
+	| { readonly ok: true }
+	| { readonly ok: false; readonly action: "connect" | "switch" | "signIn"; readonly message: string };
+
+export function sendGuard(input: {
+	readonly isConnected: boolean;
+	readonly address: string | undefined;
+	readonly walletChainId: number | undefined;
+	readonly expectedChainId: number;
+	readonly sessionWallet: string | null;
+}): SendGuard {
+	if (!input.isConnected || input.address === undefined) {
+		return { ok: false, action: "connect", message: "Connect your wallet first." };
+	}
+	// An unknown wallet chain is treated as the wrong chain: fail closed.
+	if (input.walletChainId !== input.expectedChainId) {
+		return { ok: false, action: "switch", message: "Switch your wallet to Base to trade." };
+	}
+	if (input.sessionWallet === null) {
+		return { ok: false, action: "signIn", message: "Sign in with your wallet before signing a trade." };
+	}
+	if (input.address.toLowerCase() !== input.sessionWallet) {
+		return {
+			ok: false,
+			action: "signIn",
+			message: "Your connected wallet is not the one you signed in with. Sign in again to trade with it.",
+		};
+	}
+	return { ok: true };
+}
+
 export type TicketPhase =
 	| "idle"
 	| "quoting"
@@ -75,9 +158,31 @@ export function TakeASide({
 	// The post-fill share card (owner's fomo reference, 2026-09-05).
 	const [card, setCard] = useState<FillCard | null>(null);
 	const [pending, startTransition] = useTransition();
+	/**
+	 * C5. The economics the user has SEEN and clicked through. Null until a
+	 * divergence has been shown once; after that, a send is only allowed when the
+	 * server's fresh quote still equals this.
+	 */
+	const [acknowledged, setAcknowledged] = useState<QuoteRaw | null>(null);
+	/**
+	 * C5. Requotes are async and can land out of order (type "10", then "100":
+	 * the "10" response may arrive last and overwrite the panel). Only the
+	 * newest request may write state.
+	 */
+	const requoteSeq = useRef(0);
+	/** C5. The state the current quote belongs to; a quote for another structure, side or budget is not this panel's. */
+	const quotedFor = useRef<{ structureId: string; side: Side; budgetInput: string } | null>(
+		trade === undefined ? null : { structureId: trade.structureId, side: trade.quote.side, budgetInput: trade.quote.budgetInput },
+	);
 
-	const { address, isConnected } = useConnection();
-	const chainId = useChainId();
+	const config = useConfig();
+	// F14. `useChainId()` returns the CONFIG's chain, and `lib/wagmi.ts`
+	// configures Base alone, so it was ALWAYS 8453 and the wrong-chain guard
+	// below could never fire — a wallet on Ethereum reached `eth_sendTransaction`
+	// with no chain assertion. `useConnection().chainId` is the CONNECTED
+	// wallet's chain (@wagmi/core `GetConnectionReturnType`), which is the thing
+	// the guard is about.
+	const { address, isConnected, chainId: walletChainId } = useConnection();
 	const { switchChain, isPending: switching } = useSwitchChain();
 	const { mutateAsync: sendTransactionAsync } = useSendTransaction();
 
@@ -88,20 +193,40 @@ export function TakeASide({
 	const requote = useCallback(
 		(nextSide: Side, nextBudget: string) => {
 			if (trade === undefined) return;
+			const seq = requoteSeq.current + 1;
+			requoteSeq.current = seq;
 			setPhase("quoting");
 			setMessage(null);
+			// C5. A new quote invalidates whatever the user had acknowledged.
+			setAcknowledged(null);
 			startTransition(async () => {
 				const next = await quoteTicket({
 					structureId: trade.structureId,
 					side: nextSide,
 					budgetInput: nextBudget,
 				});
+				// C5. Drop a response that a newer request has already superseded.
+				if (requoteSeq.current !== seq) return;
+				quotedFor.current = { structureId: trade.structureId, side: nextSide, budgetInput: nextBudget };
 				setQuote(next);
 				setPhase("idle");
 			});
 		},
 		[trade],
 	);
+
+	/**
+	 * F20. True while the amount field says something the panel has not been
+	 * quoted for — the ticket requotes on blur, so until then every figure below
+	 * belongs to the PREVIOUS amount. The panel says so instead of showing money
+	 * that contradicts the input.
+	 */
+	const staleQuote =
+		trade !== undefined &&
+		quotedFor.current !== null &&
+		(quotedFor.current.budgetInput !== budgetInput ||
+			quotedFor.current.side !== side ||
+			quotedFor.current.structureId !== trade.structureId);
 
 	const chooseSide = useCallback(
 		(next: Side) => {
@@ -119,25 +244,20 @@ export function TakeASide({
 		// Chain and wallet are checked before anything is prepared: no calldata is
 		// requested for a wallet that is not the signed-in one, and none is sent
 		// on another chain (PRD 13, "Wrong chain: block financial actions").
-		if (chainId !== trade.chainId) {
-			setMessage("Switch your wallet to Base to trade.");
-			switchChain({ chainId: trade.chainId });
+		const guard = sendGuard({
+			isConnected,
+			address,
+			walletChainId,
+			expectedChainId: trade.chainId,
+			sessionWallet: trade.sessionWallet,
+		});
+		if (!guard.ok) {
+			setMessage(guard.message);
+			if (guard.action === "switch") switchChain({ chainId: trade.chainId });
+			if (guard.action === "signIn") onSignedIn?.();
 			return;
 		}
-		if (!isConnected || !address) {
-			setMessage("Connect your wallet first.");
-			return;
-		}
-		if (trade.sessionWallet === null) {
-			setMessage("Sign in with your wallet before signing a trade.");
-			onSignedIn?.();
-			return;
-		}
-		if (address.toLowerCase() !== trade.sessionWallet) {
-			setMessage("Your connected wallet is not the one you signed in with. Sign in again to trade with it.");
-			onSignedIn?.();
-			return;
-		}
+		const account = address as `0x${string}`;
 
 		startTransition(async () => {
 			try {
@@ -158,13 +278,30 @@ export function TakeASide({
 				if (ready.stage === "approve") {
 					setPhase("approving");
 					setMessage(ready.note);
-					await sendTransactionAsync({
+					// C4. `chainId` and `account` are pinned on every send: without
+					// them wagmi asserts NEITHER, so a wallet that moved chains (or
+					// accounts) between the guard above and this line would still be
+					// asked to sign.
+					const approvalHash = await sendTransactionAsync({
 						to: ready.approve.to,
 						data: ready.approve.data,
 						value: 0n,
+						chainId: trade.chainId,
+						account,
 					});
-					// The allowance must be on chain before the fill is built and
-					// simulated, so the order is refetched after the approval.
+					// C4. The allowance must be ON CHAIN before the fill is built and
+					// simulated. Preparation used to continue on the approval HASH,
+					// which is only a broadcast: the refetch below then read an
+					// allowance that did not exist yet.
+					const approvalReceipt = await waitForTransactionReceipt(config, {
+						hash: approvalHash,
+						chainId: trade.chainId,
+					});
+					if (approvalReceipt.status !== "success") {
+						setPhase("failed");
+						setMessage("The approval did not succeed on Base, so nothing was filled.");
+						return;
+					}
 					setPhase("preparing");
 					const second = await prepareTrade({
 						structureId: trade.structureId,
@@ -189,12 +326,35 @@ export function TakeASide({
 					setMessage("Could not build this fill.");
 					return;
 				}
+
+				// C5. The calldata about to be signed was built from a FRESH server
+				// quote that the browser has never shown. Nothing may be signed until
+				// the figures on screen are the figures being signed for.
+				const shownRaw = acknowledged ?? quote?.raw ?? null;
+				if (!sameEconomics(ready.expected, shownRaw)) {
+					const moved = changedEconomics(ready.expected, shownRaw);
+					setAcknowledged(ready.expected);
+					setPhase("idle");
+					setMessage(
+						shownRaw === null
+							? "The panel has no quote to compare against. Check the figures and press Trade again."
+							: `The price moved while this was prepared (${moved.join(", ")}). The panel has been refreshed — check it and press Trade again to sign for the new figures.`,
+					);
+					// Refresh the printed figures from the server so the panel shows
+					// what the next click will sign for.
+					requote(side, budgetInput);
+					return;
+				}
+
 				setPhase("filling");
 				setMessage(ready.note);
 				const hash = await sendTransactionAsync({
 					to: ready.fill.to,
 					data: ready.fill.data,
 					value: 0n,
+					// C4: same pinning as the approval.
+					chainId: trade.chainId,
+					account,
 				});
 				setTxHash(hash);
 				setPhase("recording");
@@ -218,12 +378,29 @@ export function TakeASide({
 				setMessage(error instanceof Error ? error.message.split("\n")[0] ?? null : null);
 			}
 		});
-	}, [address, budgetInput, chainId, isConnected, onSignedIn, sendTransactionAsync, side, switchChain, trade]);
+	}, [
+		acknowledged,
+		address,
+		budgetInput,
+		config,
+		isConnected,
+		onSignedIn,
+		quote,
+		requote,
+		sendTransactionAsync,
+		side,
+		switchChain,
+		trade,
+		walletChainId,
+	]);
 
 	const bull = trade?.sides.bull;
 	const bear = trade?.sides.bear;
 	const busy = pending || phase === "approving" || phase === "filling" || phase === "recording";
-	const blocked = trade !== undefined && (view === null || !view.executable);
+	// F20: a stale panel must not be signed for — the figures below belong to the
+	// previous amount. The requote happens on blur, so leaving the field clears
+	// this by itself.
+	const blocked = trade !== undefined && (view === null || !view.executable || staleQuote);
 
 	return (
 		<section className="card pad ticket">
@@ -319,6 +496,14 @@ export function TakeASide({
 				<TodoOwner />
 			</span>
 
+			{staleQuote ? (
+				<span className="msg">
+					These figures are for {quotedFor.current?.budgetInput === "" ? "the previous amount" : quotedFor.current?.budgetInput}
+					{", "}not what you have typed. Leave the field to requote.
+					<TodoOwner />
+				</span>
+			) : null}
+
 			<dl className="kv">
 				<div>
 					<dt className="k">Order</dt>
@@ -364,8 +549,8 @@ export function TakeASide({
 			) : null}
 			{trade !== undefined && view !== null && view.signatureExpiresAt !== null ? (
 				<span className="msg">
-					Maker signature valid until <b className="num">{view.signatureExpiresAt}</b>. It is refetched when
-					you sign.
+					Maker signature valid until <b className="num">{instantLabel(view.signatureExpiresAt, true)}</b>. It is
+					refetched when you sign.
 					<TodoOwner />
 				</span>
 			) : null}

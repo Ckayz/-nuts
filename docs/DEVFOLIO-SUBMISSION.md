@@ -10,7 +10,7 @@ Read live from Devfolio's own submission guide on 2026-09-05 19:5x via the Devfo
 | `hashtags` (technologies) | 1–10 | Thetanuts, Base, Next.js, wagmi, viem, Drizzle, Supabase, Bun, AI SDK |
 | `pictures` | 1–6 **real screenshots of the running project** (no generated stand-ins) | see the list below |
 | `projectFieldAnswers` | both organizer fields required, markdown supported | **"The problem it solves"** (UUID `16658fe42db84f88b27ece038012a991`) and **"Challenges we ran into"** (UUID `7d4ae8a15ce0498bbd3ab528f84ff513`) — draft texts below |
-| `tracksToApplyTo` | track UUIDs | **BEST PRODUCT BUILT ON THE THETANUTS SDK** `c420ac4b297d45c2a39b988f97eb6e98` (600 / 400 USDC) and **AI × OPTIONS** `76c7ee52e01545c581dff4cd98daa32e` (500 / 300 / 200 USDC — "an AI agent that places a real on-chain options trade … live on Base mainnet": only claim this track if the agent's approval-gated execution is merged and demonstrated) |
+| `tracksToApplyTo` | track UUIDs | **BEST PRODUCT BUILT ON THE THETANUTS SDK** `c420ac4b297d45c2a39b988f97eb6e98` (600 / 400 USDC) and **AI × OPTIONS** `76c7ee52e01545c581dff4cd98daa32e` (500 / 300 / 200 USDC — "an AI agent that places a real on-chain options trade … live on Base mainnet": only claim this track if the agent's approval-gated execution is merged and demonstrated). **OWNER DECISION 2026-09-05 20:0x: apply to BOTH Thetanuts tracks** ("Tracks we can choose both of the thetanuts ones"). |
 | `links` | 0–5, include the public repo | `https://github.com/Ckayz/-nuts` (public once the owner flips it), the live URL after the Vercel deploy |
 | `video_url` | optional | a 1–2 minute demo (owner) |
 | `cover_img`, `favicon` | optional | the share card image works as a cover |

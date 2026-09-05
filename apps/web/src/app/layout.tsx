@@ -1,38 +1,58 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Archivo, Bricolage_Grotesque, JetBrains_Mono } from "next/font/google";
 import "../index.css";
+import { AppHeader } from "@/components/shell/app-header";
+import { CreatorTape } from "@/components/shell/creator-tape";
+import { IconRail } from "@/components/shell/icon-rail";
+import { PriceFooter } from "@/components/shell/price-footer";
 import Providers from "@/components/providers";
-import Header from "@/components/header";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+// The mockup requests Bricolage Grotesque as `opsz,wght@12..96,500;600;800`,
+// so the optical-size axis must stay variable or the display type renders at
+// the font's default opsz (14) instead of tracking font-size.
+const display = Bricolage_Grotesque({
+	variable: "--font-tn-display",
+	subsets: ["latin"],
+	axes: ["opsz"],
+	display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const sans = Archivo({
+	variable: "--font-tn-sans",
+	subsets: ["latin"],
+	display: "swap",
+});
+
+const mono = JetBrains_Mono({
+	variable: "--font-tn-mono",
+	subsets: ["latin"],
+	display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "nuts",
-  description: "nuts",
+	title: "Thesis.fun",
+	description: "Put your money where your thesis is.",
 };
 
 export default function RootLayout({
-  children,
+	children,
 }: Readonly<{
-  children: React.ReactNode;
+	children: React.ReactNode;
 }>) {
 	return (
-		<html lang="en" suppressHydrationWarning>
-			<body
-				className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-			>
+		<html
+			lang="en"
+			className={`${display.variable} ${sans.variable} ${mono.variable}`}
+			suppressHydrationWarning
+		>
+			<body>
 				<Providers>
-					<div className="grid grid-rows-[auto_1fr] h-svh">
-						<Header />
+					<div className="app">
+						<IconRail />
+						<AppHeader />
+						<CreatorTape />
 						{children}
+						<PriceFooter />
 					</div>
 				</Providers>
 			</body>

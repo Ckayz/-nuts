@@ -1,31 +1,103 @@
-"use client"
+import { CalloutPost } from "@/components/feed/callout-post";
+import { NewCalloutsBar } from "@/components/feed/new-callouts-bar";
+import { PositionList, TrendingList } from "@/components/feed/thesis-list";
+import { Leaderboard } from "@/components/creator/leaderboard";
+import { Pill, TodoOwner } from "@/components/primitives";
+import { usd } from "@/lib/format";
+import {
+	creatorPayouts,
+	leaderboard,
+	theses,
+	trending,
+	yourPositions,
+} from "@/lib/view-data";
 
-const TITLE_TEXT = `
- ██████╗ ███████╗████████╗████████╗███████╗██████╗
- ██╔══██╗██╔════╝╚══██╔══╝╚══██╔══╝██╔════╝██╔══██╗
- ██████╔╝█████╗     ██║      ██║   █████╗  ██████╔╝
- ██╔══██╗██╔══╝     ██║      ██║   ██╔══╝  ██╔══██╗
- ██████╔╝███████╗   ██║      ██║   ███████╗██║  ██║
- ╚═════╝ ╚══════╝   ╚═╝      ╚═╝   ╚══════╝╚═╝  ╚═╝
+export default function DiscoverPage() {
+	return (
+		<div className="work">
+			<aside className="col l">
+				<div className="sec">
+					<div className="sec-h">
+						<h2 className="h2">
+							Top P&amp;L<span className="alt">Top earners</span>
+						</h2>
+					</div>
+					<div style={{ display: "flex", gap: "6px" }}>
+						<Pill on>Net P&amp;L ▾</Pill>
+						<Pill>1W ▾</Pill>
+					</div>
+					<Leaderboard creators={leaderboard} />
+					<span className="note">
+						All P&amp;L from onchain fills and settlements. Ranking formula{" "}
+						<TodoOwner />
+					</span>
+				</div>
+				<div className="sec">
+					<div className="sec-h">
+						<span className="lbl">Creator payouts · this week</span>
+					</div>
+					<dl className="kv">
+						<dt>Paid to creators</dt>
+						<dd className="acc">{usd(creatorPayouts.paidToCreatorsUsd)}</dd>
+						<dt>From follower fills</dt>
+						<dd>{usd(creatorPayouts.fromFollowerFillsUsd)}</dd>
+						<dt>Top earner</dt>
+						<dd>
+							{creatorPayouts.topEarner.displayName} ·{" "}
+							{usd(creatorPayouts.topEarnerUsd)}
+						</dd>
+					</dl>
+					<span className="note">
+						Creators earn a share of every fill their callout brings in, like X
+						pays creators. Rate <TodoOwner />
+					</span>
+				</div>
+			</aside>
 
- ████████╗    ███████╗████████╗ █████╗  ██████╗██╗  ██╗
- ╚══██╔══╝    ██╔════╝╚══██╔══╝██╔══██╗██╔════╝██║ ██╔╝
-    ██║       ███████╗   ██║   ███████║██║     █████╔╝
-    ██║       ╚════██║   ██║   ██╔══██║██║     ██╔═██╗
-    ██║       ███████║   ██║   ██║  ██║╚██████╗██║  ██╗
-    ╚═╝       ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝
- `;
+			<main className="col">
+				<div className="sec-h">
+					<h2 className="h2">
+						Callouts<span className="alt">Following</span>
+						<span className="alt">Top</span>
+					</h2>
+					<div style={{ display: "flex", gap: "6px" }}>
+						<Pill on>All</Pill>
+						<Pill>BTC</Pill>
+						<Pill>ETH</Pill>
+						<Pill>SOL</Pill>
+					</div>
+				</div>
+				<NewCalloutsBar />
+				<div className="feed">
+					{theses.map((t) => (
+						<CalloutPost key={t.slug} thesis={t} />
+					))}
+				</div>
+			</main>
 
-export default function Home() {
-
-  return (
-    <div className="container mx-auto max-w-3xl px-4 py-2">
-      <pre className="overflow-x-auto font-mono text-sm">{TITLE_TEXT}</pre>
-      <div className="grid gap-6">
-        <section className="rounded-lg border p-4">
-          <h2 className="mb-2 font-medium">API Status</h2>
-        </section>
-      </div>
-    </div>
-  );
+			<aside className="col r">
+				<div className="sec">
+					<div className="sec-h">
+						<h2 className="h2">
+							Trending<span className="alt">Ending</span>
+							<span className="alt">Settled</span>
+						</h2>
+					</div>
+					<TrendingList items={trending} />
+					<span className="note">
+						Trending and ending rules <TodoOwner />
+					</span>
+				</div>
+				<div className="sec">
+					<div className="sec-h">
+						<span className="lbl">Your positions</span>
+						<span className="mono dim" style={{ fontSize: "11px" }}>
+							{yourPositions.length} open
+						</span>
+					</div>
+					<PositionList positions={yourPositions} />
+				</div>
+			</aside>
+		</div>
+	);
 }

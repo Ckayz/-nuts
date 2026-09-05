@@ -1,4 +1,5 @@
 "use client";
+import { Avatar } from "@/components/primitives";
 
 /**
  * Header wallet control: connect, then sign in, then show the truncated address.
@@ -143,7 +144,7 @@ export function WalletBar({ network }: { network: string }) {
 		(!isConnected || !address || address.toLowerCase() === session.walletAddress.toLowerCase());
 
 	if (session !== null && sessionMatchesAccount) {
-  return <details className="wallet-menu"><summary className="wallet"><span className="av av-26 av-asset" aria-hidden="true">{session.truncatedAddress.slice(2, 4).toUpperCase()}</span><span className="dot" aria-hidden="true" /><span className="num">{session.truncatedAddress}</span></summary><div className="card pad"><span className="mut">{networkLabel(chain, chainId) ?? network}</span>{/* TODO-OWNER: profile and reconnect menu labels. */}<Link className="btn sec" href={`/u/${session.walletAddress.toLowerCase()}`}>Profile</Link>{!isConnected ? connectors.map(c => <button type="button" key={c.uid} className="btn sec" disabled={connectPending} onClick={() => connect({ connector: c })}>Connect {c.name}</button>) : null}<button type="button" className="btn sec" onClick={runSignOut}>Sign out</button></div></details>;
+  return <details className="wallet-menu"><summary className="wallet"><Avatar seed={session.walletAddress.toLowerCase()} initials={session.truncatedAddress.slice(2, 4).toUpperCase()} size={26} /><span className="dot" aria-hidden="true" /><span className="num">{session.truncatedAddress}</span></summary><div className="card pad"><span className="mut">{networkLabel(chain, chainId) ?? network}</span>{/* TODO-OWNER: profile and reconnect menu labels. */}<Link className="btn sec" href={`/u/${session.walletAddress.toLowerCase()}`}>Profile</Link>{!isConnected ? connectors.map(c => <button type="button" key={c.uid} className="btn sec" disabled={connectPending} onClick={() => connect({ connector: c })}>Connect {c.name}</button>) : null}<button type="button" className="btn sec" onClick={runSignOut}>Sign out</button></div></details>;
  }
  if (!isConnected || !address) {
   return <details className="wallet-menu"><summary className="btn out">Sign in</summary><div className="card pad stack">{connectors.map(c => <button type="button" key={c.uid} className="btn sec" disabled={connectPending} onClick={() => connect({ connector: c })}>{c.name}</button>)}{connectors.length === 0 ? <span className="mut">no connector</span> : null}</div></details>;

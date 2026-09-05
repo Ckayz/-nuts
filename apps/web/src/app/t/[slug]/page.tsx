@@ -58,7 +58,7 @@ export default async function ThesisPage({ params }: { params: Promise<{ slug: s
   <CreatorStats creator={t.creator} {...social} />
  </>}>
   <article className="post thread-post">
-   <Link href={`/u/${t.creator.handle}`} aria-label={t.creator.displayName}><Avatar initials={t.creator.initials} /></Link>
+   <Link href={`/u/${t.creator.handle}`} aria-label={t.creator.displayName}><Avatar seed={t.creator.avatarSeed} initials={t.creator.initials} /></Link>
    <div className="post-main">
     <div className="p-head"><Link className="p-name" href={`/u/${t.creator.handle}`}>{t.creator.displayName}</Link><span className="p-handle">@{t.creator.handleLabel}</span><span className="p-time">{t.postedLabel}</span>
      {t.status && t.statusLabel ? <StatusChip status={t.status} label={t.statusLabel} /> : null}
@@ -71,6 +71,6 @@ export default async function ThesisPage({ params }: { params: Promise<{ slug: s
     <span className="mut num thread-link">{detail.shareUrl}</span>
    </div>
   </article>
-  <section className="card" id="comments"><div className="card-h"><h3>Comments</h3><span className="x num">{t.commentCount}</span></div><div className="card-b thread-comments"><CommentsList comments={detail.comments} thesisId={t.id} {...social} /></div></section>
+  <section className="card" id="comments"><div className="card-h"><h3>Comments</h3><span className="x num">{t.commentCount}</span></div><div className="card-b thread-comments"><CommentsList viewerSeed={social.signedIn ? social.mockCreator?.avatarSeed : undefined} viewerInitials={social.signedIn ? social.mockCreator?.initials : "?"} comments={detail.comments} thesisId={t.id} {...social} /></div></section>
  </PageFrame>;
 }

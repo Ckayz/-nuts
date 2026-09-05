@@ -13,7 +13,7 @@
  */
 import { useActionState, useState } from "react";
 import { Textarea } from "@nuts/ui/components/textarea";
-import { TodoOwner } from "@/components/primitives";
+import { Avatar, TodoOwner } from "@/components/primitives";
 import { TradeCards } from "@/components/feed/trade-card";
 import type { PnlCard } from "@/lib/display-types";
 import type { AssetTag } from "@/lib/thesis/composer-data";
@@ -40,6 +40,8 @@ export function Composer({
 	presetRationale,
 	previewCards,
 	signedIn,
+	viewerSeed,
+	viewerInitials = "?",
 	databaseMode,
 }: {
 	/** Tag pills; they come from live book data, never a hardcoded list. */
@@ -53,6 +55,8 @@ export function Composer({
 	/** Cards for the positions `presetRationale` links, resolved server-side. */
 	previewCards: PnlCard[];
 	signedIn: boolean;
+	viewerSeed?: string;
+	viewerInitials?: string;
 	databaseMode: boolean;
 }) {
 	const [state, formAction, pending] = useActionState(publishPostFromForm, INITIAL);
@@ -72,7 +76,7 @@ export function Composer({
 		<form action={formAction} className="card pad">
 			<div className="card-h"><h3>New thesis</h3><span className="x">Text is required. A trade is optional.<TodoOwner /></span></div>
 			<div className="field compose-field">
-				<span className="av av-40 av-asset compose-avatar" aria-hidden="true">{signedIn ? "•" : "?"}</span>
+				<Avatar seed={signedIn ? viewerSeed : undefined} initials={signedIn ? viewerInitials : "?"} size={40} className="compose-avatar" />
 				{/* The mockup shows the text itself, not a label above it; the field
 				    keeps its accessible name for a screen reader. */}
 				<label className="lbl lbl-hidden" htmlFor="post-headline">
@@ -132,7 +136,7 @@ export function Composer({
 							aria-pressed={tag === asset}
 							onClick={() => setTag(tag === asset ? null : asset)}
 						>
-							<span className="av av-asset" aria-hidden="true">{asset}</span>{name}
+							<Avatar asset={asset} tone="asset" initials={asset} size={22} />{name}
 						</button>
 					))}
 				</div>

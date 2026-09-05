@@ -8,6 +8,7 @@ import "server-only";
  * roll it back. Column and constraint names verified against
  * `packages/db/src/schema/auth-challenges.ts` and `users.ts`.
  */
+import { generateDefaultIdentity } from "../profile/default-identity";
 import { randomBytes } from "node:crypto";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { db as defaultDb } from "@nuts/db";
@@ -158,20 +159,41 @@ export async function consumeChallenge(
  * same wallet conflicts on `users_wallet_address_unique` and returns the
  * existing row, so two connects produce exactly one row.
  *
- * The profile columns (`display_name`, `bio`, `avatar_url`) are left null. The
- * wallet address is the identity; nothing is invented for a new user.
+ * New profiles receive an editable generated handle and display name; bio and
+ * avatar_url stay null. Existing profiles are never overwritten or backfilled.
  */
 export async function createOrFetchUser(
 	database: Database,
 	walletAddressInput: string,
+	options: { randomInt?: (maxExclusive: number) => number } = {},
 ): Promise<User> {
 	const walletAddress = normalizeWalletAddress(walletAddressInput);
-	const inserted = await database
-		.insert(users)
-		.values({ walletAddress })
-		.onConflictDoNothing({ target: users.walletAddress })
-		.returning();
-	if (inserted[0]) return inserted[0];
+	// TODO-OWNER: at most five retries after the initial handle attempt.
+	const maxRetries = 5;
+	let identity = generateDefaultIdentity(options.randomInt);
+	for (let attempt = 0; ; attempt++) {
+		const fallback = attempt > maxRetries;
+		try {
+			// A nested transaction is a savepoint when the caller supplied a tx.
+			// Roll back the failed statement before catching a unique violation.
+			const inserted = await database.transaction(tx => tx
+				.insert(users)
+				.values({ walletAddress, displayName: identity.displayName, handle: fallback ? null : identity.handle })
+				.onConflictDoNothing({ target: users.walletAddress })
+				.returning());
+			if (inserted[0]) return inserted[0];
+			break;
+		} catch (error) {
+			const isHandleConflict = (value: unknown): boolean => {
+				if (!value || typeof value !== "object") return false;
+				return "code" in value && value.code === "23505" &&
+					"constraint" in value && value.constraint === "users_handle_unique";
+			};
+			if (fallback || !(isHandleConflict(error) ||
+				(error !== null && typeof error === "object" && "cause" in error && isHandleConflict(error.cause)))) throw error;
+			if (attempt < maxRetries) identity = generateDefaultIdentity(options.randomInt);
+		}
+	}
 	const existing = await database
 		.select()
 		.from(users)

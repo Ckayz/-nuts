@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { avatarDataUri } from "@/lib/avatar";
+import { assetIconPath } from "@/lib/market/asset-icon";
 import type { CSSProperties, ReactNode } from "react";
 import type { Tag, ThesisStatus } from "@/lib/display-types";
 
@@ -12,7 +14,7 @@ import type { Tag, ThesisStatus } from "@/lib/display-types";
  * components outside this round's fence keep compiling; each maps to the
  * nearest mockup step (`s` → 26, default → 34, `lg` → 40).
  */
-export type AvatarSize = "s" | "lg" | 26 | 30 | 34 | 40 | 44 | 80;
+export type AvatarSize = "s" | "lg" | 22 | 26 | 30 | 34 | 40 | 44 | 80;
 
 const AVATAR_STEP: Record<string, number> = { s: 26, lg: 40 };
 
@@ -37,8 +39,11 @@ export function avatarTone(initials: string): string {
 	return AVATAR_TONES[hash % AVATAR_TONES.length]!;
 }
 
+/** Brand logos knowingly bend "colour only on money" by the owner’s order. */
 export function Avatar({
 	initials,
+	seed,
+	asset,
 	size,
 	tone,
 	className,
@@ -46,6 +51,8 @@ export function Avatar({
 	"aria-label": ariaLabel,
 }: {
 	initials: string;
+	seed?: string;
+	asset?: string;
 	size?: AvatarSize;
 	/** `asset` renders the mockup's neutral ticker avatar instead of a person. */
 	tone?: "person" | "asset";
@@ -54,7 +61,10 @@ export function Avatar({
 	"aria-label"?: string;
 }) {
 	const step = typeof size === "number" ? size : AVATAR_STEP[size ?? ""] ?? 34;
-	const colour = tone === "asset" ? "av-asset" : avatarTone(initials);
+	const isAsset = tone === "asset" || asset !== undefined;
+	const src = asset !== undefined ? assetIconPath(asset) : null;
+	const dataUri = !isAsset && seed ? avatarDataUri(seed) : null;
+	const colour = isAsset ? "av-asset" : avatarTone(initials);
 	return (
 		<span
 			className={`av av-${step} ${colour}${className ? ` ${className}` : ""}`}
@@ -62,7 +72,7 @@ export function Avatar({
 			aria-label={ariaLabel}
 			aria-hidden={ariaLabel === undefined ? true : undefined}
 		>
-			{initials}
+			{src || dataUri ? <img src={src ?? dataUri!} alt="" width={step} height={step} draggable={false} style={{ display: "block", width: "100%", height: "100%", borderRadius: "50%" }} /> : initials}
 		</span>
 	);
 }
@@ -126,7 +136,7 @@ export function TagRow({ tag, backed, thesisId }: { tag: Tag | null; backed?: bo
 	return (
 		<div className="tags">
 			<Link className="mtag" href={`/m/${tag.slug}?thesis=${thesisId}`}>
-				<Avatar initials={tag.asset} tone="asset" size={26} />
+				<Avatar asset={tag.asset} initials={tag.asset} tone="asset" size={26} />
 				{tag.asset} market
 			</Link>
 			{tag.structureLabel ? (

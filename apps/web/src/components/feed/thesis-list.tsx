@@ -12,7 +12,7 @@ import type { MarketSummary, Position } from "@/lib/display-types";
 export function PositionRow({ position }: { position: Position }) {
 	return (
 		<Link className="row" href={`/p/${position.id}`}>
-			<Avatar initials={position.asset === "" ? "—" : position.asset} tone="asset" size={30} />
+			<Avatar asset={position.asset} initials={position.asset === "" ? "—" : position.asset} tone="asset" size={30} />
 			<span className="t">
 				<b>{position.thesisHeadline ?? `${position.asset} position`}</b>
 				<i>
@@ -45,7 +45,7 @@ export function MarketList({ markets }: { markets: MarketSummary[] }) {
 		<div className="card-b">
 			{markets.map((market) => (
 				<Link className="row" href={`/m/${market.slug}`} key={market.slug}>
-					<Avatar initials={market.asset} tone="asset" size={30} />
+					<Avatar asset={market.asset} initials={market.asset} tone="asset" size={30} />
 					<span className="t">
 						<b>{market.name}</b>
 						<i>{market.asset} · Base</i>

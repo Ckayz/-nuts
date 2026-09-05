@@ -77,8 +77,8 @@ export function SearchList({ id, optionPrefix, results, selected, listRef, onCho
 }) {
 	let index = 0;
 	const groups = [
-		{ label: "Markets", rows: results?.markets.map(market => ({ href: `/m/${encodeURIComponent(market.slug)}` as `/m/${string}`, displayName: market.name, label: market.asset, initials: market.asset.slice(0, 2), tone: "asset" as const })) ?? [] },
-		{ label: "People", rows: results?.people.map(person => ({ ...person, label: `@${person.handleLabel}`, tone: "person" as const })) ?? [] },
+		{ label: "Markets", rows: results?.markets.map(market => ({ href: `/m/${encodeURIComponent(market.slug)}` as `/m/${string}`, displayName: market.name, label: market.asset, asset: market.asset, avatarSeed: undefined, initials: market.asset.slice(0, 2), tone: "asset" as const })) ?? [] },
+		{ label: "People", rows: results?.people.map(person => ({ ...person, asset: undefined, label: `@${person.handleLabel}`, tone: "person" as const })) ?? [] },
 	];
 	return <>
 		<div id={id} ref={listRef} role="listbox" aria-label={LABEL} aria-busy={results === null}>
@@ -87,7 +87,7 @@ export function SearchList({ id, optionPrefix, results, selected, listRef, onCho
 				{group.rows.map(row => { const current = index++; return <Link key={row.href} href={row.href} prefetch={false}
 					role="option" id={`${optionPrefix}-option-${current}`} aria-selected={selected === current}
 					tabIndex={-1} className="search-option" onMouseDown={event => event.preventDefault()} onClick={onChoose}>
-					<Avatar initials={row.initials} tone={row.tone} /><span><strong>{row.displayName}</strong><small>{row.label}</small></span>
+					<Avatar asset={row.asset} seed={row.avatarSeed} initials={row.initials} tone={row.tone} /><span><strong>{row.displayName}</strong><small>{row.label}</small></span>
 				</Link>; })}
 			</div>)}
 		</div>

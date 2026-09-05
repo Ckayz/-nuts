@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useConfig, useConnection, useSendTransaction, useSwitchChain } from "wagmi";
 import { waitForTransactionReceipt } from "wagmi/actions";
 import { TodoOwner } from "@/components/primitives";
@@ -77,6 +77,29 @@ export function changedEconomics(a: QuoteRaw | null, b: QuoteRaw | null): readon
  * `lib/wagmi.ts` — so the comparison was `8453 !== 8453` for every user and a
  * wallet on Ethereum went straight to `eth_sendTransaction`.
  */
+/**
+ * Has the panel's structure changed out from under the quote it is showing?
+ *
+ * The market table's "Select" is a link to `?structure=…`, so choosing another
+ * structure is a CLIENT-SIDE navigation: this component keeps its state and only
+ * its props change. A side click requotes (`chooseSide`) and so does the amount
+ * blur, but a structure change requoted nothing — so the panel kept the previous
+ * structure's order id, contracts, max loss and break-even under the NEW
+ * structure's name. Measured on a db-mode production build 2026-09-05: still
+ * wrong 26 s after the click, and it cleared only when the amount field was
+ * touched. `staleQuote` did keep `Trade` disabled the whole time, so nothing
+ * could be signed against the wrong figures — the panel simply said something
+ * untrue about which trade it was describing.
+ *
+ * Pure so it can be tested without a DOM harness, like `sendGuard` above.
+ * `quoted` is undefined only before the first structure exists, in which case
+ * the arrival of one is itself a change worth quoting.
+ */
+export function structureChanged(quoted: string | undefined, current: string | undefined): boolean {
+	if (current === undefined) return false;
+	return quoted !== current;
+}
+
 export type SendGuard =
 	| { readonly ok: true }
 	| { readonly ok: false; readonly action: "connect" | "switch" | "signIn"; readonly message: string };
@@ -235,6 +258,19 @@ export function TakeASide({
 		},
 		[budgetInput, requote, trade],
 	);
+
+	/**
+	 * Requote when the structure changes, exactly as a side click does. One
+	 * server quote per navigation — a discrete, user-initiated event, so there is
+	 * no debounce, no interval and no timing value chosen here.
+	 */
+	const quotedStructure = useRef(trade?.structureId);
+	useEffect(() => {
+		if (trade === undefined) return;
+		if (!structureChanged(quotedStructure.current, trade.structureId)) return;
+		quotedStructure.current = trade.structureId;
+		requote(side, budgetInput);
+	}, [budgetInput, requote, side, trade]);
 
 	const sign = useCallback(() => {
 		if (trade === undefined) return;

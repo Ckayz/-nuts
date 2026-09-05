@@ -8,6 +8,7 @@
  *   cd apps/web && bun test src/lib/auth/auth.integration.test.ts
  * (`@nuts/env/load` finds apps/web/.env.local and apps/web/.env by itself.)
  */
+import { DEFAULT_HANDLE_RE, DEFAULT_DISPLAY_NAME_RE } from "../profile/default-identity";
 import { describe, expect, test } from "bun:test";
 import { and, eq, sql } from "drizzle-orm";
 import { authChallenges, users } from "@nuts/db/schema/index";
@@ -17,6 +18,24 @@ import { completeSignIn, startSignIn } from "./sign-in";
 import type { SignatureVerifier } from "./verifier";
 import { buildSignInMessage } from "./message";
 import { SIGN_IN_STATEMENT } from "./constants";
+
+// Error filtering can be verified offline; collision recovery below uses real pg.
+test("create-or-fetch rethrows unrelated database errors unchanged", async () => {
+	for (const error of [
+		{ code: "23505", constraint: "other_unique" },
+		{ code: "23514", constraint: "users_handle_unique" },
+		new Error("connection failed"),
+		new Error("wrapped", { cause: { code: "23505", constraint: "other_unique" } }),
+	]) {
+		let calls = 0;
+		const database = { transaction: async () => { calls++; throw error; } } as unknown as Database;
+		try {
+			await createOrFetchUser(database, "0x00000000000000000000000000000000feed0001");
+			throw new Error("Expected the original database error");
+		} catch (actual) { expect(actual).toBe(error); }
+		expect(calls).toBe(1);
+	}
+});
 
 const databaseUrl = process.env.DATABASE_URL;
 const DOMAIN = "localhost:3109";
@@ -106,8 +125,10 @@ if (!databaseUrl) {
 				.where(eq(users.walletAddress, WALLET));
 			expect(Number(count?.total)).toBe(1);
 			expect(first.walletAddress).toBe(WALLET);
-			// Nothing is invented for a new profile.
-			expect(first.displayName).toBeNull();
+			expect(first.handle).toMatch(DEFAULT_HANDLE_RE);
+			expect(first.displayName).toMatch(DEFAULT_DISPLAY_NAME_RE);
+			expect(first.handle!.slice(-4)).toBe(first.displayName!.slice(-4));
+			expect(second.handle).toBe(first.handle);
 			expect(first.bio).toBeNull();
 			expect(first.avatarUrl).toBeNull();
 		});
@@ -116,6 +137,43 @@ if (!databaseUrl) {
 			const a = await createOrFetchUser(tx, WALLET);
 			const b = await createOrFetchUser(tx, OTHER_WALLET);
 			expect(a.id).not.toBe(b.id);
+		});
+
+		probe("handle collision retries through the real Drizzle error wrapper", async (tx) => {
+			const first = await createOrFetchUser(tx, WALLET, { randomInt: () => 7 });
+			let calls = 0;
+			const second = await createOrFetchUser(tx, OTHER_WALLET, { randomInt: () => calls++ === 0 ? 7 : 8 });
+			expect(first.handle).toBe("thesis_0007");
+			expect(second.handle).toBe("thesis_0008");
+			expect(calls).toBe(2);
+		});
+
+		probe("real duplicate handles expose the exact pg code and constraint through cause", async (tx) => {
+			await createOrFetchUser(tx, WALLET, { randomInt: () => 7 });
+			let observed: unknown;
+			try {
+				await tx.transaction(inner => inner.insert(users).values({ walletAddress: OTHER_WALLET, handle: "thesis_0007" }));
+			} catch (error) { observed = error; }
+			expect(observed).toBeInstanceOf(Error);
+			expect((observed as Error).cause).toMatchObject({ code: "23505", constraint: "users_handle_unique" });
+		});
+
+		probe("constant collisions fall back to a named profile without a handle", async (tx) => {
+			await createOrFetchUser(tx, WALLET, { randomInt: () => 7 });
+			let calls = 0;
+			const second = await createOrFetchUser(tx, OTHER_WALLET, { randomInt: () => { calls++; return 7; } });
+			expect(calls).toBe(6); // Initial attempt + the brief's five retries.
+			expect(second.handle).toBeNull();
+			expect(second.displayName).toBe("thesis-0007");
+		});
+
+		probe("reconnecting never overwrites an edited profile", async (tx) => {
+			const first = await createOrFetchUser(tx, WALLET);
+			await tx.update(users).set({ handle: "identity_edited", displayName: "Edited name" }).where(eq(users.id, first.id));
+			const second = await createOrFetchUser(tx, WALLET);
+			expect(second.id).toBe(first.id);
+			expect(second.handle).toBe("identity_edited");
+			expect(second.displayName).toBe("Edited name");
 		});
 
 		test("a malformed address never reaches the database", () => {

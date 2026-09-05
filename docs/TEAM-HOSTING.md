@@ -38,6 +38,26 @@ Never `drizzle-kit push` against the shared project (it can DROP the other devel
 3. **Custom domain**: assign it in Vercel → Domains. A pasted `https://<domain>/p/<id>` link unfurls into a trade card as soon as the page is served on that domain: `lib/site-origin.ts` accepts BOTH the deployment URL (`VERCEL_PROJECT_PRODUCTION_URL` / `VERCEL_URL`) and the origin the request actually arrived on, so a branch alias and a custom domain both work without waiting for either to become the production domain. (Measured 2026-09-05 on a db-mode production build: with the deployment URL set to one name, a link written on a second name unfurled when the page was served on that second name.) A link written on a THIRD origin the deployment never answers on stays plain text, which is the intended fence.
 4. Then the owner's tiny real fill (`packages/thetanuts/scripts/README.md`) is the final proof of the money path.
 
+## 4b. If the build fails with "Invalid environment variables"
+
+Setting a variable in the Vercel dashboard is not enough. **Turborepo filters the environment
+strictly**: a variable set on the project but not listed in `turbo.json`'s `tasks.build.env` is
+withheld from the task, and the app sees it as `undefined`. The build then dies at env
+validation naming the variable, while the real cause is printed far below as a *warning*:
+
+```
+WARNING - the following environment variables are set on your Vercel project, but missing
+from "turbo.json". These variables WILL NOT be available to your application
+  - OPENROUTER_API_KEY  - DATA_SOURCE  - SESSION_SECRET  - DATABASE_URL
+```
+
+Fixed on 2026-09-05 by declaring every server variable in `turbo.json`. **Adding a variable to
+`packages/env/src/server.ts` means adding it to `turbo.json` too**, or the next deploy fails the
+same way. Note `turbo.json` rejects `"//"` comment keys, so this note lives here instead.
+
+Reproduce locally with `bun run build` (through turbo), not `bunx next build` — the direct call
+bypasses the filter and passes even when Vercel would fail.
+
 ## 5. Things that will bite
 - Preview deployments get their own database URL only if you set one; do not point previews at production data.
 - The agent needs `OPENROUTER_API_KEY` at runtime; without it every `/agent` message fails.

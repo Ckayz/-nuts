@@ -1,1 +1,0 @@
-ALTER TABLE "theses" ADD CONSTRAINT "theses_public_creator_position_required" CHECK ("theses"."status" not in ('open', 'expired', 'settled') or "theses"."creator_position_id" is not null);

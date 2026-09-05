@@ -62,11 +62,6 @@ BEGIN
 END;
 $$;
 --> statement-breakpoint
-CREATE CONSTRAINT TRIGGER users_public_creator_wallet_invariant
-AFTER UPDATE OF wallet_address ON public.users
-DEFERRABLE INITIALLY DEFERRED
-FOR EACH ROW EXECUTE FUNCTION public.enforce_public_creator_wallet_unchanged();
---> statement-breakpoint
 CREATE FUNCTION public.enforce_order_snapshot_immutable()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -85,6 +80,21 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER theses_creator_position_invariant
+AFTER INSERT OR UPDATE ON theses
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION enforce_thesis_creator_position();
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER positions_creator_position_invariant
+AFTER UPDATE OR DELETE ON positions
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION enforce_thesis_creator_position();
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER users_public_creator_wallet_invariant
+AFTER UPDATE OF wallet_address ON public.users
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION public.enforce_public_creator_wallet_unchanged();
 --> statement-breakpoint
 CREATE TRIGGER theses_order_snapshot_immutable
 BEFORE UPDATE ON public.theses

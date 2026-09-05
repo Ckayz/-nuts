@@ -5,50 +5,22 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1788552221060,
-      "tag": "0000_polite_gressill",
+      "when": 1788556642875,
+      "tag": "0000_agent_tables",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1788552268497,
-      "tag": "0001_tidy_dragon_lord",
+      "when": 1788571776982,
+      "tag": "0001_core_schema",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
-      "when": 1788553769423,
-      "tag": "0002_material_pestilence",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1788553777046,
-      "tag": "0003_public-thesis-invariant",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1788555903803,
-      "tag": "0004_boring_gorilla_man",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1788556070707,
-      "tag": "0005_wallet-and-snapshot-invariants",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1788557327839,
-      "tag": "0006_agent_tables",
+      "when": 1788571843529,
+      "tag": "0002_core_triggers",
       "breakpoints": true
     }
   ]

@@ -39,6 +39,14 @@ Activity must reference a thesis or position. Follow-up: activity lifecycle vali
 
 ## Migrations
 
+The chain is rebased onto the AI track's migration, which is already applied to the production Supabase database:
+
+- `0000_agent_tables` — the AI track's six `agent_*` tables (`docs/HANDOVER.md` §4). Restored byte-identically from `origin/main`; already applied to production. Never regenerate or edit it.
+- `0001_core_schema` — generated from `src/schema`: the five enums, the seven core tables with their generated checks, the foreign keys, and the unique indexes.
+- `0002_core_triggers` — hand-written: three `plpgsql` trigger functions and the five triggers they back (the creator-position invariant on `theses` and `positions`, the public-creator wallet invariant on `users`, and the two order-snapshot immutability triggers). Drizzle does not model functions or triggers, so this migration has no snapshot of its own; the next `drizzle-kit generate` correctly continues from `meta/0001_snapshot.json`.
+
+Why the chain was rebased: drizzle-orm's migrator reads only the single most recently applied row (`order by created_at desc limit 1`) and applies a journal entry when `lastDbMigration.created_at < migration.folderMillis` (`drizzle-orm/pg-core/dialect.js`). It never compares tags or hashes. Our original chain carried `when` timestamps *earlier* than the already-applied `0000_agent_tables`, so every one of our migrations would have been skipped silently against production — reporting success while changing nothing. Any migration added from here must carry a `when` greater than every applied entry. `bunx drizzle-kit generate` does this automatically; a hand-written journal entry must be given a fresh `Date.now()`.
+
 Generate migrations from this package:
 
 ```bash
@@ -54,14 +62,16 @@ cd packages/db
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres bunx drizzle-kit migrate
 ```
 
-Apply to production only with the intended production URL explicitly supplied. Git pushes do not migrate the database:
+Apply to production only with `drizzle-kit migrate` and the intended production URL explicitly supplied. Git pushes do not migrate the database:
 
 ```bash
 cd packages/db
 DATABASE_URL='<production-postgres-url>' bunx drizzle-kit migrate
 ```
 
-Migrations `0004_boring_gorilla_man` (generated checks) and `0005_wallet-and-snapshot-invariants` (hand-written functions/triggers) follow round 2's `0003`; both are recorded in `src/migrations/meta/_journal.json`. Existing rows must satisfy the new checks before migration can succeed. No backfill values are invented here.
+Never run `drizzle-kit push` (or `bun run db:push`) against the shared Supabase project. `push` reshapes the database to match the schema of whoever runs it, so a tree missing the other developer's tables can drop them; and because Drizzle does not model functions or triggers, `push` would never apply the `0002_core_triggers` layer at all. `push` is for a local throwaway database and nowhere else.
+
+Existing rows must satisfy the checks in `0001_core_schema` before migration can succeed. No backfill values are invented here.
 
 After applying migrations, run `DATABASE_URL='<intended-test-postgres-url>' bun test test/schema.integration.test.ts`. Each integration case seeds its own transaction and rolls it back. Without `DATABASE_URL`, the file emits one skipped test. The isolated trigger tests temporarily drop the overlapping Base CHECK or creator-position FK inside their rollback transaction to prove the trigger itself rejects the invalid relationship. Use a test database whose role owns these tables.
 

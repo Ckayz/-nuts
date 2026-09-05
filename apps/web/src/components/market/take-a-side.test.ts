@@ -4,7 +4,7 @@
  * economics comparison (C5).
  */
 import { describe, expect, test } from "bun:test";
-import { changedEconomics, sameEconomics, sendGuard } from "./take-a-side";
+import { changedEconomics, sameEconomics, sendGuard, structureChanged } from "./take-a-side";
 import type { QuoteRaw } from "@/lib/trade/types";
 
 const WALLET = "0x00000000000000000000000000000000000000a1";
@@ -140,5 +140,41 @@ describe("sameEconomics (C5: the wallet signs for what the panel showed)", () =>
 
 	test("a null-to-value change in an optional USD field is caught", () => {
 		expect(sameEconomics(raw({ maxPayoutUsd8: null }), raw({ maxPayoutUsd8: "1" }))).toBe(false);
+	});
+});
+
+/**
+ * The panel used to keep the PREVIOUS structure's figures under the NEW
+ * structure's name after a `?structure=…` navigation, because nothing requoted
+ * on a structure change (a side click and the amount blur both did). Measured
+ * on a db-mode production build: header `BTC put 79,000 P`, but
+ * `Order 81000/80000-PS` / `Max loss $250.00`, unchanged 26 s later.
+ */
+describe("structureChanged", () => {
+	const A = "727bc7cc9bcf7f8f";
+	const B = "81000_80000_ps_1d";
+
+	test("the same structure does not requote (this is every render after the first)", () => {
+		expect(structureChanged(A, A)).toBe(false);
+	});
+
+	test("a different structure requotes", () => {
+		expect(structureChanged(A, B)).toBe(true);
+		expect(structureChanged(B, A)).toBe(true);
+	});
+
+	test("the first structure to exist is quoted", () => {
+		expect(structureChanged(undefined, A)).toBe(true);
+	});
+
+	test("losing the structure requotes nothing (there is nothing to quote)", () => {
+		expect(structureChanged(A, undefined)).toBe(false);
+		expect(structureChanged(undefined, undefined)).toBe(false);
+	});
+
+	test("ids are compared exactly, never by prefix or case", () => {
+		expect(structureChanged(A, A.toUpperCase())).toBe(true);
+		expect(structureChanged(A, `${A}0`)).toBe(true);
+		expect(structureChanged(A, A.slice(0, -1))).toBe(true);
 	});
 });

@@ -17,6 +17,7 @@ import {
 
 import "@/styles/agent.css";
 import { TodoOwner } from "@/components/primitives";
+import { agentErrorMessage } from "@/lib/agent/errors";
 import { suggestionsFor } from "@/lib/agent/suggestions";
 import { AgentMarkdown } from "./agent-markdown";
 import { ToolActivity } from "./tool-activity";
@@ -37,7 +38,13 @@ const COPY = {
 	headerDescription: "Live Thetanuts liquidity on Base. It prepares trades; your wallet approves them.",
 	/** TODO-OWNER: what an empty conversation invites the visitor to ask. */
 	emptyDescription: "Ask about options, markets, or what a small budget could buy.",
-	/** TODO-OWNER: what a failed turn says. Nothing here names the cause. */
+	/**
+	 * TODO-OWNER: what a failed turn says when the server did not say anything
+	 * more specific. F-E: the server now usually does — `agentErrorMessage` picks
+	 * its sentence when the failure carries one, and falls back to this line for
+	 * anything the server did not write (a proxy error page, a dropped
+	 * connection), so provider text can never reach the screen.
+	 */
 	error: "Something went wrong. Try sending that again.",
 } as const;
 
@@ -367,7 +374,7 @@ export function AgentChat({
 				{busy && <p className="text-muted-foreground text-sm">Thinking…</p>}
 				{error && (
 					<p className="agent-msg">
-						{COPY.error} <TodoOwner />
+						{agentErrorMessage(error, COPY.error)} <TodoOwner />
 					</p>
 				)}
 			</div>

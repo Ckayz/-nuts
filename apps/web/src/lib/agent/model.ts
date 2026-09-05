@@ -4,6 +4,8 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 import { env } from "@nuts/env/server";
 
+import { providerModelProblem } from "./model-config";
+
 /**
  * The model provider is replaceable (PRD 11). Product behaviour is defined by
  * the context contract, the tools and the guardrails, not by a vendor.
@@ -40,6 +42,24 @@ if (!usingGateway && !env.OPENROUTER_API_KEY) {
 		"No model credential. Set AI_GATEWAY_API_KEY (preferred) or OPENROUTER_API_KEY.",
 	);
 }
+
+/**
+ * F-E item 1. The id and the provider must agree, checked ONCE here rather than
+ * discovered on every turn.
+ *
+ * `da09e81` measured the cost of not doing this: an OpenRouter `:free` id while
+ * the gateway key was set killed every agent turn, and because `streamText`
+ * reports through `onError` the route still answered HTTP 200. A boot error
+ * names the variable, the id and the two ways out; a silent 200 names nothing.
+ */
+const configProblem = providerModelProblem({
+	usingGateway,
+	models: [
+		{ variable: "AGENT_MODEL", id: env.AGENT_MODEL },
+		{ variable: "AGENT_GATE_MODEL", id: env.AGENT_GATE_MODEL },
+	],
+});
+if (configProblem !== null) throw new Error(configProblem);
 
 const openrouter = usingGateway
 	? null

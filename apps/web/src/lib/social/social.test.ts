@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { actorGuard, commentBody, desiredStateGuard, SOCIAL_PUBLIC_STATUSES } from "./guards";
+import { actorGuard, commentBody, desiredStateGuard, SOCIAL_PUBLIC_STATUSES, walletGuard } from "./guards";
 import { rankCreators, rankTheses, type RankingPosition, type RankingThesis } from "./ranking";
 import { writeComment, writeFollow, writeLike } from "./writes";
 import { db } from "@nuts/db";
@@ -75,4 +75,90 @@ test("server actions return sign_in_required with no cookie and never revalidate
 	const child = Bun.spawnSync([process.execPath, "--preload", "./test/setup.ts", "-e", script], { cwd: new URL("../../..", import.meta.url).pathname, env: { ...process.env, DATABASE_URL: "", SKIP_ENV_VALIDATION: "1" }, stdout: "pipe", stderr: "pipe" });
 	expect({ code: child.exitCode, stderr: child.stderr.toString() }).toEqual({ code: 0, stderr: "" });
 	expect(child.stdout.toString()).toContain("anonymous actions: 3 sign_in_required");
+});
+
+/**
+ * B-R2 (lane B pass 2), second half. The reviewer's measurement: "`toggleLike`,
+ * `toggleFollow`, and `addComment` pass `getSession().userId` directly to their
+ * writers … If sign-out fails before deleting the cookie, subsequent social
+ * actions can therefore retain the previous identity."
+ *
+ * The client now says which wallet it is holding, and a claim that disagrees
+ * with the session is refused. The session cookie is still the identity — the
+ * claim can only ever REFUSE, never grant.
+ */
+test("walletGuard refuses a claim that is not the session's wallet, and passes silence", () => {
+	const wallet = "0x00000000000000000000000000000000000000aa";
+	expect(walletGuard(wallet, undefined)).toBeNull();
+	expect(walletGuard(wallet, null)).toBeNull();
+	expect(walletGuard(wallet, wallet)).toBeNull();
+	expect(walletGuard(wallet, wallet.toUpperCase())).toBeNull();
+	expect(walletGuard(wallet, ` ${wallet} `)).toBeNull();
+	for (const claimed of ["0x00000000000000000000000000000000000000bb", "", " ", 1, {}, true, [wallet]]) {
+		expect(walletGuard(wallet, claimed)).toEqual({ error: "sign_in_required" });
+	}
+});
+
+test("social actions refuse a write whose wallet is not the session's, before any database work", () => {
+	const script = `
+		import { plugin } from "bun";
+		const SECRET = process.env.SESSION_SECRET;
+		const A = "0x00000000000000000000000000000000000000aa";
+		const B = "0x00000000000000000000000000000000000000bb";
+		const UID = "a0000000-0000-4000-8000-000000000001";
+		const { encodeSessionToken } = await import("./src/lib/auth/token.ts");
+		const now = Math.floor(Date.now() / 1000);
+		const token = encodeSessionToken({ v: 1, uid: UID, addr: A, iat: now, exp: now + 3600 }, SECRET);
+		plugin({ name: "session-cookie-probe", setup(build) {
+			build.module("next/headers", () => ({ exports: {
+				cookies: async () => ({ get: (name) => (name === "thesis_session" ? { value: token } : undefined) }),
+			}, loader: "object" }));
+			build.module("next/cache", () => ({ exports: { revalidatePath: () => { throw new Error("refused write revalidated"); } }, loader: "object" }));
+		}});
+		const { toggleLike, toggleFollow, addComment } = await import("./src/lib/social/actions.ts");
+		const T = "a0000000-0000-4000-8000-000000000002";
+		console.log(JSON.stringify({
+			// A DIFFERENT wallet than the cookie's: refused.
+			wrongLike: await toggleLike(T, true, B),
+			wrongFollow: await toggleFollow(UID, true, B),
+			wrongComment: await addComment(T, "hello", B),
+			// The session's own wallet, any casing: past the identity check. Mock
+			// mode is as far as this process can go, and that IS the proof that the
+			// refusal above is the identity check and not the data source.
+			rightLike: await toggleLike(T, true, A.toUpperCase()),
+			rightFollow: await toggleFollow(UID, true, A),
+			rightComment: await addComment(T, "hello", A),
+			// Saying nothing behaves exactly as before this change.
+			silentLike: await toggleLike(T, true),
+			silentFollow: await toggleFollow(UID, true),
+			silentComment: await addComment(T, "hello"),
+		}));
+	`;
+	const child = Bun.spawnSync([process.execPath, "--preload", "./test/setup.ts", "-e", script], {
+		cwd: new URL("../../..", import.meta.url).pathname,
+		env: {
+			...process.env,
+			DATABASE_URL: "",
+			SKIP_ENV_VALIDATION: "1",
+			DATA_SOURCE: "mock",
+			// Not the repository's own secret: this test signs its own cookie.
+			SESSION_SECRET: "connected-identity-test-secret-0123456789",
+		},
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	expect({ code: child.exitCode, stderr: child.stderr.toString() }).toEqual({ code: 0, stderr: "" });
+	const refused = { error: "sign_in_required" };
+	const reached = { error: "mock_mode" };
+	expect(JSON.parse(child.stdout.toString())).toEqual({
+		wrongLike: refused,
+		wrongFollow: refused,
+		wrongComment: refused,
+		rightLike: reached,
+		rightFollow: reached,
+		rightComment: reached,
+		silentLike: reached,
+		silentFollow: reached,
+		silentComment: reached,
+	});
 });

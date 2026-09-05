@@ -27,6 +27,7 @@ import {
 	signOut,
 	verifySignInSignature,
 } from "@/lib/auth/actions";
+import { publishConnectedIdentity } from "./connected-identity";
 import { useSessionMismatch } from "./use-session-mismatch";
 import { readableError } from "@/lib/messages";
 import { config } from "@/lib/wagmi";
@@ -192,6 +193,16 @@ export function WalletBar() {
 	// the old identity in the chip. Called before any early return, so the hook
 	// order is stable across the loading placeholder below.
 	const mismatched = useSessionMismatch(session?.walletAddress ?? null, isConnected, address, () => setSession(null));
+
+	// B-R2 second half: the social controls are rendered by Server Components on
+	// other routes and have no path to this state, so it is published once here
+	// and read through `useConnectedIdentity()`. Published BEFORE the loading
+	// early return below, so the hook order is stable and a mismatch that
+	// resolves during the first paint is not missed.
+	const connectedAddress = isConnected && address !== undefined ? address.toLowerCase() : null;
+	useEffect(() => {
+		publishConnectedIdentity({ mismatched, address: connectedAddress });
+	}, [mismatched, connectedAddress]);
 
 	// Reserve the chip's own footprint before the session is known, so the header
 	// does not jump when it resolves. `.wallet` is the tallest of the states.

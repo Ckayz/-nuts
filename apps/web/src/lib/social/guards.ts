@@ -21,3 +21,28 @@ export function commentBody(body: unknown): string | SocialError {
 export function desiredStateGuard(value: unknown): SocialError | null {
 	return value === undefined || typeof value === "boolean" ? null : { error: "invalid_state" };
 }
+
+/**
+ * B-R2 (lane B pass 2), second half. The caller may say WHICH wallet the
+ * browser is holding; when it does and that is not the session's wallet, the
+ * write is refused.
+ *
+ * The session cookie stays the identity — this never grants anything. It only
+ * refuses a write whose two identities disagree, which is the window a FAILED
+ * mismatch sign-out leaves open: the wallet is B, the cookie is still A, and
+ * without this the like lands as A.
+ *
+ * Fail closed: anything present that is not this session's wallet is a refusal,
+ * including a non-string and the empty string. Absent (`undefined`/`null`) is
+ * the caller saying nothing, which is the behaviour every existing caller had.
+ * The code is the existing `sign_in_required` — its sentence ("Sign in with
+ * your wallet first.") is what the person has to do, and no new copy is
+ * invented here.
+ */
+export function walletGuard(sessionWallet: string, claimed: unknown): SocialError | null {
+	if (claimed === undefined || claimed === null) return null;
+	if (typeof claimed !== "string") return { error: "sign_in_required" };
+	return claimed.trim().toLowerCase() === sessionWallet.trim().toLowerCase()
+		? null
+		: { error: "sign_in_required" };
+}

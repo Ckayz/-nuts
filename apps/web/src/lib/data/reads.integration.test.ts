@@ -96,7 +96,7 @@ const STRUCTURE = {
 } satisfies Partial<NewThesis>;
 
 function position(
-	overrides: Partial<NewPosition> & { id: string; thesisId: string; userId: string; walletAddress: string },
+	overrides: Partial<NewPosition> & { id: string; thesisId: string | null; userId: string; walletAddress: string },
 ): NewPosition {
 	const confirmed = overrides.status === undefined || overrides.status === "confirmed";
 	return {
@@ -357,6 +357,26 @@ if (!databaseUrl) {
 			expect(await getThread("btc-nfp-4a2c", { database: tx })).toBeNull();
 			expect(await getThread("", { database: tx })).toBeNull();
 		});
+	});
+
+	probe("standalone fills reach wallet and creator lists but never thesis totals", async tx => {
+		const id = "33330000-0000-4000-8000-000000000007";
+		await tx.insert(positions).values(position({ id, thesisId: null, role: "standalone", userId: BOB, walletAddress: BOB_WALLET, entryPremiumUsd: "123456.00" }));
+		const portfolio = await getPortfolio(BOB_WALLET, { database: tx });
+		expect(portfolio.find(row => row.id === id)?.thesisId).toBeNull();
+		expect(portfolio.find(row => row.id === id)?.thesisHeadline).toBeNull();
+		expect((await getPortfolio(CAROL_WALLET, { database: tx })).map(row => row.id)).not.toContain(id);
+		const profile = await getCreator(BOB_WALLET, { database: tx });
+		expect(profile?.positions.map(row => row.id)).toContain(id);
+		expect(profile?.positions.map(row => row.id)).not.toContain(P_DRAFT);
+		const thread = await getThread(T_BACKED, { database: tx });
+		expect(thread?.participantCount).toBe(3);
+		expect(thread?.thesis.backing?.pooledUsd).toBe("1000");
+		for (const status of ["pending", "failed"] as const) {
+			await tx.update(positions).set({ status, fillEvent: null, confirmedAt: null }).where(sql`${positions.id} = ${id}`);
+			expect((await getPortfolio(BOB_WALLET, { database: tx })).map(row => row.id)).not.toContain(id);
+			expect((await getCreator(BOB_WALLET, { database: tx }))?.positions.map(row => row.id)).not.toContain(id);
+		}
 	});
 
 	describe("getPortfolio", () => {

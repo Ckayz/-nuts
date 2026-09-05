@@ -35,13 +35,18 @@ describe("drizzle target fence", () => {
       expect(result.stderr).not.toContain("dummy");
     });
   }
-  for (const name of ["host", "port", "%68ost", "HOST", "hostaddr", "dbname", "database", "%44aTaBaSe"]) {
+  for (const name of ["host", "port", "%68ost", "HOST", "hostaddr", "dbname", "database", "%44aTaBaSe", "options", "OPTIONS", "%6fptions"]) {
     for (const flag of ["", "1"]) test(`query override ${name} rejected with flag=${flag}`, () => {
       const result = readConfig(`${local}?${name}=remote.invalid`, "", flag);
       expect(result.exitCode).not.toBe(0);
       expect(result.stderr).toContain("destination query overrides");
     });
   }
+  test("search_path options are rejected", () => {
+    const result = readConfig(`${local}?options=-c%20search_path%3Dother`);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("destination query overrides");
+  });
   test("driver-decoded database is printed", () => {
     expect(readConfig(local.replace("local_test", "local%5Ftest")).exitCode).toBe(0);
   });

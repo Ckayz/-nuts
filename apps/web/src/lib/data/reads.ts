@@ -281,7 +281,7 @@ export async function getThread(
 	};
 }
 
-/** Every filled position held by a wallet, newest first, with the thesis it belongs to. */
+/** Every filled position held by a wallet, newest first, with an optional linked thesis. */
 export async function getPortfolio(
 	walletAddress: string,
 	options: ReadOptions & { limit?: number } = {},
@@ -291,7 +291,7 @@ export async function getPortfolio(
 	const rows = await database
 		.select({ position: positions, thesis: theses })
 		.from(positions)
-		.innerJoin(theses, eq(theses.id, positions.thesisId))
+		.leftJoin(theses, eq(theses.id, positions.thesisId))
 		.where(
 			and(
 				eq(positions.walletAddress, address),
@@ -362,15 +362,15 @@ export async function getCreator(
 	const positionRows = await database
 		.select({ position: positions, thesis: theses })
 		.from(positions)
-		.innerJoin(theses, eq(theses.id, positions.thesisId))
+		.leftJoin(theses, eq(theses.id, positions.thesisId))
 		.where(
 			and(
 				eq(positions.userId, user.id),
-				// Same position rule as everywhere else, and only positions on
+				// Same position rule as everywhere else, standalone positions or positions on
 				// public theses: a `draft` or `cancelled` headline must not reach a
 				// public profile through a participant row.
 				inArray(positions.status, [...FILLED_POSITION_STATUSES]),
-				inArray(theses.status, [...PUBLIC_THESIS_STATUSES]),
+				or(isNull(positions.thesisId), inArray(theses.status, [...PUBLIC_THESIS_STATUSES])),
 			),
 		)
 		.orderBy(desc(positions.createdAt))

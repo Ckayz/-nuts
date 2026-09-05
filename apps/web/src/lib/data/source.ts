@@ -1,3 +1,5 @@
+import { env } from "@nuts/env/server";
+
 /**
  * Which read path the pages use. A development switch, not product behaviour.
  *
@@ -10,7 +12,12 @@
 export type DataSource = "mock" | "db";
 
 export function dataSource(): DataSource {
-	return process.env.DATA_SOURCE === "db" ? "db" : "mock";
+	const source = env.DATA_SOURCE;
+	if (env.NODE_ENV === "production" && source !== "db") {
+		// TODO-OWNER: whether mock production previews should ever be allowed.
+		throw new Error("Production requires DATA_SOURCE=db; fixture data cannot be served in production.");
+	}
+	return source === "db" ? "db" : "mock";
 }
 
 export function usingDatabase(): boolean {

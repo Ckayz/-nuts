@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
-import { CalloutPost } from "@/components/feed/callout-post";
+import { YourPositionsRail } from "@/components/market/your-positions-rail";
+import { TaggedPostsTabs } from "@/components/market/tagged-posts-tabs";
+import { getSession } from "@/lib/auth/session";
 import { MarketRail } from "@/components/market/market-rail";
 import { StructuresList } from "@/components/market/structures-list";
 import { TakeASide } from "@/components/market/take-a-side";
@@ -93,6 +95,8 @@ export default async function MarketPage({
 	});
 	if (loaded === null) notFound();
 	const { market, summaries, tagged, trade, unavailable } = loaded;
+	const databaseMode = usingDatabase();
+	const signedIn = databaseMode && (await getSession()) !== null;
 	// Selecting another structure keeps the post and side the visitor arrived
 	// with, so a link from a post does not silently drop what it was about.
 	const carried: Record<string, string> = {};
@@ -129,6 +133,7 @@ export default async function MarketPage({
 						Assets, strikes and expiries come from live OptionBook orders. Nothing here is a hardcoded list.
 					</span>
 				</div>
+				<YourPositionsRail asset={market.asset} />
 			</aside>
 
 			<main className="col">
@@ -176,19 +181,7 @@ export default async function MarketPage({
 					live={trade !== null}
 				/>
 
-				<div className="sec">
-					<div className="sec-h">
-						<h2 className="h2">Tagged posts</h2>
-						<span className="mono dim" style={{ fontSize: "11px" }}>
-							{tagged.length}
-						</span>
-					</div>
-					<div className="feed">
-						{tagged.map((t) => (
-							<CalloutPost key={t.slug} thesis={t} />
-						))}
-					</div>
-				</div>
+				<TaggedPostsTabs posts={tagged} signedIn={signedIn} databaseMode={databaseMode} />
 			</main>
 
 			<aside className="col r">

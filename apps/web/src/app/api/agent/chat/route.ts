@@ -23,24 +23,61 @@ import { chargeTurn, subjectFor } from "@/lib/agent/usage";
 // The request shape lives outside this file: a Next route handler may only
 // export its verbs and its route config, so a schema exported here would fail
 // the build, and it has to be importable by a test.
-import { MAX_MESSAGE_CHARS, MESSAGE_TOO_LONG, agentChatBodySchema, messageText } from "@/lib/agent/request";
+import {
+	MAX_MESSAGE_CHARS,
+	MESSAGE_TOO_LONG,
+	REQUEST_TOO_LONG,
+	agentChatBodySchema,
+	messageText,
+} from "@/lib/agent/request";
 
 export const maxDuration = 60;
 
 /**
- * Plain text of the newest user message, for the scope gate.
+ * C-2 (lane C pass 3, MAJOR). Plain text of EVERY user message in the request,
+ * in order, for the scope gate.
  *
- * C-P2-3: the join/trim lives in `lib/agent/request.ts` and is the SAME code
- * the schema measures against `MAX_MESSAGE_CHARS`, so what was validated and
- * what is classified cannot drift.
+ * This used to be `latestUserText` — a backwards scan that returned the newest
+ * user message and stopped. The whole client-supplied history was then forwarded
+ * to the primary model at line ~148, and nothing anywhere establishes that the
+ * earlier messages were ever classified: the history comes from the browser and
+ * carries no server signature, the schema accepts consecutive user messages, and
+ * `useChat` will replay whatever the client hands it. The reviewer's two
+ * sequences, reproduced here before the fix:
+ *
+ *   TWO_USER            {"gateTexts":["What is a put?"],
+ *                        "primaryRoles":["user","user"],"primaryHasScraper":true}
+ *   USER_ASSISTANT_USER {"gateTexts":["What is a put?"],
+ *                        "primaryRoles":["user","assistant","user"],
+ *                        "primaryHasScraper":true}
+ *
+ * PRD 10.8, verbatim: "Every inbound message is classified before the primary
+ * model runs. … This layer is authoritative." Everything in the request IS
+ * inbound, so everything in the request is classified.
+ *
+ * ASSISTANT parts are deliberately NOT included. They are not the person's
+ * request, and forwarding them to the gate would hand a classifier text a
+ * hostile client wrote under the model's own role — text the gate instruction
+ * says to treat as data would then arrive as conversation. The one thing that
+ * must be classified is what the user is asking for, and that is the user role.
+ *
+ * COST, stated rather than implied: every turn re-classifies the whole
+ * conversation's user text instead of one message, so the gate's input grows
+ * with the conversation. It is bounded — `agentChatBodySchema` caps a request at
+ * 80 messages, each user message at `MAX_MESSAGE_CHARS`, and the whole request
+ * at `MAX_REQUEST_CHARS` — so this cannot grow without limit, but it is not
+ * free. TODO-OWNER: the cheaper design is for the server to SIGN the history it
+ * returns and classify only unsigned user text; that is a new mechanism, not a
+ * fix, and it is the owner's call.
  */
-function latestUserText(messages: UIMessage[]): string {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const m = messages[i];
-		if (m?.role !== "user") continue;
-		return messageText(m.parts as Array<{ type?: unknown; text?: unknown }>);
+function userTexts(messages: UIMessage[]): string[] {
+	const texts: string[] = [];
+	for (const message of messages) {
+		if (message?.role !== "user") continue;
+		const text = messageText(message.parts as Array<{ type?: unknown; text?: unknown }>);
+		if (text.length > 0) texts.push(text);
 	}
-	return "";
+	return texts;
 }
 
 /**
@@ -72,13 +109,16 @@ export async function POST(request: Request) {
 		 * answers are 400s decided here, BEFORE `chargeTurn` and before any model
 		 * call. TODO-OWNER: the wording and the 2,000-character limit itself.
 		 */
-		const tooLong = body.error.issues.some((issue) => issue.message === MESSAGE_TOO_LONG);
-		return agentError(
-			tooLong
+		const codes = new Set(body.error.issues.map((issue) => issue.message));
+		// C-3. The aggregate refusal is about the CONVERSATION, so it cannot be
+		// answered with "keep that message shorter" — the person's last message may
+		// be three words. TODO-OWNER: both sentences.
+		const sentence = codes.has(REQUEST_TOO_LONG)
+			? "This conversation has grown too long to send. Start a new chat and ask again."
+			: codes.has(MESSAGE_TOO_LONG)
 				? `That message is too long. Please keep it under ${MAX_MESSAGE_CHARS.toLocaleString("en-US")} characters and send it again.`
-				: "Expected a messages array.",
-			400,
-		);
+				: "Expected a messages array.";
+		return agentError(sentence, 400);
 	}
 
 	const messages = body.data.messages as unknown as UIMessage[];
@@ -106,7 +146,7 @@ export async function POST(request: Request) {
 
 	// PRD 10.8 layer 1. Runs before the primary model, so an out-of-scope
 	// request costs one small model call rather than a full agent turn.
-	const scope = await checkScope(latestUserText(messages));
+	const scope = await checkScope(userTexts(messages));
 
 	/**
 	 * Residual (lane C confirming pass): the gate's `degraded` result was ignored

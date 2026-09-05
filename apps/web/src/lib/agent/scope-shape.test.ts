@@ -167,3 +167,69 @@ describe("F-E item 4: the shapes are wired the way this file tested the rule", (
 		expect(scope).toContain("const errorClass = classifyAgentError(error);");
 	});
 });
+
+/**
+ * C-2 (lane C pass 3, MAJOR). The gate's prompt, EXECUTED rather than grepped.
+ *
+ * The route used to classify only the newest user message while the whole
+ * client-supplied history reached the primary model:
+ *   TWO_USER {"gateTexts":["What is a put?"],"primaryRoles":["user","user"],
+ *             "primaryHasScraper":true}
+ * PRD 10.8: "Every inbound message is classified before the primary model runs.
+ * … This layer is authoritative."
+ *
+ * `gatePrompt` is pure — no model, no network, no key — but it lives in
+ * `scope.ts`, which `request.test.ts` replaces wholesale with `mock.module`;
+ * that substitution is PROCESS-WIDE in bun, so importing the real module here
+ * yields the stub in a full run and the real one when this file runs alone
+ * (measured: 13/0 alone, 3 failures in the full suite). So it runs in its own
+ * process, the same way `connected-identity.test.tsx` drives its click path.
+ */
+describe("C-2: the gate prompt carries every message it was given", () => {
+	function gatePromptIn(child: string): Record<string, unknown> {
+		const script = `
+			const { gatePrompt } = await import("./src/lib/agent/scope.ts");
+			const { MAX_MESSAGE_CHARS } = await import("./src/lib/agent/request.ts");
+			${child}
+		`;
+		const run = Bun.spawnSync([process.execPath, "--preload", "./test/setup.ts", "-e", script], {
+			cwd: new URL("../../..", import.meta.url).pathname,
+			env: {
+				...process.env,
+				DATABASE_URL: "",
+				DIRECT_DATABASE_URL: "",
+				SKIP_ENV_VALIDATION: "1",
+				AI_GATEWAY_API_KEY: "",
+				OPENROUTER_API_KEY: "offline",
+			},
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (run.exitCode !== 0) throw new Error(run.stderr.toString());
+		return JSON.parse(run.stdout.toString()) as Record<string, unknown>;
+	}
+
+	test("each message gets its own delimited block, in order, and one long one cannot crowd the others out", () => {
+		expect(
+			gatePromptIn(`
+				const three = gatePrompt(["first question", "second question", "third question"]);
+				const long = gatePrompt(["a".repeat(MAX_MESSAGE_CHARS + 500), "the real question"]);
+				console.log(JSON.stringify({
+					blocks: (three.match(/<message>/g) ?? []).length,
+					order: [three.indexOf("first question"), three.indexOf("second question"), three.indexOf("third question")]
+						.every((at, i, all) => at > 0 && (i === 0 || at > all[i - 1])),
+					one: gatePrompt(["what is a put"]).includes("<message>\\nwhat is a put\\n</message>"),
+					longKeepsBoth: long.includes("the real question"),
+					longIsWindowed: long.includes("a".repeat(MAX_MESSAGE_CHARS) + "\\n</message>")
+						&& !long.includes("a".repeat(MAX_MESSAGE_CHARS + 1)),
+				}));
+			`),
+		).toEqual({ blocks: 3, order: true, one: true, longKeepsBoth: true, longIsWindowed: true });
+	});
+
+	test("the instruction tells the model that ANY out-of-scope message loses", () => {
+		// The judgement rule the multi-message prompt depends on. Without it the
+		// model may average several messages instead of refusing on one.
+		expect(read("./scope.ts")).toContain("answer true only if EVERY message belongs to this app");
+	});
+});

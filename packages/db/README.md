@@ -61,7 +61,9 @@ The chain is rebased onto the AI track's migration, which is already applied to 
 - `0006_follow_activity` — adds nullable target-user FK and target/time index; drops and recreates `activity_domain_reference_required` with the same name to accept target-only events.
 - `0007_standalone_positions` — a trade is independent of a post (owner 2026-09-05): `positions.thesis_id` becomes nullable, `position_role` gains `standalone`, and CHECK `positions_thesis_role_consistent` ties the two (`thesis_id IS NULL` exactly when `role = 'standalone'`; compared as `role::text` because an enum value added in the same transaction cannot be used there). The frozen 0002 trigger still requires `role = 'creator'` for `theses.creator_position_id`, so a standalone position can never be linked as a creator position.
 
-`0000`–`0007` are frozen. Apply the full migration chain before using the post model.
+- `0008_trade_recording_fences` — trade recording fences (2026-09-05): `positions.ticket_hash` and `positions.failure_reason` are added; the `(chain_id, tx_hash)` unique index becomes PARTIAL (`WHERE status <> 'failed'`) so a refused or reverted recording marked `failed` never blocks the real taker's hash; CHECK `positions_failure_reason_only_when_failed` (`failure_reason IS NULL OR status = 'failed'`). Snapshot `0008_snapshot.json`.
+
+`0000`–`0008` are frozen. Apply the full migration chain before using the post model.
 
 Why the chain was rebased: drizzle-orm's migrator reads only the single most recently applied row (`order by created_at desc limit 1`) and applies a journal entry when `lastDbMigration.created_at < migration.folderMillis` (`drizzle-orm/pg-core/dialect.js`). It never compares tags or hashes. Our original chain carried `when` timestamps *earlier* than the already-applied `0000_agent_tables`, so every one of our migrations would have been skipped silently against production — reporting success while changing nothing. Any migration added from here must carry a `when` greater than every applied entry. `bunx drizzle-kit generate` does this automatically; a hand-written journal entry must be given a fresh `Date.now()`.
 
@@ -149,4 +151,4 @@ Golden normalization tests run offline; the integration suite executes the actua
 0005 backfill block and compares its results with TypeScript across Unicode,
 punctuation and suffix collisions. The orchestrator must run that SQL differential.
 
-Snapshot inventory: `0000`, `0001`, `0003`, `0005`, `0006`, and `0007` have snapshots in `src/migrations/meta/`. The hand-written `0002` and `0004` migrations have no snapshots.
+Snapshot inventory: `0000`, `0001`, `0003`, `0005`, `0006`, `0007` and `0008` have snapshots in `src/migrations/meta/`. The hand-written `0002` and `0004` migrations have no snapshots.

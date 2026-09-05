@@ -79,7 +79,7 @@ For the mock-mode look use `bun run dev:web` (development mode has no such guard
 
 ## Production migration
 
-The review must be GREEN before production migration. The owner's reported production baseline is only `0000`; it cannot be re-verified offline. The checked-in journal has `0000`–`0007`. Confirm the baseline in the Supabase SQL editor before proceeding:
+The review must be GREEN before production migration. The owner's reported production baseline is only `0000`; it cannot be re-verified offline. The checked-in journal has `0000`–`0008`. Confirm the baseline in the Supabase SQL editor before proceeding:
 
 ```sql
 SELECT count(*) AS migration_count FROM drizzle.__drizzle_migrations;
@@ -119,7 +119,7 @@ repair:
    pre-run baseline.
 3. Fix the cause locally, prove it on a fresh throwaway
    (`create database x` + `bunx drizzle-kit migrate` from an EMPTY database, so
-   the whole chain `0000`-`0007` is exercised, not just the tail), then re-run
+   the whole chain `0000`-`0008` is exercised, not just the tail), then re-run
    the production command. Re-running after a rollback is safe: the batch is
    applied from the same starting point.
 4. NEVER `drizzle-kit push` to "repair" the difference, and never hand-edit
@@ -141,7 +141,7 @@ WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
 ORDER BY table_name;
 ```
 
-Expected migration count: **8**. Expected application tables: `activity`, `agent_conversations`, `agent_messages`, `agent_proposals`, `agent_receipts`, `agent_rfq_keys`, `agent_usage`, `auth_challenges`, `comments`, `follows`, `likes`, `positions`, `theses`, `users`. Investigate an unexpected baseline or result before deployment.
+Expected migration count: **9** (`0000`–`0008`; measured 2026-09-05 on a fresh throwaway and on a `0000`-only baseline, where `0001`–`0008` commit in one transaction). Expected application tables: `activity`, `agent_conversations`, `agent_messages`, `agent_proposals`, `agent_receipts`, `agent_rfq_keys`, `agent_usage`, `auth_challenges`, `comments`, `follows`, `likes`, `positions`, `theses`, `users`. Investigate an unexpected baseline or result before deployment.
 
 Standing rule: **NEVER run `drizzle-kit push` against the shared or production database.** Use migrations; push can drop another developer's tables.
 

@@ -9,6 +9,7 @@ import { findByInstrumentKey, instrumentKey } from "@/lib/thetanuts/instrument";
 import { AGENT_COLLATERAL, MAX_LOSS_USD, withinAgentLimits } from "./limits";
 import { structureIdOf } from "@/lib/market/structures";
 import { prepareTradeFor } from "@/lib/trade/prepare";
+import { resolveThesisAttachment } from "./attachment";
 import {
 	COLLATERAL_USD_UNAVAILABLE,
 	collateralUsdPrice,
@@ -195,6 +196,14 @@ export function createExecutionTools({ account, session, thesisId }: ExecutionTo
 				expiry: BigInt(order.entry.order.expiry),
 			});
 
+			// C#7. The conversation's post is CONTEXT. It becomes this position's
+			// attachment only when it names an instrument to attach to; a text
+			// post has nothing to back, so the fill is standalone (migration 0007)
+			// and the model is told to say so. Every other refusal the shared path
+			// makes — another market, another instrument, a closed post — still
+			// refuses, because those are PRD 8.4's forbidden substitutions.
+			const attachment = await resolveThesisAttachment(thesisId);
+
 			// THE one money path. It re-reads the book, re-quotes, re-checks the
 			// taker side, builds the calldata and issues the signed ticket that
 			// `recordTrade` needs to bind the receipt to a position.
@@ -204,7 +213,7 @@ export function createExecutionTools({ account, session, thesisId }: ExecutionTo
 				// the Bull side of the ticket's vocabulary.
 				side: "bull",
 				budgetInput: budget,
-				thesisId,
+				thesisId: attachment.attach,
 			});
 			if (!prepared.ok) {
 				return {
@@ -246,14 +255,24 @@ export function createExecutionTools({ account, session, thesisId }: ExecutionTo
 				structureId,
 				side: "bull" as const,
 				budgetInput: budget,
-				thesisId,
+				thesisId: attachment.attach,
 				stage: prepared.stage,
 				transactions:
 					prepared.stage === "approve"
 						? { approve: prepared.approve }
 						: { fill: prepared.fill },
 				/** Present only at the fill stage; hand back to `recordTrade` unchanged. */
-				...(prepared.stage === "fill" ? { token: prepared.token, expected: prepared.expected } : {}),
+				...(prepared.stage === "fill"
+					? { token: prepared.token, expected: prepared.expected, preparedAt: prepared.preparedAt }
+					: {}),
+				/**
+				 * C#5. The approval leg's own economics and the allowance decoded
+				 * from its calldata. The browser prints these and refuses to send an
+				 * approval whose bytes disagree with them.
+				 */
+				...(prepared.stage === "approve"
+					? { allowance: prepared.allowance, expected: prepared.expected }
+					: {}),
 				preview: {
 					premium: quote.premium,
 					contracts: quote.contracts,
@@ -272,7 +291,10 @@ export function createExecutionTools({ account, session, thesisId }: ExecutionTo
 				/** After this instant the maker signature is dead and the fill will revert. */
 				signatureExpiresAt: order.orderExpiresAt,
 				secondsUntilSignatureExpiry: secondsLeft,
+				/** C#7. Present only when the conversation's post could not be attached to. */
+				...(attachment.note === null ? {} : { attachmentNote: attachment.note }),
 				instruction:
+					(attachment.note === null ? "" : `${attachment.note} Say this to the user. `) +
 					"Show the user the cost, the maximum loss and the expiry, then tell them their wallet will ask them to confirm. " +
 					"Do not claim the trade is done: it is not done until their wallet reports a confirmed transaction. " +
 					"If cappedByOrderSize is true, say plainly that the order could not absorb the full budget and state what will actually be spent.",

@@ -8,7 +8,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 
-import { Button } from "@nuts/ui/components/button";
 import {
 	InputGroup,
 	InputGroupAddon,
@@ -16,10 +15,18 @@ import {
 	InputGroupTextarea,
 } from "@nuts/ui/components/input-group";
 
+import "@/styles/agent.css";
+import { suggestionsFor } from "@/lib/agent/suggestions";
+import { AgentMarkdown } from "./agent-markdown";
 import { ToolActivity } from "./tool-activity";
 import { TradeApproval } from "./trade-approval";
 import { TradeExecution, type PreparedTrade } from "./trade-execution";
 
+/**
+ * D-C2. The four prompts offered on an empty conversation. Nobody's but this
+ * file's: the mockup draws no agent view. TODO-OWNER: all four, and whether
+ * there should be four at all.
+ */
 const STARTERS = [
 	"What can I trade right now?",
 	"I think ETH goes up this week. I have $10.",
@@ -56,6 +63,8 @@ export function chatRequestBody(input: {
 	readonly body: unknown;
 	readonly walletAddress: string | undefined;
 	readonly thesisId: string | null;
+	/** Optional so existing callers, and the tests pinning them, are unchanged. */
+	readonly asset?: string | null;
 }): Record<string, unknown> {
 	return {
 		...(input.body as Record<string, unknown> | undefined),
@@ -63,32 +72,16 @@ export function chatRequestBody(input: {
 		walletAddress: input.walletAddress,
 		// Omitted rather than sent as null: the route's schema marks it optional.
 		...(input.thesisId === null ? {} : { thesisId: input.thesisId }),
+		...(input.asset === null || input.asset === undefined ? {} : { asset: input.asset }),
 	};
 }
 
 /**
- * The market URL the agent is instructed to end with, as the tool builds it:
- * `/m/<asset>?thesis=<uuid>`, or `/m/<asset>` on its own.
- *
- * Deliberately narrow. Only THIS shape becomes a link — an app-relative market
- * path with an optional uuid — so no other text the model produces can be
- * turned into a destination. The asset segment is the lowercase ticker
- * `lib/agent/tools.ts` writes.
+ * Re-exported so `agent-fold-r2.test.ts` keeps importing it from here, which is
+ * the pinned contract. The implementation moved to `./market-link` so the
+ * markdown renderer can apply the same narrow rule without importing this file.
  */
-const MARKET_URL = /\/m\/[a-z0-9]{1,12}(?:\?thesis=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?/gi;
-
-export function marketLinkParts(text: string): { text: string; href: string | null }[] {
-	const pieces: { text: string; href: string | null }[] = [];
-	let cursor = 0;
-	for (const match of text.matchAll(MARKET_URL)) {
-		const start = match.index;
-		if (start > cursor) pieces.push({ text: text.slice(cursor, start), href: null });
-		pieces.push({ text: match[0], href: match[0] });
-		cursor = start + match[0].length;
-	}
-	if (cursor < text.length) pieces.push({ text: text.slice(cursor), href: null });
-	return pieces;
-}
+export { marketLinkParts } from "./market-link";
 
 /**
  * C1-r2. The approval a message part is waiting on, or null.
@@ -121,7 +114,26 @@ export function approvalRequest(part: unknown): { id: string; input: Record<stri
 	return { id, input };
 }
 
-export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
+export function AgentChat({
+	thesisId = null,
+	asset = null,
+	variant = "page",
+}: {
+	/** The post this conversation is about (`/agent?thesis=<uuid>`). */
+	readonly thesisId?: string | null;
+	/**
+	 * The market this conversation is about. Defaults the agent's search; it does
+	 * not stop the user asking about something else.
+	 */
+	readonly asset?: string | null;
+	/**
+	 * `page` fills the viewport under the header. `panel` sits inside a card in a
+	 * column and caps its own height — the market page's right rail is one sticky
+	 * stack, so a panel that grows without limit pushes the cards below it out of
+	 * reach.
+	 */
+	readonly variant?: "page" | "panel";
+}) {
 	const [input, setInput] = useState("");
 	const { address } = useAccount();
 
@@ -133,8 +145,10 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 	}, [address]);
 
 	const thesisRef = useRef<string | null>(thesisId);
+	const assetRef = useRef<string | null>(asset);
 	useEffect(() => {
 		thesisRef.current = thesisId;
+		assetRef.current = asset;
 	}, [thesisId]);
 
 	const [transport] = useState(
@@ -157,6 +171,7 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 						body,
 						walletAddress: addressRef.current,
 						thesisId: thesisRef.current,
+						asset: assetRef.current,
 					}),
 				}),
 			}),
@@ -197,7 +212,13 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 		// `top:60px` (line 97), which the file's own `.sticky{top:126px}` (line
 		// 127) already states as the combined height. `min-h-0` keeps the message
 		// list the only scrolling element.
-		<div className="mx-auto flex h-[calc(100dvh-126px)] min-h-0 w-full max-w-3xl flex-col px-4">
+		<div
+			className={
+				variant === "panel"
+					? "agent-panel flex min-h-0 flex-col"
+					: "mx-auto flex h-[calc(100dvh-126px)] min-h-0 w-full max-w-3xl flex-col px-4"
+			}
+		>
 			<header className="border-b py-4">
 				<h1 className="font-medium text-lg">Agent</h1>
 				<p className="text-muted-foreground text-sm">
@@ -211,17 +232,17 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 						<p className="text-muted-foreground text-sm">
 							Ask about options, markets, or what a small budget could buy.
 						</p>
-						<div className="flex flex-wrap gap-2">
+						<div className="pills">
 							{STARTERS.map((s) => (
-								<Button
+								<button
+									type="button"
 									key={s}
-									variant="outline"
-									size="sm"
+									className="pill"
 									onClick={() => submit(s)}
 									disabled={busy}
 								>
 									{s}
-								</Button>
+								</button>
 							))}
 						</div>
 					</div>
@@ -234,22 +255,11 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 						</p>
 						{message.parts.map((part, i) => {
 							if (part.type === "text") {
-								// Residual (lane C confirming pass): the answer is told to end
-								// with the market URL, and it was rendered as plain text, so
-								// the one action the agent points at could not be taken.
-								return (
-									<p key={i} className="whitespace-pre-wrap text-sm leading-relaxed">
-										{marketLinkParts(part.text).map((piece, j) =>
-											piece.href === null ? (
-												piece.text
-											) : (
-												<a key={j} className="underline underline-offset-4" href={piece.href}>
-													{piece.text}
-												</a>
-											),
-										)}
-									</p>
-								);
+								// Rendered as markdown: the model writes markdown because the system
+								// prompt is written in markdown, and as plain text the asterisks showed.
+								// AgentMarkdown applies marketLinkParts to every text node, so the
+								// "only /m/ becomes a link" rule survives the change.
+								return <AgentMarkdown key={i} text={part.text} />;
 							}
 							// The runtime suspended a write tool and is waiting for the user.
 							//
@@ -299,6 +309,31 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 					</article>
 				))}
 
+				{/* Follow-ups for the newest assistant turn only, derived in code from
+				    the tool results that turn actually produced, so a chip can never
+				    name an instrument the agent did not just see. */}
+				{(() => {
+					if (busy) return null;
+					const last = messages[messages.length - 1];
+					if (last === undefined || last.role !== "assistant") return null;
+					const chips = suggestionsFor(last.parts as never);
+					if (chips.length === 0) return null;
+					return (
+						<div className="pills agent-suggest">
+							{chips.map((chip) => (
+								<button
+									type="button"
+									key={chip.label}
+									className="pill"
+									onClick={() => submit(chip.send)}
+								>
+									{chip.label}
+								</button>
+							))}
+						</div>
+					);
+				})()}
+
 				{busy && <p className="text-muted-foreground text-sm">Thinking…</p>}
 				{error && (
 					<p className="text-destructive text-sm">
@@ -318,6 +353,7 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 								submit(input);
 							}
 						}}
+						// TODO-OWNER: placeholder wording.
 						placeholder="Ask about a market, or describe what you think will happen…"
 						disabled={busy}
 						rows={2}

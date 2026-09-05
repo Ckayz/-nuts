@@ -8,6 +8,7 @@ import { YourPositionsRail } from "@/components/market/your-positions-rail";
 import { TaggedPostsTabs } from "@/components/market/tagged-posts-tabs";
 import { getSession } from "@/lib/auth/session";
 import { MarketRail } from "@/components/market/market-rail";
+import { AgentChat } from "@/components/agent/agent-chat";
 import { StructuresList } from "@/components/market/structures-list";
 import { TakeASide } from "@/components/market/take-a-side";
 import { usd, usd2 } from "@/lib/format";
@@ -51,6 +52,8 @@ interface Loaded {
 	summaries: MarketSummary[];
 	tagged: Thesis[];
 	trade: TradePanelContext | null;
+	/** C#6. Whether the structures table's "Select" navigates to a real structure. */
+	selectable: boolean;
 	unavailable: string | null;
 }
 
@@ -63,6 +66,9 @@ async function load(asset: string, params: Record<string, string | undefined>): 
 			summaries: marketSummaries,
 			tagged: thesesByMarket(market.slug),
 			trade: null,
+			// The fixture page's rows name no real structure, so there is nowhere
+			// for a "Select" to go. It stays an inert button, as it was.
+			selectable: false,
 			unavailable: null,
 		};
 	}
@@ -109,7 +115,7 @@ export default async function MarketPage({
 		// TODO-OWNER: feed-unavailable copy; no fixture market or ticket on failure.
 		return <PageFrame left={<FeedRail posts={await railTheses()} />}><section className="card pad"><h1>Market unavailable</h1><p>Live OptionBook data could not be loaded. <TodoOwner /></p></section></PageFrame>;
 	}
-	const { market, summaries, tagged, trade, unavailable } = loaded;
+	const { market, summaries, tagged, trade, selectable, unavailable } = loaded;
 	const databaseMode = usingDatabase();
 	const signedIn = databaseMode && (await getSession()) !== null;
 	// Selecting another structure keeps the post and side the visitor arrived
@@ -164,6 +170,18 @@ export default async function MarketPage({
 						expiryLabel={market.selectedExpiryLabel}
 					/>
 				)}
+
+				{/* Directly under the ticket, not at the bottom of the rail: the right
+				    column is ONE `position:sticky` stack, so a tall panel added below
+				    the other cards pushes them past the bottom of the viewport where
+				    sticky cannot reach them. The panel caps its own height too. */}
+				<section className="card pad mkt-panel agent-inline">
+					<h3 style={{ fontSize: "15px" }}>
+						Ask about {market.asset}
+						<TodoOwner />
+					</h3>
+					<AgentChat asset={market.asset} variant="panel" />
+				</section>
 
 				<section className="card">
 					<div className="card-h">
@@ -262,11 +280,15 @@ export default async function MarketPage({
 
 				{unavailable !== null ? <span className="mkt-warn">{unavailable}</span> : null}
 
+				{/* C#6: whether the LIST can navigate is a different question from
+				    whether the REQUESTED instrument can be ticketed. Passing
+				    `trade !== null` made every "Select" inert on the one page whose
+				    own copy says "pick another one from the list below". */}
 				<StructuresList
 					rows={market.structures}
 					slug={market.slug}
 					query={carried}
-					live={trade !== null}
+					live={selectable}
 				/>
 
 				<TaggedPostsTabs

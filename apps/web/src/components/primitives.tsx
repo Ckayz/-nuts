@@ -44,6 +44,7 @@ export function Avatar({
 	initials,
 	seed,
 	asset,
+	src,
 	size,
 	tone,
 	className,
@@ -53,6 +54,15 @@ export function Avatar({
 	initials: string;
 	seed?: string;
 	asset?: string;
+	/**
+	 * A REMOTE picture the app did not generate — today only a Farcaster
+	 * `author.pfp_url`, which callers must already have narrowed to https
+	 * (`lib/farcaster/casts.ts`). It outranks the generated `seed` avatar and is
+	 * outranked by a vendored `asset` logo. When it is absent, or when the remote
+	 * image fails to load, the generated avatar and then the monogram remain the
+	 * fallback, so a person is never drawn as a broken image.
+	 */
+	src?: string;
 	size?: AvatarSize;
 	/** `asset` renders the mockup's neutral ticker avatar instead of a person. */
 	tone?: "person" | "asset";
@@ -62,8 +72,12 @@ export function Avatar({
 }) {
 	const step = typeof size === "number" ? size : AVATAR_STEP[size ?? ""] ?? 34;
 	const isAsset = tone === "asset" || asset !== undefined;
-	const src = asset !== undefined ? assetIconPath(asset) : null;
+	const assetSrc = asset !== undefined ? assetIconPath(asset) : null;
 	const dataUri = !isAsset && seed ? avatarDataUri(seed) : null;
+	// Precedence: a vendored asset logo, then a caller-supplied remote picture,
+	// then the generated avatar. An asset never takes a remote `src`.
+	const remoteSrc = isAsset ? null : src;
+	const imageSrc = assetSrc ?? remoteSrc ?? dataUri;
 	const colour = isAsset ? "av-asset" : avatarTone(initials);
 	return (
 		<span
@@ -72,7 +86,7 @@ export function Avatar({
 			aria-label={ariaLabel}
 			aria-hidden={ariaLabel === undefined ? true : undefined}
 		>
-			{src || dataUri ? <img src={src ?? dataUri!} alt="" width={step} height={step} draggable={false} style={{ display: "block", width: "100%", height: "100%", borderRadius: "50%" }} /> : initials}
+			{imageSrc ? <img src={imageSrc} alt="" width={step} height={step} draggable={false} referrerPolicy={imageSrc.startsWith("https:") ? "no-referrer" : undefined} style={{ display: "block", width: "100%", height: "100%", borderRadius: "50%" }} /> : initials}
 		</span>
 	);
 }

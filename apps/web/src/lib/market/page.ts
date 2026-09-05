@@ -46,6 +46,21 @@ export interface MarketPageData {
 	 * substitution (PRD 8.4).
 	 */
 	readonly trade: TradePanelContext | null;
+	/**
+	 * C#6 (lane C confirming pass, finding 6). Can the structures table NAVIGATE?
+	 *
+	 * A different question from `trade !== null`, which asks whether the
+	 * currently REQUESTED instrument can be ticketed. The route conflated the
+	 * two, so the one page that most needs its recovery links — "that structure
+	 * is gone, pick another one from the list below" — rendered every "Select"
+	 * as a handler-less button:
+	 *   MISSING_STRUCTURE_RECOVERY {"live":false,"links":[],
+	 *                               "buttons":[{"label":"Select","hasHandler":false}]}
+	 * True whenever these rows came from the live book, including the branch
+	 * where the requested structure vanished. False for the static fixture page,
+	 * whose rows name no real structure.
+	 */
+	readonly selectable: boolean;
 	readonly unavailable: string | null;
 }
 
@@ -156,6 +171,9 @@ export async function marketPageData(
 			summaries: page.summaries,
 			tagged: posts.filter((post) => post.tag !== null && post.tag.asset === structure.asset),
 			trade: null,
+			// C#6. The BOOK was read; only the one requested instrument is gone.
+			// The list is exactly how the visitor recovers, so it navigates.
+			selectable: true,
 			unavailable: STRUCTURE_UNAVAILABLE,
 		};
 	}
@@ -199,6 +217,9 @@ export async function marketPageData(
 		summaries: page.summaries,
 		tagged,
 		trade,
+		// C#6. These rows came from the live book, so every one of them is a real
+		// destination — whether or not the CURRENTLY requested one is tradeable.
+		selectable: true,
 		unavailable: null,
 	};
 }

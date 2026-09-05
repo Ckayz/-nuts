@@ -37,6 +37,7 @@ import type * as Domain from "@/types";
 import { decimalFromBaseUnits, decimalFromNullableBaseUnits, sumDecimals, usdDecimalOrNull } from "./decimal";
 import { creatorHandle, creatorInitials } from "./identity";
 import { PUBLIC_THESIS_STATUSES } from "./constants";
+import { positionInstrument } from "@/lib/position/instrument";
 
 /** Aggregates a caller computed for one thesis. */
 export interface ThesisAggregates {
@@ -381,6 +382,14 @@ export function mapPosition(input: MapPositionInput): Domain.Position {
 		entrySpotPriceUsd: null,
 		economics: economics(position),
 		verification: verification(position),
+		// C#9. `failed` is not one outcome: a REVERTED transaction means nothing
+		// happened, while `fill_quantity_unproven` means the fill IS on chain and
+		// only the contract count could not be proven from it.
+		failureReason: position.failureReason,
+		// D5. The instrument's expiry, decoded by the SAME reader `/p/[id]` uses,
+		// so a list row can tell a finished option from a live one. Nothing moves
+		// a row to `expired` on its own yet.
+		expiryAt: positionInstrument(position.orderSnapshot)?.expiryAt ?? null,
 		createdAt: position.createdAt.toISOString(),
 		mockTransactionFragment: null,
 	};

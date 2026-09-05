@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Avatar, Chip } from "@/components/primitives";
 import type { PnlBasis, PnlCard as PnlCardView } from "@/lib/display-types";
+import { PNL_BASIS_SHORT } from "@/lib/display";
 
 /**
  * THE card. One view model (`View.PnlCard`), one component, two sizes — the two
@@ -27,14 +28,11 @@ import type { PnlBasis, PnlCard as PnlCardView } from "@/lib/display-types";
  * carries the amount's own `.bull` / `.bear` class; the name, the labels, the
  * tiles and the chip stay neutral, and the frame is the one accent surface.
  */
-/** The basis in a few words. Each says something the `pnlLabel` beside it does
- *  not, so the compact line never repeats itself ("Result · settled result"). */
-const BASIS_SHORT: Record<PnlBasis, string> = {
-	settled: "recorded at settlement",
-	estimate: "recorded with the fill",
-	derived: "estimated at the current spot",
-	unavailable: "not available yet",
-};
+/**
+ * D5: ONE basis vocabulary, shared with the list rows (`lib/display.ts`), so a
+ * position never describes the same number two different ways in two places.
+ */
+const BASIS_SHORT: Record<PnlBasis, string> = PNL_BASIS_SHORT;
 
 /** The mockup's ▲ / ▼. Drawn only when the sign is known: an unavailable P&L
  *  gets no arrow rather than a flat one that reads as "no change". */

@@ -19,7 +19,8 @@
  * tested without a database — the reviewer's AGENT_SERVER_GATE probe had to
  * drive the whole tool to see it.
  */
-import type { PrepareResult } from "@/lib/trade/types";
+import { approvalMatches } from "@/lib/trade/approval";
+import type { PrepareResult, QuoteRaw } from "@/lib/trade/types";
 
 /** PRD 10.2. */
 export const MAX_LOSS_USD = 10;
@@ -35,10 +36,15 @@ export type AgentGate = { readonly ok: true } | { readonly ok: false; readonly r
 /**
  * Does a prepared trade stay inside the agent's limits?
  *
- * `approve` is the collateral-approval leg: no fill has been priced yet, so
- * there is nothing to measure and nothing to refuse — the fill it leads to is
- * checked by this same function on the next call. `fill` carries the economics
- * the wallet is about to sign for, and those are what the ceiling is about.
+ * BOTH stages are measured. Round 2 returned `{ok:true}` for every
+ * approval-stage result on the reasoning that "no fill has been priced yet" —
+ * but the approval IS a wallet transaction, it grants a real allowance, and the
+ * browser sends it BEFORE the gated re-preparation runs. The reviewer printed a
+ * liquidity-capped $5 trade and sent an exact 20-USDC approval past this
+ * function (`APPROVE_BEFORE_GATE`). `PrepareApprove` now carries the quote it
+ * was computed from and the allowance decoded from its own calldata, so the
+ * same ceiling, the same USDC-only rule and PRD 10.2's exactness requirement
+ * all apply here too.
  *
  * A quote with no USD max loss is REFUSED, not waved through: an unpriceable
  * collateral token means the limit cannot be evaluated, and PRD 14 asks for a
@@ -46,8 +52,25 @@ export type AgentGate = { readonly ok: true } | { readonly ok: false; readonly r
  */
 export function withinAgentLimits(prepared: PrepareResult): AgentGate {
 	if (!prepared.ok) return { ok: true };
-	if (prepared.stage !== "fill") return { ok: true };
-	const quote = prepared.expected;
+	if (prepared.stage === "approve") {
+		const economics = quoteGate(prepared.expected);
+		if (!economics.ok) return economics;
+		// PRD 10.2, verbatim: "Allowances must be exact for the approved
+		// transaction." Read from the bytes that will be signed, not from a field
+		// beside them.
+		const exact = approvalMatches({
+			data: prepared.approve.data,
+			expectedSpender: prepared.allowance.spender,
+			expectedAmount: prepared.expected.debit,
+		});
+		if (!exact.ok) return { ok: false, reason: `${exact.reason} Nothing was prepared.` };
+		return { ok: true };
+	}
+	return quoteGate(prepared.expected);
+}
+
+/** The economics half of the gate, shared by both stages. */
+function quoteGate(quote: QuoteRaw): AgentGate {
 	if (quote.collateralSymbol !== AGENT_COLLATERAL) {
 		return {
 			ok: false,

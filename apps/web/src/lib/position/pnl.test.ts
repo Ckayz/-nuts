@@ -25,6 +25,8 @@ import {
 import {
 	decimalFromUsd8,
 	derivePnlAtSpot,
+	failedButOnChain,
+	FILL_ON_CHAIN_UNPROVEN,
 	derivedRisk,
 	isPastExpiry,
 	lifecycleStatus,
@@ -361,7 +363,12 @@ describe("resolvePnl — which number a status is allowed to show", () => {
 		finalPnlUsd: null,
 		estimatedPnlUsd: null,
 		settlementPriceUsd: null,
-		derivation: BUY_PUT,
+		// The RULES module takes the derived figure as an input; the risk MODEL
+		// that produces it stays in `pnl.ts` (see `lifecycle.ts`'s header for the
+		// client-bundle failure that forced the split). These tests compute it the
+		// same way `view.ts` does, so they still exercise a real derived number.
+		derivable: true,
+		derivedPnlUsd: derivePnlAtSpot(BUY_PUT, SPOT_74K),
 		spotUsd8: SPOT_74K,
 		unavailableReason: "no reason given",
 		// C7: not yet expired unless a case says so.
@@ -458,7 +465,7 @@ describe("resolvePnl — which number a status is allowed to show", () => {
 	});
 
 	test("a failed transaction is not a position", () => {
-		expect(resolvePnl({ ...base, status: "failed" })).toEqual({
+		expect(resolvePnl({ ...base, status: "failed", failureReason: "transaction_reverted" })).toEqual({
 			pnlUsd: null,
 			basis: "unavailable",
 			detail: "This transaction failed, so there is no position.",
@@ -502,7 +509,8 @@ describe("resolvePnl — which number a status is allowed to show", () => {
 		const result = resolvePnl({
 			...base,
 			status: "indexed",
-			derivation: null,
+			derivable: false,
+			derivedPnlUsd: null,
 			unavailableReason: "No P&L: put fly has no payoff model.",
 		});
 		expect(result.detail).toBe("No P&L: put fly has no payoff model.");
@@ -693,6 +701,50 @@ describe("positionPage", () => {
 		expect(page("failed").pnlPctLabel).toBeNull();
 	});
 
+	/**
+	 * C#9 (lane C confirming pass, finding 9). `failed` is not one outcome.
+	 *
+	 * `record.ts:266` marks a `fill_quantity_unproven` row failed — the fill IS
+	 * on chain and only the contract count could not be proven from the
+	 * transaction — and `pnl.ts:268` then told that holder "This transaction
+	 * failed, so there is no position."
+	 */
+	test("a quantity-unproven fill is not a reverted transaction", () => {
+		const card = (failureReason: string | null) =>
+			positionPage({
+				detail: detail({
+					position: domainPosition({
+						status: "failed",
+						failureReason,
+						verification: { transactionHash: `0x${"ab".repeat(32)}`, optionAddress: null, confirmedOnchain: false },
+					}),
+				}),
+				spotUsd8: SPOT_74K,
+				collateralUsdPrice8: "100000000",
+				asOf,
+			}).card;
+
+		const unproven = card("fill_quantity_unproven");
+		expect(unproven.statusLabel).toBe("Not tracked yet");
+		expect(unproven.pnlBasisLabel).toBe(
+			"Your fill is on chain, but the contract count could not be proven from this transaction, so the position is not tracked yet.",
+		);
+		expect(unproven.pnlBasisLabel).not.toContain("transaction failed");
+		// No number is invented for it, and the transaction link stays.
+		expect(unproven.pnl.signed2).toBe("—");
+		expect(unproven.basis).toBe("unavailable");
+		expect(unproven.tx).not.toBeUndefined();
+		// PRD 7.3: the badge still needs a verified receipt, which this has not.
+		expect(unproven.verified).toBe(false);
+
+		// Every OTHER failure is still a revert, and still says so.
+		const reverted = card("transaction_reverted");
+		expect(reverted.statusLabel).toBe("Failed");
+		expect(reverted.pnlBasisLabel).toBe("This transaction failed, so there is no position.");
+		expect(card(null).statusLabel).toBe("Failed");
+		expect(card("debit_differs_from_prepared").statusLabel).toBe("Failed");
+	});
+
 	test("a settled row reads Result, never Live P&L", () => {
 		const card = positionPage({
 			detail: detail({
@@ -837,5 +889,26 @@ describe("lifecycleStatus", () => {
 	test("the word it routes to is the one the app already has", () => {
 		expect(POSITION_STATUS_DISPLAY.expired.label).toBe("Settlement pending");
 		expect(POSITION_STATUS_DISPLAY.confirmed.label).toBe("Open · syncing");
+	});
+});
+
+describe("C#9: failedButOnChain distinguishes a proof failure from a revert", () => {
+	test("only the quantity-unproven reason on a failed row counts", () => {
+		expect(failedButOnChain("failed", FILL_ON_CHAIN_UNPROVEN)).toBe(true);
+		expect(failedButOnChain("failed", "transaction_reverted")).toBe(false);
+		expect(failedButOnChain("failed", "no_matching_order_filled")).toBe(false);
+		expect(failedButOnChain("failed", null)).toBe(false);
+		expect(failedButOnChain("failed", undefined)).toBe(false);
+	});
+
+	test("no other status is rewritten by a stray reason", () => {
+		for (const status of ["pending", "confirmed", "indexed", "expired", "settled"] as const) {
+			expect(failedButOnChain(status, FILL_ON_CHAIN_UNPROVEN)).toBe(false);
+		}
+	});
+
+	test("the constant is the string record.ts actually writes", async () => {
+		const source = await Bun.file(new URL("../trade/record.ts", import.meta.url)).text();
+		expect(source).toContain(`markFailed(pending.id, ticket.wallet, "${FILL_ON_CHAIN_UNPROVEN}")`);
 	});
 });

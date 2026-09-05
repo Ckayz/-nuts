@@ -17,7 +17,13 @@ import type { MarketStructure } from "@/lib/display-types";
  * In `DATA_SOURCE=mock` the rows are fixtures and Select is inert, exactly as
  * before. Against the live book each Select is a link that reloads the page with
  * that structure quoted, keeping whatever post and side the visitor arrived
- * with. Neither behaviour changed in this round; only the look did.
+ * with.
+ *
+ * C#6 (lane C confirming pass, finding 6): `live` is about THESE ROWS, not
+ * about the ticket. The route used to pass `trade !== null`, which is false on
+ * exactly the page whose own copy reads "that structure is no longer on the
+ * book … pick another one from the list below" — so every recovery link there
+ * rendered as a handler-less button.
  */
 export function StructuresList({
 	rows,

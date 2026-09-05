@@ -14,14 +14,14 @@
    #6f5cff). Declared after the import, unlayered, they win by source order. */
 :root{
   /* ground + surfaces */
-  --bg:#0b0b10;
-  --surface:#14141b;
-  --surface2:#1b1b24;
-  --line:#25252f;
-  --line-soft:#1e1e27;
+  --bg:#070511;
+  --surface:#181623;
+  --surface2:#201d2d;
+  --line:#282438;
+  --line-soft:#201d2c;
   /* ink */
-  --text:#f2f2f5;
-  --muted:#8d8d9c;
+  --text:#f7f7f7;
+  --muted:#9899a3;
   /* the one accent */
   --accent:#6f5cff;
   --accent-ink:#ffffff;
@@ -29,8 +29,8 @@
   --accent-tint:rgba(111,92,255,.14);
   --accent-tint-soft:rgba(111,92,255,.08);
   /* money */
-  --gain:#22c55e;
-  --loss:#f4634f;
+  --gain:#1cce59;
+  --loss:#fd6536;
   /* shape */
   --r-frame:24px; --r-card:18px; --r-panel:16px; --r-field:14px; --r-btn:12px; --r-row:12px; --r-chip:999px;
   /* Manrope arrives through next/font (apps/web/src/app/layout.tsx); the
@@ -49,7 +49,7 @@
 html,body{margin:0;padding:0}
 body{
   background:var(--bg);color:var(--text);font-family:var(--sans);
-  font-size:14px;line-height:1.45;font-weight:400;
+  font-size:14px;line-height:1.45;font-weight:500;
   -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
 }
 a{color:inherit;text-decoration:none}
@@ -431,8 +431,12 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
      DOCUMENT at the viewport width (measured: /m/btc at 390px, scrollWidth 390 =
      clientWidth 390). But `Create` then sits past the right edge and has to be
      found by scrolling, so the row is tightened here until all five items fit.
-     Measured at 390px after this rule: `.nav` scrollWidth 362 = clientWidth 362,
-     i.e. nothing is hidden. */
+     Measured at 390px with FIVE items: `.nav` scrollWidth 362 = clientWidth 362,
+     i.e. nothing was hidden. A sixth item (Agent) was added on 2026-09-06 and
+     that measurement no longer holds — the row is expected to scroll at 390px,
+     so `Create` may sit past the right edge again. The nav is `overflow-x:auto`
+     so nothing is unreachable, but this is UNVERIFIED in a browser.
+     TODO-OWNER: tighten the gap, shorten a label, or accept the scroll. */
   .nav{padding:0 12px;gap:14px}
   .nav a.btn{padding:0 11px}
   .post{padding:16px 16px;border-radius:16px;gap:12px}

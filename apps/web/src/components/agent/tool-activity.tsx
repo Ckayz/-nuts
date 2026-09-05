@@ -8,6 +8,12 @@
  * can see the lookups happening.
  */
 
+/**
+ * D-C2. What each lookup is CALLED while it runs. Every phrase is this file's
+ * own — the mockup draws no agent view — so all four are TODO-OWNER. Each names
+ * a real tool in `lib/agent/tools.ts`; reword them, but do not make one claim
+ * something the tool does not do.
+ */
 const LABELS: Record<string, string> = {
 	"tool-searchOptionBookOrders": "Searching live liquidity",
 	"tool-getMarketData": "Checking market prices",

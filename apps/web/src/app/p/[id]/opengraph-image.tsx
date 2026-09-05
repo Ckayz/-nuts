@@ -22,17 +22,17 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 /** docs/mockups/thesis-fun-mockup.html `:root`, lines 34-57. */
-const BG = "#0b0b10";
-const CARD = "#14141b";
-const SURFACE_2 = "#1b1b24";
-const LINE = "#25252f";
-const TEXT = "#f2f2f5";
-const MUTED = "#8d8d9c";
+const BG = "#070511";
+const CARD = "#181623";
+const SURFACE_2 = "#201d2d";
+const LINE = "#282438";
+const TEXT = "#f7f7f7";
+const MUTED = "#9899a3";
 const ACCENT = "#6f5cff";
 const ACCENT_LIFT = "#a99bff";
 const ACCENT_TINT = "rgba(111,92,255,.14)";
-const GAIN = "#22c55e";
-const LOSS = "#f4634f";
+const GAIN = "#1cce59";
+const LOSS = "#fd6536";
 
 export default async function Image({ params }: { params: Promise<{ id: string }> }) {
 	const page = await positionPageData((await params).id);
@@ -167,7 +167,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 					</div>
 				</div>
 
-				<div style={{ display: "flex", alignItems: "center", padding: "10px 10px 2px", color: "#f2f2f5", flexShrink: 0 }}>
+				<div style={{ display: "flex", alignItems: "center", padding: "10px 10px 2px", color: "#f7f7f7", flexShrink: 0 }}>
 					<span style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.03em" }}>thesis.fun</span>
 					{/* Says "verified" only when the receipt says so (PRD 7.3). */}
 					<span style={{ marginLeft: "auto", fontSize: 22, fontWeight: 600, color: "rgba(255,255,255,.72)" }}>

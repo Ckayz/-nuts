@@ -1,6 +1,7 @@
 import { AgentChat } from "@/components/agent/agent-chat";
 
 export const metadata = {
+	// TODO-OWNER: page title and description (they are also the link preview).
 	title: "Agent · Thesis.fun",
 	description: "Turn a market view into a real, bounded-risk options position on Base.",
 };

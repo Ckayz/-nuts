@@ -24,6 +24,23 @@ import { TodoOwner } from "@/components/primitives";
 
 const FOCUSABLE = 'input:not([disabled]), a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/** wagmi's `injected()` with no target reports this id (measured in
+ * `@wagmi/core/dist/esm/connectors/injected.js`: the no-target branch returns
+ * `{ id: "injected", name: "Injected" }`). */
+const GENERIC_INJECTED_ID = "injected";
+
+/**
+ * An EIP-6963 announcement, as opposed to the generic browser-provider fallback.
+ *
+ * `createConfig` turns each announced provider into `injected({ target: { ...info,
+ * id: info.rdns } })` (`@wagmi/core/dist/esm/createConfig.js:76`), so a discovered
+ * wallet has `type === "injected"` and an rdns id such as `io.metamask`. SDK
+ * connectors (Coinbase) carry their own type and are never announcements.
+ */
+function isAnnouncedInjected(connector: Connector): boolean {
+	return connector.type === "injected" && connector.id !== GENERIC_INJECTED_ID;
+}
+
 /**
  * One row per wallet, not one per connector.
  *
@@ -32,14 +49,20 @@ const FOCUSABLE = 'input:not([disabled]), a[href], button:not([disabled]), [tabi
  * the literal string "Injected"), the configured Coinbase connector, and an
  * EIP-6963 discovery for each — the same wallet listed twice under two names.
  *
- * The generic `injected` connector is dropped whenever any discovered connector
- * exists, because a discovered one always names itself properly and carries an
- * icon. It is kept when nothing was discovered, so a browser wallet that does
- * not announce itself is still reachable.
+ * The generic `injected` connector is dropped only when an EIP-6963 provider has
+ * actually announced itself, because such a connector names itself properly and
+ * carries an icon. It is NOT dropped merely because some other connector exists:
+ * `lib/wagmi.ts` always configures the Coinbase SDK connector, and the earlier
+ * "anything that is not `injected` counts as discovered" test evicted the generic
+ * fallback in every browser, so a wallet that only sets `window.ethereum` without
+ * announcing itself had no selectable row at all (measured: `configured
+ * injected,coinbaseWalletSDK` → `offered coinbaseWalletSDK`).
  */
 export function walletChoices(connectors: readonly Connector[]): Connector[] {
-	const discovered = connectors.filter((c) => c.id !== "injected");
-	const pool = discovered.length > 0 ? discovered : [...connectors];
+	const announced = connectors.some(isAnnouncedInjected);
+	const pool = announced
+		? connectors.filter((c) => !(c.type === "injected" && c.id === GENERIC_INJECTED_ID))
+		: [...connectors];
 
 	const seen = new Set<string>();
 	const choices: Connector[] = [];

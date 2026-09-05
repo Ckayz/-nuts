@@ -2,12 +2,21 @@ import { expect, test, describe } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Connector } from "wagmi";
 
+import { config } from "@/lib/wagmi";
+
 import { ConnectDialog, walletChoices } from "./connect-dialog";
 import { isWalletRejection, networkLabel } from "./wallet-bar";
 
-/** Enough of a Connector to exercise the picker. */
-function connector(id: string, name: string, icon?: string): Connector {
-	return { uid: `uid-${id}-${name}`, id, name, icon, type: "injected" } as unknown as Connector;
+/**
+ * Enough of a Connector to exercise the picker.
+ *
+ * `type` matters: wagmi gives every injected-family connector `type: "injected"`
+ * (the generic one keeps `id: "injected"`, an EIP-6963 announcement gets the
+ * wallet's rdns as its id), while an SDK connector such as Coinbase carries its
+ * own type. The picker's fallback rule reads both fields.
+ */
+function connector(id: string, name: string, icon?: string, type = "injected"): Connector {
+	return { uid: `uid-${id}-${name}`, id, name, icon, type } as unknown as Connector;
 }
 
 describe("walletChoices", () => {
@@ -17,7 +26,7 @@ describe("walletChoices", () => {
 		// twice, once anonymously and once by name.
 		const choices = walletChoices([
 			connector("injected", "Injected"),
-			connector("coinbaseWallet", "Coinbase Wallet"),
+			connector("coinbaseWalletSDK", "Coinbase Wallet", undefined, "coinbaseWallet"),
 			connector("io.metamask", "MetaMask"),
 		]);
 		expect(choices.map((c) => c.name)).toEqual(["Coinbase Wallet", "MetaMask"]);
@@ -27,6 +36,33 @@ describe("walletChoices", () => {
 		// A browser wallet that does not announce itself must stay reachable.
 		const choices = walletChoices([connector("injected", "Injected")]);
 		expect(choices.map((c) => c.name)).toEqual(["Injected"]);
+	});
+
+	// The two cases below run the ACTUAL configured connectors from lib/wagmi.ts.
+	// The picker previously treated every non-`injected` connector as "discovered",
+	// so the always-configured Coinbase SDK connector evicted the generic fallback
+	// in every browser and a wallet that only sets `window.ethereum` was unreachable.
+	test("offers the generic fallback alongside Coinbase when nothing announced itself", () => {
+		expect(config.connectors.map((c) => c.id)).toEqual(["injected", "coinbaseWalletSDK"]);
+		const choices = walletChoices(config.connectors);
+		expect(choices.map((c) => c.id)).toEqual(["injected", "coinbaseWalletSDK"]);
+	});
+
+	test("drops the generic fallback once a wallet announces itself, keeping Coinbase", () => {
+		// EIP-6963 discovery appends an injected-type connector keyed by rdns.
+		const announced = connector("io.metamask", "MetaMask");
+		const choices = walletChoices([...config.connectors, announced]);
+		expect(choices.map((c) => c.id)).toEqual(["coinbaseWalletSDK", "io.metamask"]);
+	});
+
+	test("an SDK connector alone is not an announcement", () => {
+		// Coinbase's own type is "coinbaseWallet", so its presence must not count
+		// as EIP-6963 discovery.
+		const choices = walletChoices([
+			connector("injected", "Injected"),
+			connector("coinbaseWalletSDK", "Coinbase Wallet", undefined, "coinbaseWallet"),
+		]);
+		expect(choices.map((c) => c.id)).toEqual(["injected", "coinbaseWalletSDK"]);
 	});
 
 	test("shows one row per wallet when the same wallet arrives twice", () => {

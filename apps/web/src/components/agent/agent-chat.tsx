@@ -16,6 +16,7 @@ import {
 	InputGroupTextarea,
 } from "@nuts/ui/components/input-group";
 
+import { AgentMarkdown } from "./agent-markdown";
 import { ToolActivity } from "./tool-activity";
 import { TradeApproval } from "./trade-approval";
 import { TradeExecution, type PreparedTrade } from "./trade-execution";
@@ -72,28 +73,11 @@ export function chatRequestBody(input: {
 }
 
 /**
- * The market URL the agent is instructed to end with, as the tool builds it:
- * `/m/<asset>?thesis=<uuid>`, or `/m/<asset>` on its own.
- *
- * Deliberately narrow. Only THIS shape becomes a link — an app-relative market
- * path with an optional uuid — so no other text the model produces can be
- * turned into a destination. The asset segment is the lowercase ticker
- * `lib/agent/tools.ts` writes.
+ * Re-exported so `agent-fold-r2.test.ts` keeps importing it from here, which is
+ * the pinned contract. The implementation moved to `./market-link` so the
+ * markdown renderer can apply the same narrow rule without importing this file.
  */
-const MARKET_URL = /\/m\/[a-z0-9]{1,12}(?:\?thesis=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?/gi;
-
-export function marketLinkParts(text: string): { text: string; href: string | null }[] {
-	const pieces: { text: string; href: string | null }[] = [];
-	let cursor = 0;
-	for (const match of text.matchAll(MARKET_URL)) {
-		const start = match.index;
-		if (start > cursor) pieces.push({ text: text.slice(cursor, start), href: null });
-		pieces.push({ text: match[0], href: match[0] });
-		cursor = start + match[0].length;
-	}
-	if (cursor < text.length) pieces.push({ text: text.slice(cursor), href: null });
-	return pieces;
-}
+export { marketLinkParts } from "./market-link";
 
 /**
  * C1-r2. The approval a message part is waiting on, or null.
@@ -239,22 +223,11 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 						</p>
 						{message.parts.map((part, i) => {
 							if (part.type === "text") {
-								// Residual (lane C confirming pass): the answer is told to end
-								// with the market URL, and it was rendered as plain text, so
-								// the one action the agent points at could not be taken.
-								return (
-									<p key={i} className="whitespace-pre-wrap text-sm leading-relaxed">
-										{marketLinkParts(part.text).map((piece, j) =>
-											piece.href === null ? (
-												piece.text
-											) : (
-												<a key={j} className="underline underline-offset-4" href={piece.href}>
-													{piece.text}
-												</a>
-											),
-										)}
-									</p>
-								);
+								// Rendered as markdown: the model writes markdown because the system
+								// prompt is written in markdown, and as plain text the asterisks showed.
+								// AgentMarkdown applies marketLinkParts to every text node, so the
+								// "only /m/ becomes a link" rule survives the change.
+								return <AgentMarkdown key={i} text={part.text} />;
 							}
 							// The runtime suspended a write tool and is waiting for the user.
 							//

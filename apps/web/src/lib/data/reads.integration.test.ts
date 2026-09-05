@@ -148,10 +148,10 @@ if (!databaseUrl) {
 			{ id: CAROL, walletAddress: CAROL_WALLET, displayName: null },
 		]);
 		await tx.insert(theses).values([
-			{ id: T_BACKED, creatorUserId: ALICE, headline: "Backed post", rationale: "why", status: "open", publishedAt: new Date(), ...STRUCTURE },
-			{ id: T_TEXT, creatorUserId: ALICE, headline: "Text only post", status: "open", publishedAt: new Date() },
-			{ id: T_TAGGED, creatorUserId: BOB, headline: "Tagged post", status: "open", publishedAt: new Date(), taggedAsset: "BTC" },
-			{ id: T_DRAFT, creatorUserId: ALICE, headline: "SECRET DRAFT", status: "draft", ...STRUCTURE },
+			{ id: T_BACKED, slug: "backed-post-2222", creatorUserId: ALICE, headline: "Backed post", rationale: "why", status: "open", publishedAt: new Date(), ...STRUCTURE },
+			{ id: T_TEXT, slug: "text-only-post-2222", creatorUserId: ALICE, headline: "Text only post", status: "open", publishedAt: new Date() },
+			{ id: T_TAGGED, slug: "tagged-post-2222", creatorUserId: BOB, headline: "Tagged post", status: "open", publishedAt: new Date(), taggedAsset: "BTC" },
+			{ id: T_DRAFT, slug: "secret-draft-2222", creatorUserId: ALICE, headline: "SECRET DRAFT", status: "draft", ...STRUCTURE },
 		] as NewThesis[]);
 		await tx.insert(positions).values([
 			position({ id: P_CREATOR, thesisId: T_BACKED, userId: ALICE, walletAddress: ALICE_WALLET, role: "creator", side: "back", entryPremiumUsd: "500.00", maximumLossUsd: "500.00", maximumPayoutUsd: "2300.00", estimatedPnlUsd: "25.00" }),

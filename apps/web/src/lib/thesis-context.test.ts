@@ -15,6 +15,7 @@ const thesisId = "10000000-0000-4000-8000-000000000001";
 const creator: User = {
 	id: textOnlyThesis.creatorUserId,
 	walletAddress: "0x00000000000000000000000000000000000000a1",
+	handle: null,
 	displayName: null,
 	bio: null,
 	avatarUrl: null,

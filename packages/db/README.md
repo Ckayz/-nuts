@@ -56,9 +56,10 @@ The chain is rebased onto the AI track's migration, which is already applied to 
 - `0001_core_schema` — generated from `src/schema`: the five enums, the seven core tables with their generated checks, the foreign keys, and the unique indexes.
 - `0002_core_triggers` — hand-written: three `plpgsql` trigger functions and the five triggers they back (the creator-position invariant on `theses` and `positions`, the public-creator wallet invariant on `users`, and the two order-snapshot immutability triggers). Drizzle does not model functions or triggers, so this migration has no snapshot of its own.
 - `0003_thesis_is_a_post` — generated schema changes for optional structures/backing and likes, with a derived `tagged_asset = underlying_asset` data backfill inserted before the new tag checks.
-- `0004_unbacked_wallet_fence` — hand-written replacement of the public creator-wallet function, excluding NULL links from its existing validation. Non-NULL link predicates and lock order are preserved.
+- `0004_unbacked_wallet_fence` — hand-written replacement of the public creator-wallet function, excluding NULL links from its existing validation. Non-NULL link predicates and lock order are preserved. This hand-written migration has no snapshot.
+- `0005_slugs_and_handles` — adds required unique thesis slugs with deterministic backfill and optional unique user handles.
 
-`0000`–`0002` are frozen. Apply the full migration chain before using the post model.
+`0000`–`0004` are frozen. Apply the full migration chain before using the post model.
 
 Why the chain was rebased: drizzle-orm's migrator reads only the single most recently applied row (`order by created_at desc limit 1`) and applies a journal entry when `lastDbMigration.created_at < migration.folderMillis` (`drizzle-orm/pg-core/dialect.js`). It never compares tags or hashes. Our original chain carried `when` timestamps *earlier* than the already-applied `0000_agent_tables`, so every one of our migrations would have been skipped silently against production — reporting success while changing nothing. Any migration added from here must carry a `when` greater than every applied entry. `bunx drizzle-kit generate` does this automatically; a hand-written journal entry must be given a fresh `Date.now()`.
 
@@ -117,3 +118,31 @@ Round 8: `theses_headline_nonblank` requires at least one non-whitespace headlin
 Round 9: headline nonblank validation uses the locale-independent ECMAScript WhiteSpace + LineTerminator set stripped by `String.prototype.trim` (ECMA-262 TrimString). SQL uses `btrim` with explicit Unicode escapes, defined in `src/schema/theses.ts` and copied into migration 0003 and its snapshot. Empty, ASCII-only, NBSP-only, figure-space-only, narrow-NBSP-only and BOM-only headlines are rejected; NBSP between words is accepted. The offline differential test decodes the actual SQL set and compares 20 inputs with JavaScript trimming, and checks schema/migration/snapshot agreement. Integration tests exercise SQL insert/update acceptance and rejection.
 
 Concurrency coverage now varies both publisher A and mutator B across READ COMMITTED, REPEATABLE READ and SERIALIZABLE. Added publication-first cases commit A with constraints still deferred; mutation-first cases likewise leave A deferred through COMMIT and require `phase: "commit"` on rejection (23514 at READ COMMITTED, 40001 for a stale stronger-isolation publisher). Existing explicit-validation schedules, lock-wait observation and timeouts remain. This round's writer runs offline only; these added schedules require orchestrator live execution.
+
+## Slugs and handles
+
+`theses.slug` is required, unique, and matches `^[a-z0-9]+(-[a-z0-9]+)*$`.
+`src/slug.ts` exports pure `deriveSlug(headline, uuid, occupied)` for future writers.
+ASCII uppercase becomes lowercase; runs outside ASCII letters/digits become one
+hyphen. Trim edge hyphens, keep the first six words and 64 characters, then trim
+a trailing hyphen. TODO-OWNER: six words / 64 characters are placeholder prefix
+limits. Append four UUID hex characters, extending one character at a time on
+collision. Empty-after-strip headlines use the full UUID hex alone. The backfill
+processes UUIDs in ascending order; a full 32-hex suffix distinguishes distinct
+UUIDs, and empty-prefix slugs have no hyphens so cannot collide with prefixed ones.
+Allocation is deterministic given the occupied set; concurrent writers must catch
+the unique violation and retry. No default or insert trigger silently chooses a slug.
+New thesis writers must supply it. Existing slugs are not recomputed on headline edits.
+
+Migration 0005 disables only the thesis relationship trigger during its backfill,
+then restores it before enforcing NOT NULL. This preserves permitted linked drafts
+without changing their backing. Apply through Drizzle's migration transaction;
+never run the statements piecemeal. Its generated snapshot models the final schema.
+
+`users.handle` is nullable, unique when set, and accepts lowercase ASCII letters,
+digits and underscores. TODO-OWNER: the enforced 1–32 character bounds are
+placeholders for the owner. There is no handle writer or profile-edit UI yet;
+wallet identity creation continues to insert the address only, leaving handle NULL.
+Golden normalization tests run offline; the integration suite executes the actual
+0005 backfill block and compares its results with TypeScript across Unicode,
+punctuation and suffix collisions. The orchestrator must run that SQL differential.

@@ -196,7 +196,7 @@ export default async function MarketPage({
 						<div className="card-b">
 							{summaries.map((m) => (
 								<Link className="row" href={`/m/${m.slug}`} key={m.slug}>
-									<Avatar initials={m.asset} tone="asset" size={30} />
+									<Avatar asset={m.asset} initials={m.asset} tone="asset" size={30} />
 									<span className="t">
 										<b>{m.name}</b>
 										<i>
@@ -221,7 +221,7 @@ export default async function MarketPage({
 		>
 				<section className="card pad">
 					<div className="mkt-head">
-						<Avatar initials={market.asset} tone="asset" size={44} />
+						<Avatar asset={market.asset} initials={market.asset} tone="asset" size={44} />
 						<div>
 							<h1>{market.name}</h1>
 							<span className="sub">

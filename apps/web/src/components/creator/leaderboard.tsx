@@ -28,7 +28,7 @@ export function Leaderboard({
 		<div className="card-b">
 			{entries.map(({ creator, following }) => (
 				<div className="row" key={creator.handle}>
-					<Avatar initials={creator.initials} size={34} />
+					<Avatar seed={creator.avatarSeed} initials={creator.initials} size={34} />
 					<span className="t">
 						<Link href={`/u/${creator.handle}`}>
 							<b>{creator.displayName}</b>

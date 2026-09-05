@@ -37,7 +37,7 @@ export async function YourPositionsRail({ asset }: { asset: string }) {
 					const view = position(row);
 					return (
 						<Link className="row" key={row.id} href={{ pathname: `/p/${row.id}` }}>
-							<Avatar initials={row.underlyingAsset} tone="asset" size={30} />
+							<Avatar asset={row.underlyingAsset} initials={row.underlyingAsset} tone="asset" size={30} />
 							<span className="t">
 								<b>{row.thesisHeadline || row.underlyingAsset}</b>
 								<i>

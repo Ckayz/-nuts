@@ -1,8 +1,10 @@
 import { CalloutTabs } from "@/components/feed/callout-tabs";
 import { MarketList, PositionList } from "@/components/feed/thesis-list";
 import { Leaderboard } from "@/components/creator/leaderboard";
+import { FarcasterRail } from "@/components/shell/farcaster-rail";
 import { PageFrame } from "@/components/shell/page-frame";
 import { TodoOwner } from "@/components/primitives";
+import { farcasterRail } from "@/lib/farcaster/casts";
 import { discoverData } from "@/lib/page-data";
 import { marketSummariesData } from "@/lib/market/summaries";
 
@@ -13,27 +15,37 @@ import { marketSummariesData } from "@/lib/market/summaries";
  *
  */
 export default async function DiscoverPage() {
-	const { leaderboard, following, top, ranked, yourPositions, signedIn, databaseMode } = await discoverData();
-	const { markets: marketSummaries, unavailable } = await marketSummariesData();
+	const [
+		{ leaderboard, following, top, ranked, yourPositions, signedIn, databaseMode },
+		{ markets: marketSummaries, unavailable },
+		farcaster,
+	] = await Promise.all([discoverData(), marketSummariesData(), farcasterRail()]);
 	return (
 		<PageFrame
 			variant="feed"
 			stackGap="sm"
 			left={
-				// `tabIndex={-1}` so the nav's Leaderboard link, which is an in-page
-				// anchor to this card, moves keyboard focus here and not just the
-				// scroll position.
-				<section className="card" id="top-traders" tabIndex={-1}>
-					<div className="card-h">
-						<h2>Follow top traders</h2>
-						<span className="x">1W</span>
-					</div>
-					<Leaderboard entries={leaderboard} signedIn={signedIn} databaseMode={databaseMode} />
-					<div className="card-f">
-						P&amp;L is 1W, from onchain fills and settlements. Ranking formula
-						<TodoOwner />
-					</div>
-				</section>
+				// The Farcaster rail sits UNDER the app's own leaderboard, in the left
+				// column. Grid columns are independent, so it displaces neither the
+				// centre feed nor the right column: the app's own content keeps every
+				// pixel it had, and somebody else's network is visibly secondary to it.
+				<div className="stack">
+					{/* `tabIndex={-1}` so the nav's Leaderboard link, which is an in-page
+					    anchor to this card, moves keyboard focus here and not just the
+					    scroll position. */}
+					<section className="card" id="top-traders" tabIndex={-1}>
+						<div className="card-h">
+							<h2>Follow top traders</h2>
+							<span className="x">1W</span>
+						</div>
+						<Leaderboard entries={leaderboard} signedIn={signedIn} databaseMode={databaseMode} />
+						<div className="card-f">
+							P&amp;L is 1W, from onchain fills and settlements. Ranking formula
+							<TodoOwner />
+						</div>
+					</section>
+					<FarcasterRail state={farcaster} />
+				</div>
 			}
 			right={
 				<>

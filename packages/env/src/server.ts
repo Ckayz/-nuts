@@ -47,6 +47,17 @@ export const env = createEnv({
 		 */
 		AGENT_GATE_MODEL: z.string().min(1).default("anthropic/claude-haiku-4.5"),
 
+		/**
+		 * Neynar API key for the "From Farcaster" rail (sent as the `x-api-key`
+		 * header, docs.neynar.com/reference/fetch-feed-by-channel-ids).
+		 *
+		 * OPTIONAL by design: the app must run with no Farcaster account at all.
+		 * When it is absent the rail renders an honest "not configured" line and
+		 * makes no request — see apps/web/src/lib/farcaster/casts.ts. Server-only,
+		 * never exposed to the browser.
+		 */
+		NEYNAR_API_KEY: z.string().optional(),
+
 		/** Base mainnet RPC. Public endpoint works; a keyed provider is better under load. */
 		BASE_RPC_URL: z.string().url().default("https://mainnet.base.org"),
 		THESIS_REFERRER: z.string().regex(/^0x[0-9a-fA-F]{40}$/).default("0xd5E66B6d957C2d5e6C8c167707a49a029D1247dd"),

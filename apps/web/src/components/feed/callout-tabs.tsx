@@ -1,10 +1,12 @@
 "use client";
 
 import { useId, useState } from "react";
+import Link from "next/link";
 import type { Thesis } from "@/lib/display-types";
 import type { RankedTheses } from "@/lib/page-data";
 import { TodoOwner } from "@/components/primitives";
 import { CalloutPost } from "./callout-post";
+import { feedEmptyState } from "./empty-state";
 import { NewCalloutsBar } from "./new-callouts-bar";
 import { TabHeading, TabPanel } from "./tabs";
 
@@ -59,7 +61,7 @@ export function CalloutTabs({ ranked, following, top, signedIn, databaseMode }: 
 			{audience === 1 && databaseMode && !signedIn ? <span className="note">Sign in to see posts from creators you follow. <TodoOwner /></span> : null}
 			{/* TODO-OWNER: signed-out Following copy above; Top inherits the trending rule. */}
 			{posts.length === 0 ? (
-				<span className="note">Nothing here yet.</span>
+				<FeedEmpty audience={audience} ranking={ranking} />
 			) : (
 				<div className="stack">{posts.map(thesis =>
 					<CalloutPost key={thesis.slug} thesis={thesis} signedIn={signedIn} databaseMode={databaseMode} />)}</div>
@@ -67,4 +69,20 @@ export function CalloutTabs({ ranked, following, top, signedIn, databaseMode }: 
 			<span className="note">Trending, ending and settled rules <TodoOwner /></span>
 		</TabPanel>
 	</>;
+}
+
+/**
+ * What a tab with no posts says. Two things, and no third: the reason this list
+ * is empty (`empty-state.ts` picks the one that fits the selected tabs) and the
+ * one action that changes it. Deliberately NOT a skeleton — nothing is loading,
+ * and pretending otherwise would be a lie about the state of the database.
+ */
+function FeedEmpty({ audience, ranking }: { audience: number; ranking: number }) {
+	const { line, action } = feedEmptyState(audience, ranking);
+	return (
+		<div className="card pad stack" style={{ alignItems: "flex-start" }}>
+			<p className="note">{line} <TodoOwner /></p>
+			<Link className="btn acc" href="/new">{action}</Link>
+		</div>
+	);
 }

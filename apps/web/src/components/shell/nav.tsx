@@ -13,9 +13,10 @@ import { marketSummaries } from "@/lib/view-data";
  * carried over from the icon rail this replaces.
  *
  * TODO-OWNER: there is no `/leaderboard` route. The top-traders card on the
- * feed IS the leaderboard today, so the item jumps to it rather than being a
- * button that does nothing; the owner decides whether Leaderboard gets its own
- * page. The same item was a dead `<button>` in the icon rail this replaces.
+ * feed IS the leaderboard today, so the item is a real in-page anchor to it —
+ * `/#top-traders`, matching the `id` on the feed's left card, which carries
+ * `tabIndex={-1}` so a keyboard user's focus lands on the card and not only the
+ * scroll position. The owner decides whether Leaderboard gets its own page.
  *
  * DIVERGENCE from the mockup: its nav ends with mockup-only view switchers
  * (Thread / Compose). The icon rail this replaces carried the only route to

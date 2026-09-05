@@ -1,6 +1,6 @@
 import Link from "next/link";
-import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
-import type { DisplayAmount, Tag, ThesisStatus } from "@/lib/display-types";
+import type { CSSProperties, ReactNode } from "react";
+import type { Tag, ThesisStatus } from "@/lib/display-types";
 
 /**
  * The shared primitives, ported from docs/mockups/thesis-fun-mockup.html.
@@ -102,119 +102,6 @@ export function StatusChip({
 		<Chip flat={status === "settled"} style={style}>
 			{label}
 		</Chip>
-	);
-}
-
-/** A money figure: tabular numerals, colour from the amount, never from a label. */
-export function Money({
-	amount,
-	className,
-	style,
-}: {
-	amount: DisplayAmount | undefined;
-	className?: string;
-	style?: CSSProperties;
-}) {
-	return (
-		<span
-			className={`num ${amount?.pnlClass ?? ""}${className ? ` ${className}` : ""}`}
-			style={style}
-		>
-			{amount?.signed ?? "—"}
-		</span>
-	);
-}
-
-export type ButtonVariant = "acc" | "sec" | "out";
-
-export function buttonClass(
-	variant: ButtonVariant = "sec",
-	options?: { block?: boolean; big?: boolean; className?: string },
-): string {
-	return [
-		"btn",
-		variant,
-		options?.block ? "block" : "",
-		options?.big ? "big" : "",
-		options?.className ?? "",
-	]
-		.filter(Boolean)
-		.join(" ");
-}
-
-/** The mockup's `.btn` with its three variants. */
-export function Button({
-	variant = "sec",
-	block,
-	big,
-	className,
-	...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
-	variant?: ButtonVariant;
-	block?: boolean;
-	big?: boolean;
-}) {
-	return <button {...rest} className={buttonClass(variant, { block, big, className })} />;
-}
-
-/**
- * The single-colour Bull split bar.
- *
- * RETIRED BY THE ROUND-1 MOCKUP: the fomo-feel spec draws no bars at all —
- * colour is for money only. It stays exported, with a neutral track, because
- * `/t/[slug]` and `components/thesis/share-panel.tsx` are another lane's files
- * this round. Delete both with those pages.
- */
-export function Bar({ pct, style }: { pct: number; style?: CSSProperties }) {
-	return (
-		<div className="bar" style={style}>
-			<i style={{ width: `${pct}%` }} />
-		</div>
-	);
-}
-
-/** See `Bar`: retired by the round-1 mockup, kept until `/t/[slug]` is rebuilt. */
-export function SplitBar({
-	bullLabel,
-	bearLabel,
-	bullPct,
-	bearMuted,
-	rowStyle,
-	barStyle,
-	style,
-}: {
-	bullLabel: string;
-	bearLabel: string;
-	bullPct: number;
-	bearMuted?: boolean;
-	rowStyle?: CSSProperties;
-	barStyle?: CSSProperties;
-	style?: CSSProperties;
-}) {
-	return (
-		<div className="sent" style={style}>
-			<div className="row2" style={rowStyle}>
-				<span>{bullLabel}</span>
-				<span className={bearMuted ? "mut" : undefined}>{bearLabel}</span>
-			</div>
-			<Bar pct={bullPct} style={barStyle} />
-		</div>
-	);
-}
-
-export function Pill({
-	children,
-	on,
-	style,
-}: {
-	children: ReactNode;
-	on?: boolean;
-	style?: CSSProperties;
-}) {
-	return (
-		<span className={on ? "pill on" : "pill"} style={style}>
-			{children}
-		</span>
 	);
 }
 

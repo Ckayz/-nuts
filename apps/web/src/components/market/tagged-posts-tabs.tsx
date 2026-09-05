@@ -28,7 +28,7 @@ export function TaggedPostsTabs({
 	const [tab, setTab] = useState<"all" | "backed">("all");
 	const all = useRef<HTMLButtonElement>(null);
 	const backed = useRef<HTMLButtonElement>(null);
-	const visible = tab === "all" ? posts : posts.filter((post) => post.backing !== null);
+	const visible = tab === "all" ? posts : posts.filter((post) => post.backingCard != null);
 	return (
 		<section className="card">
 			<div className="card-h tagged-h">
@@ -85,7 +85,9 @@ export function TaggedPostsTabs({
 					</span>
 				) : (
 					visible.map((post) => (
-						<CalloutPost key={post.slug} thesis={post} signedIn={signedIn} databaseMode={databaseMode} />
+						// Round-1 fold item 20: the mockup's market-page post is text plus
+						// a "Backed" chip, not the full card the feed draws.
+						<CalloutPost key={post.slug} thesis={post} signedIn={signedIn} databaseMode={databaseMode} compact />
 					))
 				)}
 			</div>

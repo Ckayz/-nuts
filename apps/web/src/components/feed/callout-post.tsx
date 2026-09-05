@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { PositionCard } from "@/components/feed/position-card";
 import { CommentIcon, ShareIcon, SparkIcon } from "@/components/icons";
 import { LikeButton } from "@/components/feed/like-button";
 import { PostText, TradeCards } from "@/components/feed/trade-card";
+import { PnlCard } from "@/components/position/pnl-card";
 import { Avatar, StatusChip, TagRow } from "@/components/primitives";
 import type { Thesis } from "@/lib/display-types";
 
@@ -14,11 +14,16 @@ import type { Thesis } from "@/lib/display-types";
  * trade button here — trading is on the market page. Three states:
  *   text only  — headline, rationale, like / comment / share;
  *   tagged     — plus the market chip and, when named, the structure chip;
- *   backed     — plus the verified badge and the creator's live position card.
+ *   backed     — plus the creator's live position card.
  *
  * Independently of all three, a `/p/<uuid>` link in the rationale unfurls into
  * a compact trade card: a post and a trade are separate things and a link is
- * what connects them (owner 2026-09-05).
+ * what connects them (owner 2026-09-05). When the linked position IS the one
+ * backing the post, only one card is drawn — `lib/position/view.ts`'s
+ * `withCards` drops the duplicate (round-1 fold item 8).
+ *
+ * `compact` is the market page's "Posts about <asset>" row (round-1 fold item
+ * 20): the mockup draws those as text plus the market chip, with no card.
  *
  * DIVERGENCES from the mockup, reported: (1) the mockup wraps headline AND
  * rationale in one link to the thread; the rationale can contain its own
@@ -27,11 +32,21 @@ import type { Thesis } from "@/lib/display-types";
  * moves lifecycle into the trade card, but an unbacked post has no card and
  * would silently lose its countdown.
  */
-export function CalloutPost({ thesis, signedIn = false, databaseMode = false }: { thesis: Thesis; signedIn?: boolean; databaseMode?: boolean }) {
+export function CalloutPost({
+	thesis,
+	signedIn = false,
+	databaseMode = false,
+	compact = false,
+}: {
+	thesis: Thesis;
+	signedIn?: boolean;
+	databaseMode?: boolean;
+	compact?: boolean;
+}) {
 	return (
 		<article className="post" aria-labelledby={`post-${thesis.slug}`}>
 			<Link href={`/u/${thesis.creator.handle}`} aria-label={thesis.creator.displayName}>
-				<Avatar initials={thesis.creator.initials} size={40} />
+				<Avatar initials={thesis.creator.initials} size={compact ? 34 : 40} />
 			</Link>
 			<div className="post-main">
 				<div className="p-head">
@@ -43,6 +58,9 @@ export function CalloutPost({ thesis, signedIn = false, databaseMode = false }: 
 					{thesis.status && thesis.statusLabel ? (
 						<StatusChip status={thesis.status} label={thesis.statusLabel} />
 					) : null}
+					{/* The mockup's market-page post carries a "Backed" chip in the
+					    byline instead of the card it has no room for. */}
+					{compact && thesis.backingCard ? <span className="chip">Backed</span> : null}
 				</div>
 				<p className="p-body" id={`post-${thesis.slug}`}>
 					<Link href={`/t/${thesis.slug}`}>{thesis.headline}</Link>
@@ -50,18 +68,16 @@ export function CalloutPost({ thesis, signedIn = false, databaseMode = false }: 
 						<PostText as="span" className="second" text={thesis.note} tokens={thesis.noteTokens} />
 					) : null}
 				</p>
-				{/* A `/p/<uuid>` link in the text unfurls here, X-style. The link
-				    above stays clickable; a link whose position did not resolve
-				    simply has no card (owner: no error state). */}
-				<TradeCards cards={thesis.tradeCards} />
-				{thesis.backing ? (
-					<PositionCard
-						asset={thesis.asset}
-						structure={thesis.structure}
-						backing={thesis.backing}
-					/>
-				) : null}
-				<TagRow tag={thesis.tag} backed={thesis.backing !== null} />
+				{compact ? null : (
+					<>
+						{/* A `/p/<uuid>` link in the text unfurls here, X-style. The link
+						    above stays clickable; a link whose position did not resolve
+						    simply has no card (owner: no error state). */}
+						<TradeCards cards={thesis.tradeCards} />
+						{thesis.backingCard ? <PnlCard card={thesis.backingCard} compact href /> : null}
+					</>
+				)}
+				<TagRow tag={thesis.tag} backed={thesis.backingCard != null} />
 				<div className="p-acts">
 					<LikeButton thesisId={thesis.id} signedIn={signedIn} databaseMode={databaseMode} likes={thesis.likes} liked={thesis.likedByViewer} />
 					<Link
@@ -77,10 +93,12 @@ export function CalloutPost({ thesis, signedIn = false, databaseMode = false }: 
 						Share
 					</button>
 					{/* Kept from the previous round: the AI lane owns what it does. */}
-					<button className="act" type="button">
-						<SparkIcon />
-						Explain
-					</button>
+					{compact ? null : (
+						<button className="act" type="button">
+							<SparkIcon />
+							Explain
+						</button>
+					)}
 				</div>
 			</div>
 		</article>

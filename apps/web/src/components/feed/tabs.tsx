@@ -1,9 +1,10 @@
 "use client";
 
-import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { TrendingItem } from "@/lib/display-types";
-import { TodoOwner } from "@/components/primitives";
-import { TrendingList } from "./thesis-list";
+/**
+ * The two tab presentations the mockup uses, and the keyboard rule they share.
+ * Both the feed's audience tabs and its ranking pills are built from these.
+ */
+import { type KeyboardEvent, type ReactNode } from "react";
 
 export function tabKey(key: string, current: number, count: number): number | null {
 	if (key === "ArrowRight") return (current + 1) % count;
@@ -46,31 +47,4 @@ export function TabHeading({ id, labels, selected, onSelect, variant = "tabs" }:
 
 export function TabPanel({ id, selected, children }: { id: string; selected: number; children: ReactNode }) {
 	return <div id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-tab-${selected}`} tabIndex={0}>{children}</div>;
-}
-
-/**
- * The Trending / Ending / Settled control.
- *
- * MISMATCH between the mockup and the data, reported: the mockup draws these
- * three as filter pills over the post feed, but they are their OWN ranked sets
- * (`View.TrendingItem`, headline + P&L only) and half of them are theses the
- * feed page does not carry — intersecting the two would silently drop rows.
- * So the pills keep selecting their own compact list, which renders directly
- * under them where the control is. Making them a true feed filter needs one
- * shape for both, i.e. a `lib/page-data.ts` change outside this fence.
- */
-export function RailTabs({ trending, ending, settled }: {
-	trending: TrendingItem[]; ending: TrendingItem[]; settled: TrendingItem[];
-}) {
-	const [selected, setSelected] = useState(0);
-	const id = useId();
-	return <>
-		<TabHeading id={id} labels={["Trending", "Ending", "Settled"]} selected={selected} onSelect={setSelected} variant="pills" />
-		<TabPanel id={id} selected={selected}>
-			<TrendingList
-				items={[trending, ending, settled][selected] ?? []}
-				note={<>Trending and ending rules <TodoOwner /></>}
-			/>
-		</TabPanel>
-	</>;
 }

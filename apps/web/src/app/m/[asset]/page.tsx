@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
+import { FeedRail } from "@/components/shell/feed-rail";
+import { PageFrame } from "@/components/shell/page-frame";
+import { Avatar } from "@/components/primitives";
 import { YourPositionsRail } from "@/components/market/your-positions-rail";
 import { TaggedPostsTabs } from "@/components/market/tagged-posts-tabs";
 import { getSession } from "@/lib/auth/session";
@@ -10,6 +13,7 @@ import { TakeASide } from "@/components/market/take-a-side";
 import { usd, usd2 } from "@/lib/format";
 import { usingDatabase } from "@/lib/data/source";
 import { marketBySlug, marketSummaries, thesesByMarket } from "@/lib/view-data";
+import { railTheses } from "@/lib/page-data";
 import type { Market, MarketSummary, Thesis } from "@/lib/display-types";
 import type { TradePanelContext } from "@/lib/trade/types";
 import "@/styles/market.css";
@@ -112,168 +116,161 @@ export default async function MarketPage({
 		if (value !== undefined) carried[key] = value;
 	}
 
-	return (
-		<main className="wrap">
-<div className="cols page no-left">
-				{/* MERGE: this is `PageFrame` (shell lane, `components/shell/page-frame.tsx`)
-				    written out, because that module does not exist in this lane's tree.
-				    At merge, replace this element and its two rails with:
-				      <PageFrame left={<FeedRail posts={...} />} right={<>…right column…</>}>
-				        …centre…
-				      </PageFrame>
-				    `no-left` drops the rail's grid track until then, so the page is not
-				    left with an empty 264px column. */}
+	const rail = await railTheses();
 
-				<div className="stack lg">
-					<section className="card pad">
-						<div className="mkt-head">
-							<span className="av av-44 av-asset" aria-hidden="true">
-								{market.asset}
-							</span>
+	return (
+		<PageFrame
+			left={<FeedRail posts={rail} />}
+			right={
+				<>
+				{trade === null ? (
+					<>
+						<TakeASide
+							ticket={market.ticket}
+							structureLabel={market.selectedLabel}
+							expiryLabel={market.selectedExpiryLabel}
+						/>
+						<section className="card pad mkt-panel">
+							<h3 style={{ fontSize: "15px" }}>Post about {market.asset}</h3>
+							<p className="fine">
+								Write your read on this market. A post is text first — tag this structure if you
+								want, and it shows the verified badge only once your own fill confirms.
+							</p>
+							<Link className="btn sec block" style={{ marginTop: "14px" }} href="/new">
+								Write a post
+							</Link>
+						</section>
+					</>
+				) : (
+					<MarketRail
+						trade={trade}
+						structureLabel={market.selectedLabel}
+						expiryLabel={market.selectedExpiryLabel}
+					/>
+				)}
+
+				<section className="card">
+					<div className="card-h">
+						<h3>About {market.asset}</h3>
+					</div>
+					<div className="card-b" style={{ padding: "0 20px 16px" }}>
+						<dl className="kv">
 							<div>
-								<h1>{market.name}</h1>
-								<span className="sub">
-									{market.asset} · {market.venueLabel}
-								</span>
+								<dt className="k">Venue</dt>
+								<dd className="v">Thetanuts OptionBook</dd>
 							</div>
-							<span className="px">
-								<b className="num">{usd2(market.spotUsd)}</b>
-								<i className={`${market.changeClass} num`}>
-									{market.changeLabel} <span className="mut">24h</span>
-								</i>
-							</span>
+							<div>
+								<dt className="k">Network</dt>
+								<dd className="v">Base · 8453</dd>
+							</div>
+							<div>
+								<dt className="k">Expiries</dt>
+								<dd className="v num">{market.expiryCount}</dd>
+							</div>
+							<div>
+								<dt className="k">Structures</dt>
+								<dd className="v num">{market.structureCount}</dd>
+							</div>
+							<div>
+								<dt className="k">Settlement</dt>
+								<dd className="v">Thetanuts TWAP</dd>
+							</div>
+						</dl>
+					</div>
+				</section>
+
+				<YourPositionsRail asset={market.asset} />
+
+				{/* TODO-OWNER: the mockup hides the whole right column below 1180px
+				    (`index.css`, `@media (max-width:1180px) .col-right`), so on a
+				    phone this page shows the book but not the ticket and the market
+				    cannot be traded from a phone at all. That is the mockup's own
+				    rule; whether mobile should be able to trade is the owner's call,
+				    not this round's. */}
+
+				{summaries.length > 0 ? (
+					<section className="card">
+						<div className="card-h">
+							<h3>Markets</h3>
+							<span className="x num">{summaries.length} live</span>
 						</div>
-						<div className="stats">
-							<span className="tile">
-								<i>Spot</i>
-								<b className="num">{usd(market.spotUsd)}</b>
-							</span>
-							<span className="tile">
-								<i>24h</i>
-								<b className={`${market.changeClass} num`}>{market.changeLabel}</b>
-							</span>
-							<span className="tile">
-								<i>Structures</i>
-								<b className="num">{market.structureCount}</b>
-							</span>
-							<span className="tile">
-								<i>Tagged posts</i>
-								<b className="num">{tagged.length}</b>
-							</span>
+						<div className="card-b">
+							{summaries.map((m) => (
+								<Link className="row" href={`/m/${m.slug}`} key={m.slug}>
+									<Avatar initials={m.asset} tone="asset" size={30} />
+									<span className="t">
+										<b>{m.name}</b>
+										<i>
+											{m.asset} · Base
+										</i>
+									</span>
+									<span className="v">
+										<b className="num">{usd2(m.spotUsd)}</b>
+										<i className={`${m.changeClass} num`}>{m.changeLabel}</i>
+									</span>
+								</Link>
+							))}
+						</div>
+						<div className="card-f">
+							Assets, strikes and expiries come from live OptionBook orders. Nothing here is a
+							hardcoded list.
 						</div>
 					</section>
-
-					{unavailable !== null ? <span className="mkt-warn">{unavailable}</span> : null}
-
-					<StructuresList
-						rows={market.structures}
-						slug={market.slug}
-						query={carried}
-						live={trade !== null}
-					/>
-
-					<TaggedPostsTabs
-						posts={tagged}
-						asset={market.asset}
-						signedIn={signedIn}
-						databaseMode={databaseMode}
-					/>
-				</div>
-
-				<div className="col-right">
-					<div className="sticky stack">
-						{trade === null ? (
-							<>
-								<TakeASide
-									ticket={market.ticket}
-									structureLabel={market.selectedLabel}
-									expiryLabel={market.selectedExpiryLabel}
-								/>
-								<section className="card pad mkt-panel">
-									<h3 style={{ fontSize: "15px" }}>Post about {market.asset}</h3>
-									<p className="fine">
-										Write your read on this market. A post is text first — tag this structure if you
-										want, and it shows the verified badge only once your own fill confirms.
-									</p>
-									<Link className="btn sec block" style={{ marginTop: "14px" }} href="/new">
-										Write a post
-									</Link>
-								</section>
-							</>
-						) : (
-							<MarketRail
-								trade={trade}
-								structureLabel={market.selectedLabel}
-								expiryLabel={market.selectedExpiryLabel}
-							/>
-						)}
-
-						<section className="card">
-							<div className="card-h">
-								<h3>About {market.asset}</h3>
-							</div>
-							<div className="card-b" style={{ padding: "0 20px 16px" }}>
-								<dl className="kv">
-									<div>
-										<dt className="k">Venue</dt>
-										<dd className="v">Thetanuts OptionBook</dd>
-									</div>
-									<div>
-										<dt className="k">Network</dt>
-										<dd className="v">Base · 8453</dd>
-									</div>
-									<div>
-										<dt className="k">Expiries</dt>
-										<dd className="v num">{market.expiryCount}</dd>
-									</div>
-									<div>
-										<dt className="k">Structures</dt>
-										<dd className="v num">{market.structureCount}</dd>
-									</div>
-									<div>
-										<dt className="k">Settlement</dt>
-										<dd className="v">Thetanuts TWAP</dd>
-									</div>
-								</dl>
-							</div>
-						</section>
-
-						<YourPositionsRail asset={market.asset} />
-
-						{summaries.length > 0 ? (
-							<section className="card">
-								<div className="card-h">
-									<h3>Markets</h3>
-									<span className="x num">{summaries.length} live</span>
-								</div>
-								<div className="card-b">
-									{summaries.map((m) => (
-										<Link className="row" href={`/m/${m.slug}`} key={m.slug}>
-											<span className="av av-30 av-asset" aria-hidden="true">
-												{m.asset}
-											</span>
-											<span className="t">
-												<b>{m.name}</b>
-												<i>
-													{m.asset} · Base
-												</i>
-											</span>
-											<span className="v">
-												<b className="num">{usd2(m.spotUsd)}</b>
-												<i className={`${m.changeClass} num`}>{m.changeLabel}</i>
-											</span>
-										</Link>
-									))}
-								</div>
-								<div className="card-f">
-									Assets, strikes and expiries come from live OptionBook orders. Nothing here is a
-									hardcoded list.
-								</div>
-							</section>
-						) : null}
+				) : null}
+				</>
+			}
+		>
+				<section className="card pad">
+					<div className="mkt-head">
+						<Avatar initials={market.asset} tone="asset" size={44} />
+						<div>
+							<h1>{market.name}</h1>
+							<span className="sub">
+								{market.asset} · {market.venueLabel}
+							</span>
+						</div>
+						<span className="px">
+							<b className="num">{usd2(market.spotUsd)}</b>
+							<i className={`${market.changeClass} num`}>
+								{market.changeLabel} <span className="mut">24h</span>
+							</i>
+						</span>
 					</div>
-				</div>
-			</div>
-		</main>
+					<div className="stats">
+						<span className="tile">
+							<i>Spot</i>
+							<b className="num">{usd(market.spotUsd)}</b>
+						</span>
+						<span className="tile">
+							<i>24h</i>
+							<b className={`${market.changeClass} num`}>{market.changeLabel}</b>
+						</span>
+						<span className="tile">
+							<i>Structures</i>
+							<b className="num">{market.structureCount}</b>
+						</span>
+						<span className="tile">
+							<i>Tagged posts</i>
+							<b className="num">{tagged.length}</b>
+						</span>
+					</div>
+				</section>
+
+				{unavailable !== null ? <span className="mkt-warn">{unavailable}</span> : null}
+
+				<StructuresList
+					rows={market.structures}
+					slug={market.slug}
+					query={carried}
+					live={trade !== null}
+				/>
+
+				<TaggedPostsTabs
+					posts={tagged}
+					asset={market.asset}
+					signedIn={signedIn}
+					databaseMode={databaseMode}
+				/>
+		</PageFrame>
 	);
 }

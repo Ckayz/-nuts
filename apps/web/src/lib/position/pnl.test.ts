@@ -542,7 +542,12 @@ describe("positionPage", () => {
 		expect(page.card.pnl.signed2).toBe("+$39.95");
 		expect(page.card.pnl.signed).toBe("+$40");
 		expect(page.card.basis).toBe("derived");
-		expect(page.card.instrumentLabel).toBe("BTC · put · 78,000 P · 11 SEP");
+		// Round-1 fold item 9: the mockup splits the instrument into a title, a
+		// strikes sub-line and an expiry chip; the card carries the three apart.
+		expect(page.card.instrumentLabel).toBe("BTC put");
+		expect(page.card.strikesLabel).toBe("78,000 P");
+		expect(page.card.expiryLabel).toBe("11 Sep");
+		expect(page.card.expiryFullLabel).toBe("11 Sep 26 08:00 UTC");
 		// Premium paid: entryPremiumUsd is null on this row, so it is valued from
 		// 50000 aBasUSDC base units at the 1 USD peg = 0.05.
 		expect(page.card.stats[0]).toEqual({ label: "Premium paid", value: "$0.05" });

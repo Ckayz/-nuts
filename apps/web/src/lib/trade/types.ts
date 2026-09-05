@@ -6,7 +6,7 @@
  * shape on the way to the browser and every printed figure keeps its raw base
  * units next to it.
  */
-import type { Ticket } from "@/lib/display-types";
+import type { PnlCard, Ticket } from "@/lib/display-types";
 
 export type TicketSide = "bull" | "bear";
 export type TakerSide = "buy" | "sell";
@@ -150,29 +150,21 @@ export interface RecordSuccess {
 	} | null;
 }
 
-export interface FillCardTile {
-	readonly label: string;
-	readonly value: string;
-}
-
-export interface FillCard {
-	/** Truncated wallet of whoever holds the position. */
-	readonly ownerLabel: string;
-	/** The mockup's `.live` chip copy. */
-	readonly statusLabel: string;
-	readonly instrumentLabel: string;
-	/** "Bull · bought" or "Bear · sold". */
-	readonly sideLabel: string;
-	/** Live P&L, or an em dash when no mark exists yet. */
-	readonly pnlLabel: string;
-	readonly pnlPercentLabel: string;
-	/** Null when there is no P&L to colour. */
-	readonly pnlClass: string;
-	readonly tiles: readonly FillCardTile[];
+/**
+ * What the post-fill dialog renders: the SAME card as `/p/[id]` and the feed
+ * (round-1 fold item 16), widened only with the two paths the dialog needs.
+ *
+ * Before this round `FillCard` was its own shape — a truncated wallet and three
+ * label/value tiles — so the dialog drew a hand-copied lookalike of the share
+ * card with no avatar, no date and its own status vocabulary. It is now
+ * `View.PnlCard`, built by the one builder in `lib/position/view.ts`, so a fill
+ * reads the same in the dialog as it does on its own page a second later.
+ */
+export type FillCard = PnlCard & {
 	/** Path of this position's own page. */
 	readonly positionPath: string;
 	/** Composer, pre-filled with a link to the position. */
 	readonly composePath: string;
-}
+};
 
 export type RecordResult = RecordFailure | RecordSuccess;

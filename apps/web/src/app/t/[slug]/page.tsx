@@ -4,11 +4,13 @@ import { notFound } from "next/navigation";
 import { CreatorStats } from "@/components/creator/creator-stats";
 import { LikeButton } from "@/components/feed/like-button";
 import { PostText, TradeCards } from "@/components/feed/trade-card";
+import { PnlCard } from "@/components/position/pnl-card";
 import { CommentIcon, ShareIcon } from "@/components/icons";
 import { Avatar, StatusChip } from "@/components/primitives";
 import { CommentsList } from "@/components/thesis/comments-list";
-import { PagesFrame } from "@/components/thesis/pages-frame";
-import { thesisDetailData, socialPageState } from "@/lib/page-data";
+import { FeedRail } from "@/components/shell/feed-rail";
+import { PageFrame } from "@/components/shell/page-frame";
+import { thesisDetailData, railTheses, socialPageState } from "@/lib/page-data";
 import "@/styles/thread.css";
 /**
  * Rendered per request, never from a build-time cache.
@@ -44,7 +46,8 @@ export default async function ThesisPage({ params }: { params: Promise<{ slug: s
  if (!detail) notFound();
  const t = detail.thesis;
  const social = await socialPageState(t.creator.id);
- return <PagesFrame right={<div className="stack">
+ const rail = await railTheses();
+ return <PageFrame left={<FeedRail posts={rail} />} right={<>
   {t.tag ? <section className="card pad thread-market">
    <h3>Trade this on the {t.tag.asset} market</h3>
    <p className="mut">{t.tag.structureLabel ? `This post names the ${t.tag.asset} ${t.tag.structureLabel}.` : `This post is about the ${t.tag.asset} market.`}</p>
@@ -52,20 +55,21 @@ export default async function ThesisPage({ params }: { params: Promise<{ slug: s
    <Link className="btn acc block" href={`/m/${t.tag.slug}`}>Open the {t.tag.asset} market</Link>
   </section> : null}
   <CreatorStats creator={t.creator} {...social} />
- </div>}>
+ </>}>
   <article className="post thread-post">
    <Link href={`/u/${t.creator.handle}`} aria-label={t.creator.displayName}><Avatar initials={t.creator.initials} /></Link>
    <div className="post-main">
     <div className="p-head"><Link className="p-name" href={`/u/${t.creator.handle}`}>{t.creator.displayName}</Link><span className="p-handle">@{t.creator.handle}</span><span className="p-time">{t.postedLabel}</span>
      {t.status && t.statusLabel ? <StatusChip status={t.status} label={t.statusLabel} /> : null}
-     {t.backing ? <span className="chip flat">Backed</span> : null}
+     {t.backingCard ? <span className="chip">Backed</span> : null}
     </div>
     <div className="p-body"><h1>{t.headline}</h1>{t.note ? <div className="second"><PostText text={t.note} tokens={t.noteTokens} /></div> : null}</div>
+    {t.backingCard ? <PnlCard card={t.backingCard} compact href /> : null}
     <TradeCards cards={t.tradeCards} />
     <div className="p-acts"><LikeButton thesisId={t.id} {...social} likes={t.likes} liked={t.likedByViewer} /><a className="act" href="#comments"><CommentIcon />{t.commentCount}</a><button className="act" type="button"><ShareIcon />Share</button></div>
     <span className="mut num thread-link">{detail.shareUrl}</span>
    </div>
   </article>
   <section className="card" id="comments"><div className="card-h"><h3>Comments</h3><span className="x num">{t.commentCount}</span></div><div className="card-b thread-comments"><CommentsList comments={detail.comments} thesisId={t.id} {...social} /></div></section>
- </PagesFrame>;
+ </PageFrame>;
 }

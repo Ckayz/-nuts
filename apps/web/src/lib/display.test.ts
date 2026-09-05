@@ -56,13 +56,13 @@ describe("post states", () => {
         const view = thesis(ethCallsCheap);
         assert.equal(view.tag?.slug, "eth");
         assert.equal(view.tag?.asset, "ETH");
-        assert.equal(view.tag?.structureLabel, "2,600 / 2,800 C · 25 SEP");
+        assert.equal(view.tag?.structureLabel, "2,600 / 2,800 C · 25 Sep");
         assert.equal(view.backing, null);
         assert.equal(view.statusLabel, "LIVE · 20d 09h");
     });
     test("a backed post carries the position card and the sides", () => {
         const view = thesis(btcNfp);
-        assert.equal(view.tag?.structureLabel, "78,000 / 74,000 P · 11 SEP");
+        assert.equal(view.tag?.structureLabel, "78,000 / 74,000 P · 11 Sep");
         assert.equal(view.backing?.creatorRiskedUsd.usd, "$1,000");
         assert.equal(view.backing?.creatorPnlLabel, "Live P&L");
         assert.equal(view.backing?.bull.amountLabel, "$7,920");

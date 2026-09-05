@@ -35,18 +35,22 @@ import {
 } from "@nuts/thetanuts";
 import { and, eq } from "drizzle-orm";
 import { db } from "@nuts/db";
-import { positions, type Position } from "@nuts/db/schema/index";
+import { positions, users, type Position } from "@nuts/db/schema/index";
 import { encodeFillEventSnapshot } from "@nuts/db/fill-event-snapshot";
 import { decodeOrderSnapshot } from "@nuts/db/order-snapshot";
 import { getSession } from "@/lib/auth/session";
 import { ascendingStrikes, riskKindFor } from "@/lib/market/structures";
 import { formatBaseUnits, formatUsd8 } from "@/lib/market/units";
+import { pnlCard } from "@/lib/display";
+import { mapCreator } from "@/lib/data/map";
+import { creatorHandle, creatorInitials } from "@/lib/data/identity";
+import type * as Domain from "@/types";
 import { collateralUsdPrice } from "@/lib/thetanuts/orders";
 import { ACTIVITY_EVENTS, recordActivity } from "./store";
 import { measureDebit, publicClient } from "./chain";
 import { decodeTradeTicket, type TradeTicketPayload } from "./ticket";
 import { truncateAddress } from "@/lib/auth/address";
-import type { FillCard, FillCardTile, RecordResult } from "./types";
+import type { FillCard, RecordResult } from "./types";
 
 /**
  * The two chain reads this module makes. Structural, so viem's public client
@@ -218,51 +222,85 @@ export async function recordTradeFor(
 }
 
 /**
- * The post-fill share card, shaped after fomo's post-trade card (owner reference
- * 2026-09-05): owner, status chip, instrument, one big signed P&L, three tiles.
+ * The post-fill share card — the SAME `View.PnlCard` every other surface draws
+ * (round-1 fold item 16), built by the one builder in `lib/position/view.ts`.
  *
- * The big number is an em dash on purpose. A live P&L needs a mark for the
- * option, and this app has none at the moment a fill confirms: the Thetanuts
- * indexer read is a follow-up (`positions.status` only reaches `indexed` later)
- * and the SDK publishes no option price here. Printing "+$0.00" would assert a
- * valuation nobody measured, so the slot says so instead.
- * TODO-OWNER: the P&L mark source and the tile labels below.
+ * The big number is an em dash on purpose, and the builder says so in its own
+ * sentence: a live P&L needs a mark for the option, and this app has none at the
+ * moment a fill confirms (`positions.status` only reaches `indexed` later, and
+ * the SDK publishes no option price here). A freshly confirmed row is
+ * `confirmed`, whose resolution is exactly "no recorded estimate yet", so the
+ * card states that rather than asserting "+$0.00".
+ *
+ * The USD figures are the ones the fill itself recorded, converted from raw
+ * collateral base units by the same peg `usd8Of` uses above; a token this code
+ * cannot price yields null, which the card renders as "\u2014".
  */
-function fillCard(ticket: TradeTicketPayload, row: Position): FillCard {
+async function fillCard(ticket: TradeTicketPayload, row: Position): Promise<FillCard> {
+	const [user] = await db
+		.select()
+		.from(users)
+		.where(eq(users.id, ticket.userId))
+		.limit(1);
+	const owner: Domain.Creator = user
+		? mapCreator(user)
+		: {
+				// The session proved this wallet; the row it belongs to is only used
+				// for the name and monogram, so a missing row degrades to the address
+				// rather than failing the fill that already happened onchain.
+				id: ticket.userId,
+				walletAddress: row.walletAddress,
+				displayName: null,
+				handle: creatorHandle(row.walletAddress),
+				initials: creatorInitials(null, row.walletAddress),
+				mockWalletFragment: null,
+				sinceLabel: null,
+				winRatePct: null,
+				thesesCount: null,
+				followers: null,
+				netPnlUsd: null,
+				verifiedPnl30dUsd: null,
+				biggestLossUsd: null,
+			};
 	const decimals = ticket.collateralDecimals;
 	const symbol = ticket.collateralSymbol;
 	const debit = ticket.taker === "buy" ? row.premium : row.collateral;
-	const tiles: FillCardTile[] = [
-		{
-			// TODO-OWNER: tile labels. The mockup names "Max loss" and "Max payout";
-			// it has no label for what a fill cost.
-			label: ticket.taker === "buy" ? "Paid" : "Locked",
-			value: `${formatBaseUnits(BigInt(debit), decimals)} ${symbol}`,
-		},
-		{
-			label: "Max loss",
-			value: row.maximumLoss === null ? "—" : `${formatBaseUnits(BigInt(row.maximumLoss), decimals)} ${symbol}`,
-		},
-		{
-			label: "Max payout",
-			value:
-				row.maximumPayout === null ? "—" : `${formatBaseUnits(BigInt(row.maximumPayout), decimals)} ${symbol}`,
-		},
-	];
-	return {
-		ownerLabel: truncateAddress(row.walletAddress),
-		// The mockup's chip vocabulary is LIVE / ENDING / SETTLED; a fill that
-		// just confirmed is live.
-		statusLabel: "LIVE",
-		instrumentLabel: ticket.instrumentLabel,
-		sideLabel: ticket.taker === "buy" ? "Bull · bought" : "Bear · sold",
-		pnlLabel: "—",
-		pnlPercentLabel: "—",
-		pnlClass: "",
-		tiles,
-		positionPath: `/p/${row.id}`,
-		composePath: `/new?link=/p/${row.id}`,
+	const usdOrNull = (base: string | null): string | null => {
+		if (base === null) return null;
+		const usd8 = usd8Of(BigInt(base), symbol, decimals);
+		return usd8 === null ? null : formatUsd8(usd8);
 	};
+	const card = pnlCard({
+		id: row.id,
+		owner,
+		status: row.status === "failed" ? "failed" : "confirmed",
+		createdAt: (row.confirmedAt ?? row.createdAt).toISOString(),
+		instrumentLabel: ticket.instrumentLabel,
+		// The order snapshot's own strings are already in the ticket's label; the
+		// split fields stay null rather than re-parsing that label back apart.
+		asset: null,
+		strikesLabel: null,
+		expiryLabel: null,
+		expiryFullLabel: null,
+		side: ticket.positionSide,
+		pnl: {
+			usd: null,
+			basis: "unavailable",
+			detail:
+				"No P&L yet: a live figure needs a mark for this option and nothing published one at the moment this fill confirmed. TODO-OWNER: the mark source.",
+		},
+		// TODO-OWNER: tile labels. The mockup names "Max loss" and "Max payout"; it
+		// has no label for what a fill cost.
+		entryLabel: ticket.taker === "buy" ? "Premium paid" : "Collateral locked",
+		entryUsd: usdOrNull(debit),
+		maxLossUsd: usdOrNull(row.maximumLoss),
+		maxPayoutUsd: usdOrNull(row.maximumPayout),
+		tx: row.txHash === null ? undefined : { label: `${truncateAddress(row.txHash)} \u2197`, href: `https://basescan.org/tx/${row.txHash}` },
+		// PRD 7.3: the badge is shown only after a verified Base mainnet receipt,
+		// which is exactly the state this function is called in.
+		verified: row.status !== "failed",
+	});
+	return { ...card, positionPath: `/p/${row.id}`, composePath: `/new?link=/p/${row.id}` };
 }
 
 async function result(ticket: TradeTicketPayload, row: Position, txHash: string): Promise<RecordResult> {
@@ -272,7 +310,7 @@ async function result(ticket: TradeTicketPayload, row: Position, txHash: string)
 		positionId: row.id,
 		thesisId: ticket.thesisId,
 		txHash,
-		card: row.status === "failed" ? null : fillCard(ticket, row),
+		card: row.status === "failed" ? null : await fillCard(ticket, row),
 		settled:
 			row.status === "failed"
 				? null

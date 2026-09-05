@@ -1,39 +1,7 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
 import { Avatar } from "@/components/primitives";
 import { pnlClass, signedUsd, usd } from "@/lib/format";
-import type { MarketSummary, Position, TrendingItem } from "@/lib/display-types";
-
-/**
- * The mockup's `.row`: asset avatar, two lines of neutral text, one figure on
- * the right in money colour (docs/mockups/thesis-fun-mockup.html). Nothing here
- * draws a bar — the round-1 design puts colour on numbers only.
- */
-export function TrendingList({ items, note }: { items: TrendingItem[]; note?: ReactNode }) {
-	return (
-		<div className="card">
-			<div className="card-b">
-				{items.map((it) => (
-					<Link className="row" href={`/t/${it.slug}`} key={it.slug}>
-						<Avatar initials={it.asset === "" ? "—" : it.asset} tone="asset" size={30} />
-						<span className="t">
-							<b>{it.headline}</b>
-							<i>
-								{[it.creatorHandle, it.timeLabel, `${it.bullPct}% bull`]
-									.filter(Boolean)
-									.join(" · ")}
-							</i>
-						</span>
-						<span className="v">
-							<b className={`num ${pnlClass(it.pnlUsd)}`}>{signedUsd(it.pnlUsd)}</b>
-						</span>
-					</Link>
-				))}
-			</div>
-			{note === undefined ? null : <div className="card-f">{note}</div>}
-		</div>
-	);
-}
+import type { MarketSummary, Position } from "@/lib/display-types";
 
 /**
  * A row in a positions list. It links to the POSITION, not to a post: a position

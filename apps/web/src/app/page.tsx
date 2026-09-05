@@ -1,5 +1,4 @@
 import { CalloutTabs } from "@/components/feed/callout-tabs";
-import { RailTabs } from "@/components/feed/rail-tabs";
 import { MarketList, PositionList } from "@/components/feed/thesis-list";
 import { Leaderboard } from "@/components/creator/leaderboard";
 import { PageFrame } from "@/components/shell/page-frame";
@@ -18,18 +17,21 @@ import { marketSummaries } from "@/lib/view-data";
  * Markets link the same way.
  */
 export default async function DiscoverPage() {
-	const { leaderboard, theses, following, top, trending, ending, settled, yourPositions, signedIn, databaseMode } = await discoverData();
+	const { leaderboard, following, top, ranked, yourPositions, signedIn, databaseMode } = await discoverData();
 	return (
 		<PageFrame
 			variant="feed"
 			stackGap="sm"
 			left={
-				<section className="card" id="top-traders">
+				// `tabIndex={-1}` so the nav's Leaderboard link, which is an in-page
+				// anchor to this card, moves keyboard focus here and not just the
+				// scroll position.
+				<section className="card" id="top-traders" tabIndex={-1}>
 					<div className="card-h">
 						<h2>Follow top traders</h2>
 						<span className="x">1W</span>
 					</div>
-					<Leaderboard creators={leaderboard} />
+					<Leaderboard entries={leaderboard} signedIn={signedIn} databaseMode={databaseMode} />
 					<div className="card-f">
 						P&amp;L is 1W, from onchain fills and settlements. Ranking formula
 						<TodoOwner />
@@ -59,10 +61,7 @@ export default async function DiscoverPage() {
 				</>
 			}
 		>
-			<CalloutTabs
-				{...{ theses, following, top, signedIn, databaseMode }}
-				filters={<RailTabs {...{ trending, ending, settled }} />}
-			/>
+			<CalloutTabs {...{ ranked, following, top, signedIn, databaseMode }} />
 		</PageFrame>
 	);
 }

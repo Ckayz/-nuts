@@ -56,15 +56,33 @@ export function expiryLabel(value: string, full = false) {
     const date = new Date(value);
     const day = String(date.getUTCDate()).padStart(2, "0");
     const month = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" }).format(date);
+    // "11 Sep", not "11 SEP": the mockup writes the month in title case
+    // (docs/mockups/thesis-fun-mockup.html, the market table and the trade card).
     if (!full)
-        return `${day} ${month.toUpperCase()}`;
+        return `${day} ${month}`;
     return `${day} ${month} ${String(date.getUTCFullYear()).slice(-2)} ${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")} UTC`;
 }
 function pctLabel(value: string) { return `${decimal(value).sign > 0 ? "+" : ""}${value}%`; }
 /** Exported for the live market page (lib/market), which builds the market View
  *  from OptionBook orders instead of a Domain.Market fixture. Same wording, one
  *  implementation: the mock page and the live page must not drift apart. */
-export function strikesLabel(strikesUsd: string[], isCall: boolean) { return `${strikesUsd.map(v => group(v)).join(" / ")} ${isCall ? "C" : "P"}`; }
+export function strikesLabel(strikesUsd: string[], isCall: boolean | null) {
+    const strikes = strikesUsd.map(v => group(v)).join(" / ");
+    // `null` means the product is neither a call nor a put, so no suffix is
+    // printed. See `strikeSide` below.
+    return isCall === null ? strikes : `${strikes} ${isCall ? "C" : "P"}`;
+}
+/**
+ * Which suffix a product's strikes carry, or null for none.
+ *
+ * A RANGER pays inside a band between two strikes: it is neither a call nor a
+ * put, and the mockup's market table prints its strikes bare ("72,000 / 88,000",
+ * docs/mockups/thesis-fun-mockup.html `#market`). Every other product the book
+ * lists is one or the other, and `isCall` decides.
+ */
+export function strikeSide(productType: string | null, isCall: boolean): boolean | null {
+    return productType !== null && /ranger/i.test(productType) ? null : isCall;
+}
 /** Market slugs are derived from the asset: the book, not a hardcoded list. */
 export function marketSlug(asset: string) { return asset.toLowerCase(); }
 export function creator(value: Domain.Creator): View.Creator {
@@ -75,7 +93,7 @@ export function creator(value: Domain.Creator): View.Creator {
         netPnlUsd: optionalAmount(value.netPnlUsd), verifiedPnl30dUsd: optionalAmount(value.verifiedPnl30dUsd), biggestLossUsd: optionalAmount(value.biggestLossUsd) };
 }
 function structure(value: Domain.ThesisStructure, expiryAt: string): View.Structure {
-    return { ...value, expiryAt, expiryLabel: expiryLabel(expiryAt), strikesLabel: strikesLabel(value.strikesUsd, value.isCall), side: "bull", venueLabel: "Base · OptionBook" };
+    return { ...value, expiryAt, expiryLabel: expiryLabel(expiryAt), strikesLabel: strikesLabel(value.strikesUsd, strikeSide(value.productType, value.isCall)), side: "bull", venueLabel: "Base · OptionBook" };
 }
 /** The position card's sub-line and side stats; only a backed post has one. */
 function backing(value: Domain.Thesis, settled: boolean): View.Backing {
@@ -141,74 +159,162 @@ export function thesisWithOrigin(value: Domain.Thesis, siteOrigin: string | unde
         tag: value.market === null ? null : { slug: marketSlug(value.market.underlyingAsset), asset: value.market.underlyingAsset, structureLabel: struct === null ? null : `${struct.strikesLabel} · ${struct.expiryLabel}` },
         structure: struct, backing: value.backing === null ? null : backing(value, settled),
         likes: value.likes, likedByViewer: value.likedByViewer, commentCount: value.commentCount,
-        // The link tokens are derived from the rationale the author wrote; the
-        // cards come from whichever of those links the reads actually resolved,
-        // so an unresolved link simply stays a link (owner: no error state).
-        noteTokens: value.thesis.rationale === null ? undefined : renderTextWithLinks(value.thesis.rationale, siteOrigin),
-        tradeCards: (value.linkedPositions ?? []).map(tradeCard) };
+        // The link tokens are derived from the rationale the author wrote. The
+        // CARDS are not built here: `lib/position/view.ts` owns the one card
+        // builder (it also owns the P&L rules PRD 13/14 sets) and
+        // `lib/page-data.ts` attaches them, so an unresolved link simply stays a
+        // link (owner: no error state).
+        noteTokens: value.thesis.rationale === null ? undefined : renderTextWithLinks(value.thesis.rationale, siteOrigin) };
 }
 export function thesis(value: Domain.Thesis): View.Thesis {
     return thesisWithOrigin(value, undefined);
 }
 /**
- * Signed percent of `base`, rounded half-up to one decimal, in exact decimal
- * arithmetic — the same discipline `group` above uses, so no money value is
- * ever routed through binary floating point. Null when either side is missing
- * or the base is zero (there is no percentage of nothing).
+ * The ONE card view model, assembled in ONE place.
+ *
+ * Before this round three view models described the same object — `View.Backing`
+ * (the creator's fill under a post), `View.TradeCard` (a `/p/<uuid>` unfurl) and
+ * `View.PnlCard` (`/p/[id]` and the post-fill dialog) — each with its own status
+ * wording, its own tiles and its own percent basis, so the same fill could read
+ * three different ways on three screens. They are now one `View.PnlCard` built
+ * here, rendered by one component at two sizes: the mockup's `.tcard` inside a
+ * post and its accent-framed `.frame` share card on `/p/[id]` and in the dialog.
+ *
+ * This function is pure assembly. Whoever calls it has already RESOLVED the P&L
+ * (`lib/position/pnl.ts` owns those rules, PRD 13/14) and the risk numbers, so
+ * the status table, the tile set, the percent and the date live here once and
+ * cannot drift between callers.
  */
-function signedPercent(value: string, base: string): string | null {
-    const numerator = decimal(value);
-    const denominator = decimal(base);
-    const places = Math.max(numerator.fraction.length, denominator.fraction.length);
-    const scale = (parts: { integer: string; fraction: string }) =>
-        BigInt(parts.integer + parts.fraction.padEnd(places, "0"));
-    // Magnitudes only; the sign is carried separately so the rounding below
-    // stays half-up on the magnitude rather than half-up towards +infinity.
-    const top = scale(numerator) * 1000n;
-    const bottom = scale(denominator);
-    if (bottom === 0n) return null;
-    const tenths = (top + bottom / 2n) / bottom;
-    const sign = numerator.sign * denominator.sign;
-    const whole = tenths / 10n;
-    const digit = tenths % 10n;
-    if (sign === 0) return `0.0%`;
-    return `${sign > 0 ? "+" : "\u2212"}${group(`${whole}`)}.${digit}%`;
+export const POSITION_STATUS_DISPLAY: Record<Domain.PositionStatus, { label: string; tone: View.ThesisStatus }> = {
+    // TODO-OWNER: `ThesisStatus` display mapping is an open owner item
+    // (CLAUDE.md). These reuse the three chip tones the mockup defines and take
+    // their words from the PRD, not from invention: 8.5.3 "settlement pending",
+    // 13 "confirmed but not indexed: show syncing", 13 "failed transaction: do
+    // not publish or count the position".
+    pending: { label: "Pending", tone: "settled" },
+    confirmed: { label: "Open · syncing", tone: "live" },
+    indexed: { label: "Open", tone: "live" },
+    expired: { label: "Settlement pending", tone: "ending" },
+    settled: { label: "Settled", tone: "settled" },
+    failed: { label: "Failed", tone: "ending" },
+};
+
+/** The fill's own date, e.g. "5 Sep 2026". UTC, like every other instant here. */
+export function dateLabel(iso: string): string {
+    const date = new Date(iso);
+    const month = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" }).format(date);
+    return `${date.getUTCDate()} ${month} ${date.getUTCFullYear()}`;
+}
+
+/** Decimal string -> scaled BigInt pair, for exact ratio arithmetic. */
+function scaled(value: string): { units: bigint; scale: bigint } {
+    const negative = value.startsWith("-");
+    const [integer = "0", fraction = ""] = (negative ? value.slice(1) : value).split(".");
+    const units = BigInt(integer + fraction);
+    return { units: negative ? -units : units, scale: 10n ** BigInt(fraction.length) };
 }
 
 /**
- * The compact card a post's `/p/<uuid>` link unfurls into.
- *
- * Every figure comes from the position row; nothing is estimated. A value the
- * database does not hold renders as "\u2014" rather than a zero.
- *
- * TODO-OWNER: the mockup specifies no trade card, so the three tiles (Risked /
- * Premium / Max payout), the status chip wording and the percent BASIS (P&L
- * over maximum loss, shown on screen as "of risked") are the minimum honest
- * presentation of the columns that exist, not approved product copy.
+ * `numerator / denominator` as a signed percentage with one decimal place,
+ * rounded half-up in integer arithmetic. Null when the denominator is zero or
+ * either side is not a plain decimal — a percentage of nothing is not zero.
  */
-export function tradeCard(value: Domain.LinkedPosition): View.TradeCard {
-    const settled = value.position.status === "settled";
-    const economics = value.position.economics;
-    const pnlRaw = settled ? economics.finalPnlUsd : economics.estimatedPnlUsd;
-    const risked = economics.maximumLossUsd;
-    const percent = pnlRaw === null || risked === null ? null : signedPercent(pnlRaw, risked);
+export function percentLabel(numerator: string, denominator: string): string | null {
+    const top = scaled(numerator);
+    const bottom = scaled(denominator);
+    if (bottom.units === 0n) return null;
+    // (top/topScale) / (bottom/bottomScale) * 100, carried to one decimal:
+    //   1000 * top.units * bottom.scale / (bottom.units * top.scale)
+    const numeratorUnits = 1000n * top.units * bottom.scale;
+    const denominatorUnits = bottom.units * top.scale;
+    if (denominatorUnits === 0n) return null;
+    const negative = numeratorUnits < 0n !== denominatorUnits < 0n;
+    const absoluteTop = numeratorUnits < 0n ? -numeratorUnits : numeratorUnits;
+    const absoluteBottom = denominatorUnits < 0n ? -denominatorUnits : denominatorUnits;
+    // Round half-up on the magnitude, then reapply the sign.
+    const tenths = (absoluteTop * 2n + absoluteBottom) / (absoluteBottom * 2n);
+    const whole = tenths / 10n;
+    const decimalDigit = tenths % 10n;
+    const sign = tenths === 0n ? "" : negative ? "\u2212" : "+";
+    return `${sign}${whole}.${decimalDigit}%`;
+}
+
+/** Everything the card needs that only the caller can know. */
+export interface PnlCardInput {
+    readonly id: string;
+    readonly owner: Domain.Creator;
+    readonly status: Domain.PositionStatus;
+    /** ISO instant the fill was recorded; the share card's top-right date. */
+    readonly createdAt: string;
+    /** Title line, e.g. "BTC put spread". Never empty. */
+    readonly instrumentLabel: string;
+    /** Ticker for the asset monogram; null when the record does not name one. */
+    readonly asset: string | null;
+    /** Strikes as rendered, e.g. "78,000 / 74,000 P"; null when unknown. */
+    readonly strikesLabel: string | null;
+    /** Expiry chip, e.g. "11 Sep"; null when unknown. */
+    readonly expiryLabel: string | null;
+    /** Expiry in full, e.g. "11 Sep 26 08:00 UTC"; null when unknown. */
+    readonly expiryFullLabel: string | null;
+    readonly side: Domain.PositionSide;
+    /** Already resolved by `lib/position/pnl.ts`; never re-derived here. */
+    readonly pnl: { readonly usd: string | null; readonly detail: string; readonly basis: View.PnlBasis };
+    /** "Premium paid" for a taker who bought, "Collateral locked" for one who sold. */
+    readonly entryLabel: string;
+    readonly entryUsd: string | null;
+    readonly maxLossUsd: string | null;
+    readonly maxPayoutUsd: string | null;
+    readonly tx: View.TxRef | undefined;
+    readonly verified: boolean;
+}
+
+export function pnlCard(input: PnlCardInput): View.PnlCard {
+    const status = POSITION_STATUS_DISPLAY[input.status];
+    const settled = input.status === "settled";
     return {
-        positionId: value.position.id,
-        href: tradeLinkHref(value.position.id),
-        owner: creator(value.owner),
-        statusLabel: value.position.status.toUpperCase(),
-        settled,
-        instrumentLabel: value.position.underlyingAsset === "" ? "\u2014" : value.position.underlyingAsset,
-        side: value.position.side === "back" ? "bull" : "bear",
-        sideLabel: value.position.side === "back" ? "Bull" : "Bear",
-        pnlUsd: amount(pnlRaw),
+        id: input.id,
+        owner: creator(input.owner),
+        statusLabel: status.label,
+        statusTone: status.tone,
+        dateLabel: dateLabel(input.createdAt),
+        instrumentLabel: input.instrumentLabel,
+        asset: input.asset,
+        strikesLabel: input.strikesLabel,
+        expiryLabel: input.expiryLabel,
+        expiryFullLabel: input.expiryFullLabel,
+        side: input.side === "back" ? "bull" : "bear",
+        sideLabel: input.side === "back" ? "Bull" : "Bear",
+        pnl: amount(input.pnl.usd),
         pnlLabel: settled ? "Result" : "Live P&L",
-        pnlPct: percent === null ? null : { value: percent, basis: "of risked" },
+        // TODO-OWNER: the denominator. Max loss is the money genuinely at stake,
+        // and for a bought option it equals the premium paid, so the two coincide
+        // on the common case. The tile it refers to is named in the label so the
+        // reader is never left guessing which number it is a percentage of.
+        ...(() => {
+            const percent =
+                input.pnl.usd === null || input.maxLossUsd === null
+                    ? null
+                    : percentLabel(input.pnl.usd, input.maxLossUsd);
+            const basis = "of max loss";
+            return {
+                pnlPctLabel: percent === null ? null : `${percent} ${basis}`,
+                pnlPctValue: percent,
+                pnlPctBasis: percent === null ? null : basis,
+            };
+        })(),
+        pnlBasisLabel: input.pnl.detail,
+        basis: input.pnl.basis,
+        // The ONE tile set (round-1 fold item 11). The mockup's third tile is a
+        // spot price, which no record here stores, so the three tiles are the
+        // money that went in and the two bounds the risk model gives. A value
+        // nobody recorded renders "\u2014", never a zero.
         stats: [
-            { label: "Risked", value: amount(risked).usd },
-            { label: "Premium", value: amount(economics.entryPremiumUsd).usd },
-            { label: "Max payout", value: amount(economics.maximumPayoutUsd).usd },
+            { label: input.entryLabel, value: amount(input.entryUsd).usd2 },
+            { label: "Max loss", value: amount(input.maxLossUsd).usd2 },
+            { label: "Max payout", value: amount(input.maxPayoutUsd).usd2 },
         ],
+        tx: input.tx,
+        verified: input.verified,
     };
 }
 
@@ -235,9 +341,6 @@ export function detail(value: Domain.ThesisDetail): View.ThesisDetail {
         comments: value.comments.map(v => ({ creator: creator(v.creator), postedLabel: `· ${elapsed(v.createdAt, value.thesis.dataAsOf)}`, body: v.body })),
         activity: value.activity.map(activity), activityCount: value.activityCount, participantCount: value.participantCount };
 }
-export function trending(value: Domain.TrendingItem): View.TrendingItem {
-    return { slug: value.slug, asset: value.underlyingAsset, headline: value.headline, creatorHandle: value.creatorHandle, timeLabel: `${value.remainingDays}d`, pnlUsd: amount(value.estimatedPnlUsd), bullPct: value.bullPct };
-}
 export function price(value: {
     underlyingAsset: string;
     currentSpotPriceUsd: string;
@@ -247,7 +350,7 @@ export function price(value: {
 }
 function marketStructure(value: Domain.MarketStructure, selectedId: string): View.MarketStructure {
     return { id: value.id, expiryLabel: expiryLabel(value.expiryAt), productType: `${value.productType.charAt(0).toUpperCase()}${value.productType.slice(1)}`,
-        strikesLabel: strikesLabel(value.strikesUsd, value.isCall), premiumPerContractUsd: amount(value.premiumPerContractUsd),
+        strikesLabel: strikesLabel(value.strikesUsd, strikeSide(value.productType, value.isCall)), premiumPerContractUsd: amount(value.premiumPerContractUsd),
         maxPayoutLabel: `${value.maxPayoutMultiple}×`, liquidityLeftUsd: amount(value.liquidityLeftUsd), selected: value.id === selectedId };
 }
 export function marketSummary(value: Domain.Market): View.MarketSummary {
@@ -266,6 +369,6 @@ export function market(value: Domain.Market): View.Market {
         series: value.series.map(p => { decimal(p.priceUsd); return { time: p.time, value: Number(p.priceUsd) }; }),
         structures: value.structures.map(s => marketStructure(s, value.selectedStructureId)),
         ticket: ticket(value.ticket),
-        selectedLabel: `${value.underlyingAsset} ${selected.productType} ${strikesLabel(selected.strikesUsd, selected.isCall)}`,
+        selectedLabel: `${value.underlyingAsset} ${selected.productType} ${strikesLabel(selected.strikesUsd, strikeSide(selected.productType, selected.isCall))}`,
         selectedExpiryLabel: expiryLabel(selected.expiryAt, true) };
 }

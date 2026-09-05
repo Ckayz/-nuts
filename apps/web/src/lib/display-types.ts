@@ -84,46 +84,6 @@ export interface Backing {
     bear: SideStats;
     settled: boolean;
 }
-/** One stat tile under a trade card's P&L, e.g. "Risked" / "$1,000". */
-export interface TradeCardStat {
-    label: string;
-    value: string;
-}
-/**
- * The compact position card a post's `/p/<uuid>` link unfurls into.
- *
- * Layout follows the share card the owner sent (`.demo/fomo-share-card.png`):
- * owner + status chip, the instrument, one big signed P&L with a percent, then
- * three stat tiles. No price line and no chart — Thetanuts exposes no price
- * history and the owner removed the charts.
- */
-export interface TradeCard {
-    positionId: string;
-    /** Canonical `/p/<id>` path; the whole card is a link to it. */
-    href: string;
-    owner: Creator;
-    /** Lifecycle chip copy, e.g. "OPEN" or "SETTLED". */
-    statusLabel: string;
-    /** Whether the position has settled; drives the muted card treatment. */
-    settled: boolean;
-    /** Instrument line, e.g. "BTC put spread" or just "BTC". */
-    instrumentLabel: string;
-    side: Side;
-    /** Side chip copy, "Bull" or "Bear". */
-    sideLabel: string;
-    /** The big number: signed P&L, "—" when the database holds none. */
-    pnlUsd: DisplayAmount;
-    /** "Live P&L" while open, "Result" once settled. */
-    pnlLabel: string;
-    /**
-     * The percent beside the big number, split so the component never parses a
-     * label: `value` is the coloured number, `basis` the neutral wording that
-     * says what it is a percent OF. Null when the ratio is not computable.
-     */
-    pnlPct: { value: string; basis: string } | null;
-    /** Exactly three tiles, each "—" when its value is unavailable. */
-    stats: TradeCardStat[];
-}
 /** Where a post's market/structure chips link to, and what they read. */
 export interface Tag {
     /** Market page slug, e.g. "btc"; the href is built as `/m/${slug}` so
@@ -165,8 +125,15 @@ export interface Thesis {
      * means "render `note` as plain text".
      */
     noteTokens?: TextToken[];
-    /** One card per linked position that resolved, in link order. ADDED. */
-    tradeCards?: TradeCard[];
+    /** One card per linked position that resolved, in link order. Same shape as
+     *  every other card in the product (round-1 fold item 9). */
+    tradeCards?: PnlCard[];
+    /**
+     * The creator's own fill, as the same card. Null when the post is not backed.
+     * `backing` above still carries the rail's one-line meta and the sides; this
+     * is the card the post renders.
+     */
+    backingCard?: PnlCard | null;
 }
 export interface Participant {
     creator: Creator;
@@ -212,16 +179,6 @@ export interface Comment {
     /** Relative time as rendered, e.g. "· 11m". */
     postedLabel: string;
     body: string;
-}
-export interface TrendingItem {
-    slug: string;
-    asset: string;
-    headline: string;
-    creatorHandle: string;
-    /** Time-left chip, e.g. "6d". */
-    timeLabel: string;
-    pnlUsd: DisplayAmount;
-    bullPct: number;
 }
 /** Everything the post thread page renders beyond the feed-level `Thesis`. */
 export interface ThesisDetail {
@@ -329,10 +286,19 @@ export interface PnlCard {
     statusTone: ThesisStatus;
     /** Date the fill was recorded, e.g. "5 Sep 2026". */
     dateLabel: string;
-    /** The instrument line, e.g. "BTC 78,000 / 74,000 P · 11 SEP". */
+    /** The card's title line, e.g. "BTC put spread"; the mockup's `.tc-inst`
+     *  and `.sc-inst`. Never empty. */
     instrumentLabel: string;
     /** Null when the order snapshot does not name the underlying. */
     asset: string | null;
+    /** Strikes as rendered, e.g. "78,000 / 74,000 P"; null when unknown. The
+     *  mockup puts them on the sub-line, not in the title. */
+    strikesLabel: string | null;
+    /** Expiry chip, e.g. "11 Sep"; the mockup's top-right slot on the compact
+     *  card. Null when the record names no expiry. */
+    expiryLabel: string | null;
+    /** Expiry in full, e.g. "11 Sep 26 08:00 UTC"; the share card's sub-line. */
+    expiryFullLabel: string | null;
     side: Side;
     /** "Bull" / "Bear" as rendered. */
     sideLabel: string;
@@ -340,8 +306,15 @@ export interface PnlCard {
     pnl: DisplayAmount;
     /** "Result" once settled, "Live P&L" while the option is open. */
     pnlLabel: string;
-    /** Percent in brackets, e.g. "+38.4% of risked"; null when not computable. */
+    /** Percent in brackets with its denominator, e.g. "+38.4% of max loss"; null
+     *  when not computable. The share card prints this in full. */
     pnlPctLabel: string | null;
+    /** The same percent WITHOUT the denominator, e.g. "+38.4%". The mockup's
+     *  compact card prints the bare number and names the denominator on the
+     *  basis line under it, so nothing is left unsaid at either size. */
+    pnlPctValue: string | null;
+    /** What the percent is a percentage OF, e.g. "of max loss"; null with no percent. */
+    pnlPctBasis: string | null;
     /** One sentence saying exactly where the number came from. */
     pnlBasisLabel: string;
     basis: PnlBasis;

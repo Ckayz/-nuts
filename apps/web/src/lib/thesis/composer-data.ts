@@ -13,16 +13,22 @@
  * foreign host, a `javascript:` URL, junk — is dropped and the composer simply
  * opens empty. `?asset=` must be a ticker shape and is uppercased.
  */
-import * as display from "../display";
-import type { TradeCard } from "../display-types";
+import type { PnlCard } from "../display-types";
 import { usingDatabase } from "../data/source";
 import { extractTradeLinks, tradeLinkHref } from "./links";
 
+/** One tag pill: the ticker for the monogram and the market's name beside it,
+ *  which is how the mockup writes them ("BTC Bitcoin"). */
+export interface AssetTag {
+	asset: string;
+	name: string;
+}
+
 export interface ComposerData {
-	assets: string[];
+	assets: AssetTag[];
 	presetAsset: string | null;
 	presetRationale: string;
-	previewCards: TradeCard[];
+	previewCards: PnlCard[];
 	signedIn: boolean;
 	databaseMode: boolean;
 }
@@ -50,10 +56,16 @@ export async function composerData(
 	// worker who owns the book reads, not to the trade-card round.
 	const { marketSummaries } = await import("../view-data");
 	const asset = presetAsset(single(searchParams.asset));
-	const assets = marketSummaries.map((market) => market.asset);
+	const assets: AssetTag[] = marketSummaries.map((market) => ({ asset: market.asset, name: market.name }));
 	// A preselected ticker is always offered, even when it is not in the list
-	// above, so `?asset=` cannot arrive selected but invisible.
-	if (asset !== null && !assets.includes(asset)) assets.unshift(asset);
+	// above, so `?asset=` cannot arrive selected but invisible. Its name is the
+	// ticker itself: nothing here knows a name the book has not published.
+	if (asset !== null && !assets.some((tag) => tag.asset === asset)) assets.unshift({ asset, name: asset });
+
+	// The ONE card builder (round-1 fold item 9). Imported here rather than at the
+	// top of the module because it reaches `@nuts/thetanuts` for the risk model,
+	// and only this branch of `/new` needs it.
+	const { linkedPositionCard } = await import("../position/view");
 
 	const link = single(searchParams.link);
 	// `?link=` is validated by the SAME grammar the post text is read with, so a
@@ -68,7 +80,7 @@ export async function composerData(
 			assets,
 			presetAsset: asset,
 			presetRationale,
-			previewCards: found.map(display.tradeCard),
+			previewCards: found.map((entry) => linkedPositionCard(entry)),
 			signedIn: false,
 			databaseMode,
 		};
@@ -82,7 +94,7 @@ export async function composerData(
 		assets,
 		presetAsset: asset,
 		presetRationale,
-		previewCards: entry === undefined ? [] : [display.tradeCard(entry)],
+		previewCards: entry === undefined ? [] : [linkedPositionCard(entry)],
 		signedIn: session !== null,
 		databaseMode,
 	};

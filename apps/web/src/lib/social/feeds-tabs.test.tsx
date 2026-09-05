@@ -1,23 +1,24 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { RailTabs, TabHeading, tabKey } from "@/components/feed/rail-tabs";
+import { TabHeading, tabKey } from "@/components/feed/tabs";
 import { CalloutTabs } from "@/components/feed/callout-tabs";
-import { trending, ending, settled } from "../view-data";
-test("rail tabs render initial list and ARIA linkage", () => {
- const html = renderToStaticMarkup(<RailTabs {...{ trending, ending, settled }} />);
- expect(html).toContain('role="tablist"');
- expect(html.match(/role="tab"/g)).toHaveLength(3);
- expect(html.match(/aria-selected="true"/g)).toHaveLength(1);
- expect(html).toContain('role="tabpanel"');
- expect(html).toContain(`/t/${trending[0]!.slug}`);
- expect(html).toContain("Ending"); expect(html).toContain("Settled");
+import type { RankedTheses } from "@/lib/page-data";
+
+const EMPTY: RankedTheses = { trending: [], ending: [], settled: [] };
+
+// Round-1 fold items 4 and 5: ONE post list under both controls, and the first
+// audience tab reads "All" as the mockup writes it — not "Callouts".
+test("the feed renders both controls: audience tabs and ranking pills", () => {
+ const html = renderToStaticMarkup(<CalloutTabs ranked={EMPTY} following={[]} top={[]} signedIn={false} databaseMode={false} />);
+ for (const label of ["All", "Following", "Top", "Trending", "Ending", "Settled"]) expect(html).toContain(label);
+ expect(html).not.toContain("Callouts");
+ expect(html.match(/role="tablist"/g)).toHaveLength(2);
+ expect(html.match(/role="tab"/g)).toHaveLength(6);
+ expect(html.match(/aria-selected="true"/g)).toHaveLength(2);
+ // ONE list: a single panel, not one per control.
+ expect(html.match(/role="tabpanel"/g)).toHaveLength(1);
 });
-test("callout tabs render the named labels without a wallet", () => {
- const html = renderToStaticMarkup(<CalloutTabs theses={[]} following={[]} top={[]} signedIn={false} databaseMode={false} />);
- for (const label of ["Callouts", "Following", "Top"]) expect(html).toContain(label);
- expect(html.match(/role="tab"/g)).toHaveLength(3);
-});
-for (const labels of [["Trending", "Ending", "Settled"], ["Callouts", "Following", "Top"]]) {
+for (const labels of [["Trending", "Ending", "Settled"], ["All", "Following", "Top"]]) {
  test(`${labels[0]} keyboard wraps and handles Home/End with roving tabindex`, () => {
   let selected = 0;
   for (const [key, expected] of [["ArrowLeft", 2], ["ArrowRight", 0], ["End", 2], ["Home", 0], ["ArrowRight", 1]] as const) {

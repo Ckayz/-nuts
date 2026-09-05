@@ -408,7 +408,11 @@ if (!databaseUrl) {
 				expect(page.thesis).toBeNull();
 				expect(page.marketSlug).toBe("btc");
 				expect(page.structureId).toMatch(/^[0-9a-f]{16}$/);
-				expect(page.card.instrumentLabel).toBe("BTC · put · 78,000 P · 11 SEP");
+				// Round-1 fold item 9: the card splits the instrument the way the
+				// mockup draws it — title, strikes sub-line, expiry chip.
+				expect(page.card.instrumentLabel).toBe("BTC put");
+				expect(page.card.strikesLabel).toBe("78,000 P");
+				expect(page.card.expiryLabel).toBe("11 Sep");
 				expect(page.card.pnl.signed2).toBe("+$39.95");
 			});
 

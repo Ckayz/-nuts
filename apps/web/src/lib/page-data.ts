@@ -24,6 +24,7 @@ import * as mock from "./view-data";
 import * as mockSource from "@/mock/data";
 import { attachLinkedPositions, enrichWithTradeLinks } from "./thesis/enrich";
 import { usingDatabase } from "./data/source";
+import { rankTheses } from "./social/ranking";
 
 /**
  * Mock-mode posts with their `/p/<uuid>` trade links applied.
@@ -54,16 +55,36 @@ function isOpen(position: View.Position): boolean {
 	return !position.settled;
 }
 
+/** One row of the feed's "Follow top traders" rail. */
+export interface LeaderboardEntry {
+	creator: View.Creator;
+	/** Whether the signed-in viewer already follows this creator. False in mock
+	 *  mode and for a signed-out visitor, who is routed to sign-in by the control. */
+	following: boolean;
+}
+
+/**
+ * The three rankings the feed's filter pills select between.
+ *
+ * They are POSTS, not a separate summary shape: the mockup draws the pills as
+ * filters over the post feed, so `trending` / `ending` / `settled` are the same
+ * `View.Thesis` objects in the order (and with the membership) the ranking reads
+ * give — `lib/social/ranking.ts` `rankTheses`, whose rules carry their own
+ * `TODO-OWNER`. Nothing here re-sorts or re-filters them.
+ */
+export interface RankedTheses {
+	trending: View.Thesis[];
+	ending: View.Thesis[];
+	settled: View.Thesis[];
+}
+
 export interface DiscoverData {
 	signedIn: boolean;
 	databaseMode: boolean;
-	ending: View.TrendingItem[];
-	settled: View.TrendingItem[];
-	leaderboard: View.Creator[];
-	theses: View.Thesis[];
+	leaderboard: LeaderboardEntry[];
 	following: View.Thesis[];
 	top: View.Thesis[];
-	trending: View.TrendingItem[];
+	ranked: RankedTheses;
 	yourPositions: View.Position[];
 }
 
@@ -94,43 +115,135 @@ async function viewer(): Promise<{ userId: string; walletAddress: string } | nul
 	return session === null ? null : { userId: session.userId, walletAddress: session.walletAddress };
 }
 
+/**
+ * Domain posts -> view posts WITH their cards.
+ *
+ * `lib/display.ts` builds everything about a post except its cards; the cards
+ * come from the one builder in `lib/position/view.ts` (round-1 fold item 9),
+ * which is imported dynamically because it reaches `@nuts/thetanuts` for the
+ * risk model and no page should pull the SDK in just to render text.
+ */
+async function toPosts(rows: readonly Domain.Thesis[]): Promise<View.Thesis[]> {
+	if (rows.length === 0) return [];
+	const { withCards } = await import("./position/view");
+	const asOf = new Date();
+	return rows.map((row) => withCards(display.thesis(row), row, asOf));
+}
+
+/**
+ * The three rankings, over the SAME posts the feed shows.
+ *
+ * One rule in both modes: `rankTheses` is the ranking the database reads use
+ * (`lib/data/reads.ts` `rankedTheses`), applied here to whichever rows the mode
+ * supplies. Mock mode therefore orders the fixtures by the product's own rule
+ * rather than by a second, hand-written fixture order.
+ */
+function rankFixtures(rows: readonly Domain.Thesis[], kind: "trending" | "ending" | "settled"): Domain.Thesis[] {
+	return rankTheses(
+		rows.map((row) => ({
+			row,
+			id: row.id,
+			status: row.thesis.status,
+			likes: row.likes,
+			comments: row.commentCount,
+			// The fixtures carry no participant aggregate; the two side counts on a
+			// backed post are the same number the database read sums.
+			participants: (row.backing?.bull.count ?? 0) + (row.backing?.bear.count ?? 0),
+			expiryAt: row.market?.expiryAt == null ? null : new Date(row.market.expiryAt),
+			// No fixture records a settlement instant. `rankTheses` orders those
+			// last-first by id, which is the honest "no order information" result.
+			settledAt: null,
+		})),
+		kind,
+	).map((entry) => entry.row);
+}
+
 export async function discoverData(): Promise<DiscoverData> {
 	if (!usingDatabase()) {
+		const rows = mockPostsWithTradeLinks();
+		const bySlug = new Map(rows.map((row) => [row.slug, row]));
+		const cohort = (posts: readonly Domain.Thesis[]) =>
+			posts.map((post) => bySlug.get(post.slug) ?? post);
 		return {
-			signedIn: false, databaseMode: false, ending: mock.ending, settled: mock.settled,
-			following: mock.following, top: mock.top,
-			leaderboard: mock.leaderboard,
-			theses: mockPostsWithTradeLinks().map(display.thesis),
-			trending: mock.trending,
+			signedIn: false, databaseMode: false,
+			following: await toPosts(cohort(mockSource.following)),
+			top: await toPosts(cohort(mockSource.top)),
+			// Mock mode has no viewer, so nobody is followed yet.
+			leaderboard: mock.leaderboard.map((creator) => ({ creator, following: false })),
+			ranked: {
+				trending: await toPosts(rankFixtures(rows, "trending")),
+				ending: await toPosts(rankFixtures(rows, "ending")),
+				settled: await toPosts(rankFixtures(rows, "settled")),
+			},
 			yourPositions: mock.yourPositions,
 		};
 	}
 	await connection();
-	const { listFeed, getPortfolio, leaderboard, trending, endingSoon, settled } = await import("./data/reads");
+	const { getPortfolio, leaderboard, trending, endingSoon, settled, getFollowState, listPositionsByIds } =
+		await import("./data/reads");
 	const { following, top } = await import("./social/feeds");
 	const signedIn = await viewer();
-	const { listPositionsByIds } = await import("./data/reads");
+	const options = { viewerUserId: signedIn?.userId ?? null };
 	// One extra query for the whole page: the ids every post's text links, then
-	// the positions behind them. A post that links nothing costs nothing.
-	const theses = await enrichWithTradeLinks(
-		await listFeed({ viewerUserId: signedIn?.userId ?? null }),
-		(ids) => listPositionsByIds(ids),
+	// the positions behind them. A post that links nothing costs nothing, and the
+	// three rankings plus the two cohorts are enriched in ONE lookup because they
+	// are overlapping views of the same posts.
+	const [trendingRows, endingRows, settledRows, followingRows, topRows] = await Promise.all([
+		trending(options),
+		endingSoon(options),
+		settled(options),
+		following(options),
+		top(options),
+	]);
+	const enriched = new Map(
+		(
+			await enrichWithTradeLinks(
+				[...trendingRows, ...endingRows, ...settledRows, ...followingRows, ...topRows].filter(
+					(row, index, all) => all.findIndex((other) => other.id === row.id) === index,
+				),
+				(ids) => listPositionsByIds(ids),
+			)
+		).map((row) => [row.id, row]),
 	);
+	const withLinks = (rows: readonly Domain.Thesis[]) => rows.map((row) => enriched.get(row.id) ?? row);
 	const positions = signedIn === null ? [] : await getPortfolio(signedIn.walletAddress);
+	// TODO-OWNER: provisional social/ranking.ts formulas; UI notes retained.
+	const ranked = await leaderboard({ window: "1W" });
 	return {
 		signedIn: signedIn !== null, databaseMode: true,
-		// TODO-OWNER: provisional social/ranking.ts formulas; UI notes retained.
-		leaderboard: (await leaderboard({ window: "1W" })).map(display.creator),
-		ending: (await endingSoon()).map(railItem),
-		settled: (await settled()).map(railItem),
-		theses: theses.map(display.thesis),
-		following: (await following({ viewerUserId: signedIn?.userId ?? null })).map(display.thesis),
-		top: (await top({ viewerUserId: signedIn?.userId ?? null })).map(display.thesis),
+		leaderboard: await Promise.all(
+			ranked.map(async (row) => ({
+				creator: display.creator(row),
+				following: (await getFollowState(signedIn?.userId ?? null, row.id)).following,
+			})),
+		),
+		following: await toPosts(withLinks(followingRows)),
+		top: await toPosts(withLinks(topRows)),
+		ranked: {
+			trending: await toPosts(withLinks(trendingRows)),
+			ending: await toPosts(withLinks(endingRows)),
+			settled: await toPosts(withLinks(settledRows)),
+		},
 		// `getPortfolio` already applies the single fill-status rule, so nothing
 		// is filtered by status a second time here.
 		yourPositions: positions.map(display.position).filter(isOpen),
-		trending: (await trending()).map(railItem),
 	};
+}
+
+/**
+ * The compact posts every page except the feed carries in its left rail
+ * (the mockup's "Latest theses" card).
+ *
+ * One read, and the smallest one that answers the question: the rail shows the
+ * newest posts across the whole product, not the page's own subject, so a page
+ * cannot pass its own rows in. It deliberately does NOT build cards — the rail
+ * renders a headline, a time and one meta line.
+ */
+export async function railTheses(limit = 5): Promise<View.Thesis[]> {
+	if (!usingDatabase()) return mockSource.theses.slice(0, limit).map(display.thesis);
+	await connection();
+	const { listFeed } = await import("./data/reads");
+	return (await listFeed({ limit })).slice(0, limit).map(display.thesis);
 }
 
 /**
@@ -148,7 +261,8 @@ export async function thesisDetailData(slug: string): Promise<View.ThesisDetail 
 		const source = mockSource.thesisDetails.find((entry) => entry.thesis.slug === slug);
 		if (source === undefined) return undefined;
 		const post = mockPostsWithTradeLinks().find((entry) => entry.slug === slug);
-		return display.detail(post === undefined ? source : { ...source, thesis: post });
+		const resolved = post === undefined ? source : { ...source, thesis: post };
+		return withThesisCards(display.detail(resolved), resolved.thesis);
 	}
 
 	await connection();
@@ -163,7 +277,7 @@ export async function thesisDetailData(slug: string): Promise<View.ThesisDetail 
 		listPositionsByIds(ids),
 	);
 
-	return display.detail({
+	return withThesisCards(display.detail({
 		thesis: enriched,
 		shareUrl: `thesis.fun/t/${thread.thesis.slug}`,
 		shareHeadline: thread.thesis.thesis.headline,
@@ -177,7 +291,16 @@ export async function thesisDetailData(slug: string): Promise<View.ThesisDetail 
 		activity: thread.activity,
 		activityCount: thread.activityCount,
 		participantCount: thread.participantCount,
-	});
+	}), enriched);
+}
+
+/** The thread's post carries the same cards a feed post does. */
+async function withThesisCards(
+	detail: View.ThesisDetail,
+	domain: Domain.Thesis,
+): Promise<View.ThesisDetail> {
+	const { withCards } = await import("./position/view");
+	return { ...detail, thesis: withCards(detail.thesis, domain) };
 }
 
 /**
@@ -199,9 +322,18 @@ export async function positionPageData(id: string): Promise<View.PositionPage | 
 		const { mockPositionDetail } = await import("./position/mock");
 		const detail = mockPositionDetail(id);
 		if (detail === undefined) return undefined;
-		// The fixtures carry no order snapshot, so there is no instrument to price
-		// and no live call is made: a mock page never reaches the network.
-		return positionPage({ detail, spotUsd8: null, collateralUsdPrice8: null, asOf: new Date() });
+		// EXAMPLE prices for the EXAMPLE instrument `lib/position/mock.ts` attaches
+		// (round-1 fold item 23), so the mock page is exercised with real values
+		// through the real risk model. No live call is made: a mock page never
+		// reaches the network. The spot is the mockup's own $79,607.32 at 8
+		// decimals; aBasUSDC is valued at its 1 USD peg, the same TODO-OWNER peg
+		// `lib/thetanuts/orders.ts` uses in database mode.
+		return positionPage({
+			detail,
+			spotUsd8: detail.instrument === null ? null : "7960732000000",
+			collateralUsdPrice8: detail.instrument === null ? null : "100000000",
+			asOf: new Date(),
+		});
 	}
 	await connection();
 	const { readPositionDetail } = await import("./position/read");
@@ -227,7 +359,7 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		return {
 			signedIn: false, databaseMode: false, following: false, self: false, isOwner: false,
 			creator,
-			callouts: mock.thesesByCreator(handle),
+			callouts: await toPosts(mockSource.theses.filter((post) => post.creator.handle === handle)),
 			positions: mock.participantsByCreator(handle),
 			activity: mock.activityByCreator(handle),
 		};
@@ -244,9 +376,7 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		signedIn: signedIn !== null, databaseMode: true, self: signedIn?.userId === profile.creator.id,
 		following: (await getFollowState(signedIn?.userId ?? null, profile.creator.id)).following,
 		creator: display.creator(profile.creator),
-		callouts: profile.theses
-			.filter((thesis) => renderableStatus(thesis.thesis.status))
-			.map(display.thesis),
+		callouts: await toPosts(profile.theses.filter((thesis) => renderableStatus(thesis.thesis.status))),
 		positions: profile.positions.map(display.participant),
 		activity: (await listActivity(profile.creator.id)).map(display.activity),
 	};
@@ -286,13 +416,6 @@ export async function portfolioData(): Promise<PortfolioData> {
  * reachable at build time was never wanted either.
  */
 
-/** A rail can show a text post without inventing a market, expiry or P&L. */
-function railItem(value: Domain.Thesis): View.TrendingItem {
-	const expiry = value.market?.expiryAt;
-	return { slug: value.slug, asset: value.market?.underlyingAsset ?? "", headline: value.thesis.headline,
-		creatorHandle: value.creator.handle, timeLabel: expiry ? `${Math.max(0, Math.ceil((Date.parse(expiry) - Date.parse(value.dataAsOf)) / 86400000))}d` : "",
-		pnlUsd: display.amount(value.thesis.status === "settled" ? value.backing?.economics.finalPnlUsd ?? null : value.backing?.economics.estimatedPnlUsd ?? null), bullPct: value.backing?.bull.pct ?? 0 };
-}
 export async function socialPageState(creatorId?: string) {
 	if (!usingDatabase()) return { databaseMode: false, signedIn: false, following: false, self: false, mockCreator: mock.currentUser };
 	const session = await viewer();

@@ -257,6 +257,8 @@ export interface MarketStructure {
     productType: string;
     /** e.g. "78,000 / 74,000 P". */
     strikesLabel: string;
+    /** The same strikes as numbers, for the chart's strike lines. */
+    strikesUsd: string[];
     premiumPerContractUsd: DisplayAmount;
     /** e.g. "4.6×". */
     maxPayoutLabel: string;

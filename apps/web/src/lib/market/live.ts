@@ -237,6 +237,8 @@ export function structureRow(structure: LiveStructure, selectedId: string): Mark
 		expiryLabel: display.expiryLabel(structure.expiryAt),
 		productType: `${structure.productType.charAt(0).toUpperCase()}${structure.productType.slice(1)}`,
 		strikesLabel: display.strikesLabel(structure.strikesUsd, display.strikeSide(structure.productType, structure.isCall)),
+		// The same strikes unformatted, so the chart can draw them as levels.
+		strikesUsd: [...structure.strikesUsd],
 		premiumPerContractUsd: collateralAmount(premiumPerContract, structure.collateralSymbol),
 		maxPayoutLabel: payoutMultiple === null ? "—" : `${payoutMultiple}×`,
 		liquidityLeftUsd: collateralAmount(liquidity, structure.collateralSymbol),

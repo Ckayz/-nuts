@@ -9,6 +9,7 @@ import { TaggedPostsTabs } from "@/components/market/tagged-posts-tabs";
 import { getSession } from "@/lib/auth/session";
 import { MarketRail } from "@/components/market/market-rail";
 import { AgentChat } from "@/components/agent/agent-chat";
+import { PriceChart } from "@/components/market/price-chart";
 import { StructuresList } from "@/components/market/structures-list";
 import { TakeASide } from "@/components/market/take-a-side";
 import { usd2 } from "@/lib/format";
@@ -276,6 +277,16 @@ export default async function MarketPage({
 						))}
 					</div>
 				</section>
+
+				{/* The chart sits ABOVE the structures list and below the header: the
+				    strikes it draws are the rows underneath it, so the level and the
+				    row that names it are read together. Its strikes come from the
+				    SELECTED structure, so choosing a different row moves the lines. */}
+				<PriceChart
+					asset={market.asset}
+					strikesUsd={market.structures.find((row) => row.selected)?.strikesUsd ?? []}
+					strikesLabel={market.structures.find((row) => row.selected)?.strikesLabel ?? null}
+				/>
 
 				{unavailable !== null ? <span className="mkt-warn">{unavailable}</span> : null}
 

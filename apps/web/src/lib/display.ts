@@ -484,7 +484,7 @@ export function price(value: {
 }
 function marketStructure(value: Domain.MarketStructure, selectedId: string): View.MarketStructure {
     return { id: value.id, expiryLabel: expiryLabel(value.expiryAt), productType: `${value.productType.charAt(0).toUpperCase()}${value.productType.slice(1)}`,
-        strikesLabel: strikesLabel(value.strikesUsd, strikeSide(value.productType, value.isCall)), premiumPerContractUsd: amount(value.premiumPerContractUsd),
+        strikesLabel: strikesLabel(value.strikesUsd, strikeSide(value.productType, value.isCall)), strikesUsd: [...value.strikesUsd], premiumPerContractUsd: amount(value.premiumPerContractUsd),
         maxPayoutLabel: `${value.maxPayoutMultiple}×`, liquidityLeftUsd: amount(value.liquidityLeftUsd), selected: value.id === selectedId };
 }
 export function marketSummary(value: Domain.Market): View.MarketSummary {

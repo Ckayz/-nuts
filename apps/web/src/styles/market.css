@@ -255,3 +255,13 @@
 	.ticket-first > .col-right > .sticky > * { order: 4; min-width: 0; }
 	.ticket-first > .col-right > .sticky > .ticket { order: 2; }
 }
+
+/* The price chart. Hairlines and tokens like every other card; the library is
+   configured to draw on a transparent ground so the card shows through. */
+.chart-card{margin-bottom:14px}
+.chart-h{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+.chart-h h3{font-size:15px}
+.chart-h .num{margin-left:auto;font-size:12.5px}
+.chart-box{position:relative;min-height:120px}
+.chart-box .note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;margin:0}
+.chart-note{margin:10px 0 0;font-size:12px;line-height:1.4}

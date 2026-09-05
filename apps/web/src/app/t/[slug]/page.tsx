@@ -34,11 +34,13 @@ export const dynamic = "force-dynamic";
 
 /** Share metadata reads through the same mode-aware path as the page. */
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+	const { vercelOrigin } = await import("@nuts/env/server");
 	const detail = await thesisDetailData((await params).slug);
 	if (!detail) notFound();
 	const title = detail.thesis.headline;
 	const description = detail.thesis.note ?? detail.thesis.headline;
 	return {
+		...(vercelOrigin ? { metadataBase: new URL(vercelOrigin) } : {}),
 		title,
 		description,
 		openGraph: { title, description, type: "article" },

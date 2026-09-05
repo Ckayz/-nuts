@@ -147,3 +147,5 @@ wallet identity creation continues to insert the address only, leaving handle NU
 Golden normalization tests run offline; the integration suite executes the actual
 0005 backfill block and compares its results with TypeScript across Unicode,
 punctuation and suffix collisions. The orchestrator must run that SQL differential.
+
+Snapshot inventory: `0000`, `0001`, `0003`, `0005`, `0006`, and `0007` have snapshots in `src/migrations/meta/`. The hand-written `0002` and `0004` migrations have no snapshots.

@@ -3,7 +3,7 @@
  * read from the bytes that will be sent.
  */
 import { describe, expect, test } from "bun:test";
-import { APPROVE_SELECTOR, approvalMatches, decodeApproval } from "./approval";
+import { APPROVE_SELECTOR, approvalMatches, decodeApproval, fillIsStale, MAX_FILL_AGE_MS } from "./approval";
 
 const SPENDER = "0x1bdff855d6811728acadc00989e79143a2bdfded";
 const word = (hex: string) => hex.padStart(64, "0");
@@ -66,5 +66,29 @@ describe("approvalMatches (PRD 10.2: allowances must be exact)", () => {
 
 	test("unreadable calldata is refused, never assumed harmless", () => {
 		expect(approvalMatches({ ...ok, data: "0xdead" }).ok).toBe(false);
+	});
+});
+
+describe("fillIsStale (C#8, PRD 14: 30 seconds fetch-to-broadcast)", () => {
+	const now = Date.parse("2026-09-05T12:00:00.000Z");
+	const ago = (ms: number) => new Date(now - ms).toISOString();
+
+	test("inside the window is fresh, the boundary included", () => {
+		expect(fillIsStale(ago(0), now)).toBe(false);
+		expect(fillIsStale(ago(29_999), now)).toBe(false);
+		expect(fillIsStale(ago(MAX_FILL_AGE_MS), now)).toBe(false);
+	});
+
+	test("one millisecond past the window is stale", () => {
+		expect(fillIsStale(ago(MAX_FILL_AGE_MS + 1), now)).toBe(true);
+		// The reviewer's probe.
+		expect(fillIsStale(ago(31_000), now)).toBe(true);
+	});
+
+	test("an unknown, unparseable or future timestamp fails CLOSED", () => {
+		expect(fillIsStale(undefined, now)).toBe(true);
+		expect(fillIsStale("not a date", now)).toBe(true);
+		expect(fillIsStale("", now)).toBe(true);
+		expect(fillIsStale(new Date(now + 1_000).toISOString(), now)).toBe(true);
 	});
 });

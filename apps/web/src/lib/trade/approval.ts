@@ -82,3 +82,29 @@ export function approvalMatches(input: {
 	}
 	return { ok: true };
 }
+
+/**
+ * C#8 (lane C confirming pass, finding 8). PRD 14, verbatim: "calldata must be
+ * built and broadcast within 30 seconds of the fetch that produced it."
+ *
+ * The number is the PRD's, cited above — not this file's. It is a MAXIMUM AGE,
+ * which is a different clock from the maker signature's remaining validity: the
+ * reviewer advanced 31 seconds with the signature still valid and the stale
+ * calldata was broadcast (`STALE_FILL {elapsedSeconds:31, prepares:0, sends:1}`).
+ */
+export const MAX_FILL_AGE_MS = 30_000;
+
+/**
+ * Is this calldata older than the PRD's window?
+ *
+ * Fails CLOSED: an absent or unparseable timestamp is stale, because "we cannot
+ * tell how old this is" is not a reason to broadcast it. A timestamp in the
+ * FUTURE is stale too — a clock that disagrees is not evidence of freshness.
+ */
+export function fillIsStale(preparedAt: string | undefined, now: number): boolean {
+	if (preparedAt === undefined) return true;
+	const at = Date.parse(preparedAt);
+	if (Number.isNaN(at)) return true;
+	if (at > now) return true;
+	return now - at > MAX_FILL_AGE_MS;
+}

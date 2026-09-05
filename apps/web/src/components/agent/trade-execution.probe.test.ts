@@ -45,6 +45,7 @@ function fillTrade(): PreparedTrade {
 		expected: RAW,
 		preview: { premium: { amount: "5", token: "USDC" }, contracts: "0.01", maxLossUsd: "5.00" },
 		signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+		preparedAt: new Date().toISOString(),
 	};
 }
 
@@ -229,6 +230,7 @@ describe("C#5: the approval card shows what the approval will allow, and cannot 
 			thesisId: null,
 			expected: RAW,
 			signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+			preparedAt: new Date().toISOString(),
 			note: "",
 		});
 		const h = mount(TradeExecution, { trade: approveTrade() });
@@ -236,5 +238,107 @@ describe("C#5: the approval card shows what the approval will allow, and cannot 
 		await h.settle();
 		expect(calls.sends.map((s) => s.to)).toEqual([USDC, BOOK]);
 		expect(calls.agentPrepares).toBe(1);
+	});
+});
+
+// -------------------------------------------------- finding 8: STALE CALLDATA
+
+describe("C#8: fill calldata is never broadcast past PRD 14's 30-second window", () => {
+	/** The reviewer's probe: 31 seconds elapsed, maker signature still valid. */
+	function staleTrade(): PreparedTrade {
+		return {
+			...fillTrade(),
+			// Valid for another 90 s — a DIFFERENT clock from the fetch age.
+			signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+			preparedAt: new Date(Date.now() - 31_000).toISOString(),
+		};
+	}
+
+	test("STALE_FILL — the stale calldata is never the thing that is sent", async () => {
+		reset();
+		replies.agentPrepare = async () => ({
+			ok: true,
+			stage: "fill",
+			fill: { to: BOOK as `0x${string}`, data: "0xFRESH" as const, value: "0" as const },
+			token: "tok2",
+			thesisId: null,
+			expected: RAW,
+			signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+			preparedAt: new Date().toISOString(),
+			note: "",
+		});
+		const h = mount(TradeExecution, { trade: staleTrade() });
+		press(h);
+		await h.settle();
+		expect({ prepares: calls.agentPrepares, sends: calls.sends.map((s) => s.data) }).toEqual({
+			prepares: 1,
+			sends: ["0xFRESH"],
+		});
+		// And the fill was recorded with the FRESH ticket, not the stale one.
+		expect(calls.records.map((r) => r.token)).toEqual(["tok2"]);
+	});
+
+	test("a stale fill whose refresh fails sends nothing", async () => {
+		reset();
+		replies.agentPrepare = async () => ({ ok: false, code: "STRUCTURE_GONE", reason: "That structure is no longer on the book." });
+		const h = mount(TradeExecution, { trade: staleTrade() });
+		press(h);
+		await h.settle();
+		expect({ prepares: calls.agentPrepares, sends: calls.sends }).toEqual({ prepares: 1, sends: [] });
+		expect(h.text()).toContain("no longer on the book");
+	});
+
+	test("a refresh that is ITSELF stale is not sent either", async () => {
+		reset();
+		replies.agentPrepare = async () => ({
+			ok: true,
+			stage: "fill",
+			fill: { to: BOOK as `0x${string}`, data: "0xFRESH" as const, value: "0" as const },
+			token: "tok2",
+			thesisId: null,
+			expected: RAW,
+			signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+			preparedAt: new Date(Date.now() - 60_000).toISOString(),
+			note: "",
+		});
+		const h = mount(TradeExecution, { trade: staleTrade() });
+		press(h);
+		await h.settle();
+		expect(calls.sends).toEqual([]);
+		expect(h.text()).toContain("could not be refreshed");
+	});
+
+	test("a refreshed fill whose economics moved stops and asks again", async () => {
+		reset();
+		replies.agentPrepare = async () => ({
+			ok: true,
+			stage: "fill",
+			fill: { to: BOOK as `0x${string}`, data: "0xFRESH" as const, value: "0" as const },
+			token: "tok2",
+			thesisId: null,
+			expected: { ...RAW, debit: "9000000", maxLossUsd8: "900000000" },
+			signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+			preparedAt: new Date().toISOString(),
+			note: "",
+		});
+		const h = mount(TradeExecution, { trade: staleTrade() });
+		press(h);
+		await h.settle();
+		expect(calls.sends).toEqual([]);
+		expect(h.text()).toContain("The price moved while this was prepared");
+		// C4-r2: the card now prints the server's figures, so the next click
+		// authorises what is on screen.
+		expect(h.text()).toContain("9 USDC");
+	});
+
+	test("a fresh fill is sent without a re-preparation", async () => {
+		reset();
+		const h = mount(TradeExecution, { trade: fillTrade() });
+		press(h);
+		await h.settle();
+		expect({ prepares: calls.agentPrepares, sends: calls.sends.map((s) => s.data) }).toEqual({
+			prepares: 0,
+			sends: ["0xFILL"],
+		});
 	});
 });

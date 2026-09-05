@@ -135,6 +135,16 @@ export interface PrepareFill {
 	readonly thesisId: string | null;
 	readonly expected: QuoteRaw;
 	readonly signatureExpiresAt: string;
+	/**
+	 * C#8. When the book fetch that produced this calldata started, ISO 8601.
+	 *
+	 * PRD 14, verbatim: "calldata must be built and broadcast within 30 seconds
+	 * of the fetch that produced it." The maker signature's own expiry is a
+	 * different clock — the reviewer advanced 31 seconds with the signature still
+	 * valid and the stale calldata was broadcast anyway (`STALE_FILL {prepares:
+	 * 0, sends: 1}`). Taken BEFORE the fetch, so the age is never understated.
+	 */
+	readonly preparedAt: string;
 	readonly note: string;
 }
 

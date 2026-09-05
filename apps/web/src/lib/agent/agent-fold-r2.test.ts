@@ -122,6 +122,7 @@ describe("C3-r2: the agent ceiling applies to what was PREPARED", () => {
 		thesisId: null,
 		expected: quote(over),
 		signatureExpiresAt: "2026-09-05T08:00:30.000Z",
+		preparedAt: new Date().toISOString(),
 		note: "",
 	});
 

@@ -95,6 +95,7 @@ const fill = (data: `0x${string}`, expected: QuoteRaw) =>
 		thesisId: null,
 		expected,
 		signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+		preparedAt: new Date().toISOString(),
 		note: "",
 	}) satisfies PrepareResult;
 

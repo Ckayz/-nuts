@@ -87,6 +87,10 @@ export async function prepareTradeFor(
 	}
 
 	let budget: bigint;
+	// C#8. PRD 14: "calldata must be built and broadcast within 30 seconds of the
+	// fetch that produced it." Stamped BEFORE the fetch, so the age this reports
+	// is never younger than the truth.
+	const fetchStartedAt = new Date().toISOString();
 	const found = await findStructure(input.structureId, { force: true });
 	if (found === null) return fail("STRUCTURE_GONE", "That structure is no longer on the book. Pick another one.");
 	if (isFeedUnavailable(found)) return fail(found.error.toUpperCase(), found.detail);
@@ -239,6 +243,7 @@ export async function prepareTradeFor(
 		thesisId: resolved.thesisId,
 		expected,
 		signatureExpiresAt: new Date(Number(quote.orderExpiry) * 1000).toISOString(),
+		preparedAt: fetchStartedAt,
 		// TODO-OWNER: how long a signature must have left before the app refuses
 		// to hand over calldata is an owner's number; nothing is imposed here
 		// beyond the book's own expiry filter.

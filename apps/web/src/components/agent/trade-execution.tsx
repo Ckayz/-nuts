@@ -11,7 +11,7 @@ import { Button } from "@nuts/ui/components/button";
 import { prepareAgentTrade } from "@/lib/agent/actions";
 import { recordTrade } from "@/lib/trade/actions";
 import { clearHeldFill, readHeldFill, sessionFillStore, writeHeldFill } from "@/lib/trade/held-fill";
-import { approvalMatches } from "@/lib/trade/approval";
+import { approvalMatches, fillIsStale } from "@/lib/trade/approval";
 import { formatBaseUnits, formatUsd8 } from "@/lib/market/units";
 import { sameEconomics, sendGuard } from "@/components/market/take-a-side";
 import type { QuoteRaw } from "@/lib/trade/types";
@@ -83,6 +83,12 @@ export interface PreparedTrade {
 		readonly requestedBudget?: { readonly amount: string; readonly token: string } | null;
 	};
 	readonly signatureExpiresAt?: string;
+	/**
+	 * C#8. When the book fetch that produced the fill calldata started, ISO 8601.
+	 * PRD 14 bounds fetch-to-broadcast at 30 seconds; the maker signature's own
+	 * expiry is a different, longer clock.
+	 */
+	readonly preparedAt?: string;
 }
 
 type Phase = "idle" | "approving" | "preparing" | "filling" | "recording" | "done" | "expired" | "error";
@@ -316,7 +322,13 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 		try {
 			let ready:
 				| { stage: "approve"; approve: { to: string; data: string } }
-				| { stage: "fill"; fill: { to: string; data: string }; token: string; expected: QuoteRaw } =
+				| {
+						stage: "fill";
+						fill: { to: string; data: string };
+						token: string;
+						expected: QuoteRaw;
+						preparedAt: string | undefined;
+					} =
 				trade.stage === "approve" && trade.transactions.approve
 					? { stage: "approve", approve: trade.transactions.approve }
 					: {
@@ -324,7 +336,37 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 							fill: trade.transactions.fill ?? { to: "", data: "" },
 							token: trade.token ?? "",
 							expected: trade.expected as QuoteRaw,
+							preparedAt: trade.preparedAt,
 						};
+
+			/**
+			 * C#8. Re-prepares whenever the calldata in hand is past PRD 14's
+			 * 30-second fetch-to-broadcast window. The card can sit in a chat
+			 * transcript for minutes; the only thing that used to refresh it was an
+			 * APPROVAL leg, so a wallet with a sufficient allowance broadcast
+			 * whatever the agent prepared, however old
+			 * (`STALE_FILL {elapsedSeconds:31, signatureStillValid:true,
+			 * prepares:0, sends:1}`).
+			 */
+			const reprepare = async (): Promise<string | null> => {
+				setPhase("preparing");
+				const fresh = await prepareAgentTrade({
+					structureId: trade.structureId,
+					side: trade.side,
+					budgetInput: trade.budgetInput,
+					thesisId: trade.thesisId,
+				});
+				if (!fresh.ok) return fresh.reason;
+				if (fresh.stage !== "fill") return "The approval has not landed yet. Try again in a moment.";
+				ready = {
+					stage: "fill",
+					fill: fresh.fill,
+					token: fresh.token,
+					expected: fresh.expected,
+					preparedAt: fresh.preparedAt,
+				};
+				return null;
+			};
 
 			if (ready.stage === "approve") {
 				// C#5. The bytes about to be signed are decoded here and compared
@@ -387,7 +429,25 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 					setMessage("The approval has not landed yet. Try again in a moment.");
 					return;
 				}
-				ready = { stage: "fill", fill: second.fill, token: second.token, expected: second.expected };
+				ready = {
+					stage: "fill",
+					fill: second.fill,
+					token: second.token,
+					expected: second.expected,
+					preparedAt: second.preparedAt,
+				};
+			}
+
+			// C#8. Checked AFTER the approval branch, so the one preparation that
+			// branch already did is not repeated — and checked again below, because
+			// a fresh preparation that is somehow still stale must not be sent.
+			if (ready.stage === "fill" && fillIsStale(ready.preparedAt, Date.now())) {
+				const failed = await reprepare();
+				if (failed !== null) {
+					setPhase("error");
+					setMessage(failed);
+					return;
+				}
 			}
 
 			// C5. Nothing is signed until the figures on this card are the figures
@@ -402,6 +462,16 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				setMessage(
 					"The price moved while this was prepared. The figures above have been replaced with the server's current ones — check them and press again to sign for those.",
 				);
+				return;
+			}
+
+			// C#8. The last age check before the money moves. A re-preparation that
+			// is itself already past the window means the round trip cannot finish
+			// inside PRD 14's bound, and nothing is broadcast.
+			if (fillIsStale(ready.preparedAt, Date.now())) {
+				setPhase("expired");
+				// TODO-OWNER: wording.
+				setMessage("This trade could not be refreshed inside the 30 seconds a fill has to reach Base, so nothing was sent. Ask the agent for a fresh quote.");
 				return;
 			}
 

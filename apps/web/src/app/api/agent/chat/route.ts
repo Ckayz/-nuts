@@ -6,9 +6,16 @@ import {
 	type UIMessage,
 } from "ai";
 
+import { env } from "@nuts/env/server";
+
 import { getSession } from "@/lib/auth/session";
 import { createReadTools } from "@/lib/agent/tools";
 import { createExecutionTools } from "@/lib/agent/execute";
+import {
+	AGENT_ERROR_SENTENCES,
+	agentErrorSentence,
+	classifyAgentError,
+} from "@/lib/agent/errors";
 import { agentModel } from "@/lib/agent/model";
 import { SYSTEM_PROMPT } from "@/lib/agent/prompt";
 import { OUT_OF_SCOPE_REPLY, checkScope } from "@/lib/agent/scope";
@@ -34,17 +41,30 @@ function latestUserText(messages: UIMessage[]): string {
 	return "";
 }
 
+/**
+ * F-E item 3. Every JSON failure this route writes carries `source: "agent"`.
+ *
+ * `useChat` surfaces a non-OK response by throwing `new Error(await
+ * response.text())` (`ai@7.0.92` dist/index.js:18673-18676), so the whole body
+ * lands in `error.message` in the browser. The marker is what lets the client
+ * tell OUR sentence from a proxy's error page and refuse to print the latter —
+ * see `agentErrorMessage` in `lib/agent/errors.ts`.
+ */
+function agentError(message: string, status: number): Response {
+	return Response.json({ error: message, source: "agent" }, { status });
+}
+
 export async function POST(request: Request) {
 	let parsed: unknown;
 	try {
 		parsed = await request.json();
 	} catch {
-		return Response.json({ error: "Malformed request body." }, { status: 400 });
+		return agentError("Malformed request body.", 400);
 	}
 
 	const body = agentChatBodySchema.safeParse(parsed);
 	if (!body.success) {
-		return Response.json({ error: "Expected a messages array." }, { status: 400 });
+		return agentError("Expected a messages array.", 400);
 	}
 
 	const messages = body.data.messages as unknown as UIMessage[];
@@ -67,7 +87,7 @@ export async function POST(request: Request) {
 	 */
 	const turn = await chargeTurn(subjectFor(session?.walletAddress ?? null, request.headers));
 	if (!turn.allowed) {
-		return Response.json({ error: turn.reason }, { status: 429 });
+		return agentError(turn.reason, 429);
 	}
 
 	// PRD 10.8 layer 1. Runs before the primary model, so an out-of-scope
@@ -82,9 +102,17 @@ export async function POST(request: Request) {
 	 * TODO-OWNER: the wording, and whether a degraded gate should serve at all.
 	 */
 	if (scope.degraded) {
-		return Response.json(
-			{ error: "The agent's safety check could not run, so this message was not sent. Try again shortly." },
-			{ status: 503 },
+		/**
+		 * F-E item 3. One sentence per CAUSE instead of one sentence for all of
+		 * them: a spent free-tier quota, an unpaid account and a model id the
+		 * provider does not serve each need a different person to do a different
+		 * thing, and "try again shortly" is only true for one of the three.
+		 * TODO-OWNER: every sentence in AGENT_ERROR_SENTENCES.
+		 */
+		const cls = scope.errorClass === "ok" ? "unknown" : scope.errorClass;
+		return agentError(
+			`The agent's safety check could not run, so this message was not sent. ${AGENT_ERROR_SENTENCES[cls]}`,
+			503,
 		);
 	}
 
@@ -126,9 +154,19 @@ export async function POST(request: Request) {
 
 	return result.toUIMessageStreamResponse({
 		onError: (error) => {
-			// Never leak provider internals to the browser.
-			console.error("[agent/chat]", error);
-			return "The agent is unavailable right now. Please try again.";
+			/**
+			 * F-E item 3. `streamText` reports failures HERE rather than throwing out
+			 * of the handler, so the response is already a 200 by the time this runs
+			 * — which is exactly why a wrong model id looked like a working route
+			 * for a whole evening (`da09e81`). The class decides the sentence; the
+			 * class and the model id are logged so an operator can act without the
+			 * user relaying anything.
+			 *
+			 * Never leaks provider internals: `agentErrorSentence` returns one of
+			 * five fixed strings and nothing derived from the provider's message.
+			 */
+			console.error(`[agent/chat] [${classifyAgentError(error)}] model=${env.AGENT_MODEL}:`, error);
+			return agentErrorSentence(error);
 		},
 	});
 }

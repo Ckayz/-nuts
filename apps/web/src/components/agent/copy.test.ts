@@ -80,7 +80,33 @@ describe("D-C2: the agent's copy is tagged", () => {
 		}
 		expect(undocumented).toEqual([]);
 		// And each of the three prints a rendered marker beside it.
-		expect(source.match(/COPY\.\w+\} <TodoOwner \/>/g)?.length ?? 0).toBe(3);
+		//
+		// F-E: the error line now reads `{agentErrorMessage(error, COPY.error)}`,
+		// because the server usually knows WHICH failure happened and says so —
+		// `COPY.error` is the fallback for anything the server did not word. The
+		// fence is unchanged in strength: a COPY reference still has to be the last
+		// thing before the rendered marker.
+		expect(source.match(/COPY\.\w+[^\n]*\} <TodoOwner \/>/g)?.length ?? 0).toBe(3);
+	});
+
+	/**
+	 * F-E. The five sentences the server may put on the screen live in one tagged
+	 * block too, for the same reason the three above do: nobody has worded them
+	 * but this repo, and a sixth must not slip in untagged.
+	 */
+	test("the server's failure sentences are one tagged block", async () => {
+		const source = await Bun.file(new URL("../../lib/agent/errors.ts", import.meta.url)).text();
+		const start = source.indexOf("export const AGENT_ERROR_SENTENCES");
+		expect(start).toBeGreaterThan(-1);
+		// The tag sits in the doc comment immediately above the block.
+		expect(source.slice(Math.max(0, start - 400), start)).toContain("TODO-OWNER");
+		const block = source.slice(start, source.indexOf("};", start));
+		const entries = [...block.matchAll(/^\t(\w+):/gm)].map((m) => m[1]);
+		expect(entries).toEqual(["model_not_found", "no_credit", "rate_limited", "provider_down", "unknown"]);
+		// Not one of them names a provider, a model or a status code.
+		for (const forbidden of ["OpenRouter", "Vercel", "gateway", "401", "402", "429", "anthropic"]) {
+			expect(block, forbidden).not.toContain(forbidden);
+		}
 	});
 
 	/**

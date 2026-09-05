@@ -20,6 +20,11 @@ import { ToolActivity } from "./tool-activity";
 import { TradeApproval } from "./trade-approval";
 import { TradeExecution, type PreparedTrade } from "./trade-execution";
 
+/**
+ * D-C2. The four prompts offered on an empty conversation. Nobody's but this
+ * file's: the mockup draws no agent view. TODO-OWNER: all four, and whether
+ * there should be four at all.
+ */
 const STARTERS = [
 	"What can I trade right now?",
 	"I think ETH goes up this week. I have $10.",
@@ -318,6 +323,7 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 								submit(input);
 							}
 						}}
+						// TODO-OWNER: placeholder wording.
 						placeholder="Ask about a market, or describe what you think will happen…"
 						disabled={busy}
 						rows={2}

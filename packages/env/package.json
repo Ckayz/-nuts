@@ -6,7 +6,8 @@
   "exports": {
     "./server": "./src/server.ts",
     "./web": "./src/web.ts",
-    "./load": "./src/load.ts"
+    "./load": "./src/load.ts",
+    "./schema-keys": "./src/schema-keys.ts"
   },
   "dependencies": {
     "dotenv": "catalog:",

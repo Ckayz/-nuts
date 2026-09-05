@@ -99,6 +99,29 @@ export interface PrepareApprove {
 	readonly ok: true;
 	readonly stage: "approve";
 	readonly approve: TxRequest;
+	/**
+	 * C#5. What the approval calldata ACTUALLY does, decoded from its own bytes
+	 * by `lib/trade/approval.ts` before it is issued.
+	 *
+	 * The approval stage used to carry calldata and a sentence and nothing else,
+	 * so the agent's limit gate had nothing to measure and passed every approval,
+	 * and the card printed the agent's own preview beside bytes nobody had read.
+	 */
+	readonly allowance: {
+		/** Base units, exactly equal to `expected.debit`. */
+		readonly amount: string;
+		/** Lowercase address the allowance is granted to: the contract the fill calls. */
+		readonly spender: string;
+		readonly tokenAddress: string;
+		readonly tokenSymbol: string;
+		readonly tokenDecimals: number;
+	};
+	/**
+	 * C#5. The quote this approval was computed from. Present so the agent's
+	 * spend limits apply to the approval leg too, and so the card can print the
+	 * economics it is approving for rather than the model's own preview.
+	 */
+	readonly expected: QuoteRaw;
 	readonly note: string;
 }
 
@@ -112,6 +135,16 @@ export interface PrepareFill {
 	readonly thesisId: string | null;
 	readonly expected: QuoteRaw;
 	readonly signatureExpiresAt: string;
+	/**
+	 * C#8. When the book fetch that produced this calldata started, ISO 8601.
+	 *
+	 * PRD 14, verbatim: "calldata must be built and broadcast within 30 seconds
+	 * of the fetch that produced it." The maker signature's own expiry is a
+	 * different clock — the reviewer advanced 31 seconds with the signature still
+	 * valid and the stale calldata was broadcast anyway (`STALE_FILL {prepares:
+	 * 0, sends: 1}`). Taken BEFORE the fetch, so the age is never understated.
+	 */
+	readonly preparedAt: string;
 	readonly note: string;
 }
 

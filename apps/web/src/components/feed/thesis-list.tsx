@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Avatar } from "@/components/primitives";
 import { pnlClass, signedUsd, usd } from "@/lib/format";
+import { PNL_BASIS_SHORT } from "@/lib/display";
 import type { MarketSummary, Position } from "@/lib/display-types";
 
 /**
@@ -8,6 +9,13 @@ import type { MarketSummary, Position } from "@/lib/display-types";
  * is its own thing (owner 2026-09-05, "trade is just trade") and since migration
  * 0007 it may belong to no post at all, in which case there is no headline to
  * show and no `/t/<slug>` to link to.
+ *
+ * D5 (lane D confirming pass). The row carries the lifecycle chip and the P&L
+ * BASIS, both visible. It used to say only "settled" or nothing, so an expired
+ * position, a pending one and a failed one all rendered as a live position with
+ * a number beside it and no statement of where that number came from. The chip
+ * and the basis words are the shared vocabulary the share card uses, and the
+ * status is resolved by the same `lifecycleStatus`/`resolvePnl` pair.
  */
 export function PositionRow({ position }: { position: Position }) {
 	return (
@@ -16,12 +24,13 @@ export function PositionRow({ position }: { position: Position }) {
 			<span className="t">
 				<b>{position.thesisHeadline ?? `${position.asset} position`}</b>
 				<i>
-					{position.side === "bull" ? "Bull" : "Bear"} · {usd(position.riskedUsd)} risked
-					{position.settled ? " · settled" : ""}
+					{position.side === "bull" ? "Bull" : "Bear"} · {usd(position.riskedUsd)} risked ·{" "}
+					<span className={`chip ${position.statusTone}`}>{position.statusLabel}</span>
 				</i>
 			</span>
 			<span className="v">
 				<b className={`num ${pnlClass(position.livePnlUsd)}`}>{signedUsd(position.livePnlUsd)}</b>
+				<i>{PNL_BASIS_SHORT[position.basis]}</i>
 			</span>
 		</Link>
 	);

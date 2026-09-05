@@ -387,21 +387,61 @@ export async function getMarketPage(
 }
 
 /**
- * Which structure the ticket opens on.
+ * Does this row offer anything to open on: liquidity left AND a payout?
  *
- * TODO-OWNER: the surfacing rule is undecided. Until it is, the page opens on
- * the first structure (in the deterministic table order) that can actually be
- * quoted, so the ticket does not open on a refusal when a tradeable row exists;
- * with none, it opens on the first row and shows that row's reason.
+ * Read from the SAME derivations the table prints (`structureRow` above), so
+ * the rule cannot disagree with the pixels: `liquidityLeftUsd` is the freshest
+ * order's `availableAmount`, and `maxPayoutLabel` is `rowEconomics`'s payout
+ * multiple, which prints "0×" when the cap is barely above the premium and "—"
+ * when the multiple is unknown (unproven contract units, unvalued collateral,
+ * or an uncapped long call). "Unknown" is not "positive", so those rows are not
+ * chosen as the landing row — they stay one click away in the table.
  */
+export function structureWorthOpening(structure: LiveStructure): boolean {
+	const order = structure.buy ?? structure.sell;
+	if (order === null || structure.collateralDecimals === null) return false;
+	if (order.availableAmount <= 0n) return false;
+	const { payoutMultiple } = rowEconomics(structure);
+	if (payoutMultiple === null) return false;
+	return Number(payoutMultiple) > 0;
+}
+
+/**
+ * Which structure the ticket opens on, given "can this row be quoted at all".
+ *
+ * TODO-OWNER: the surfacing rule is undecided (best premium? nearest expiry?
+ * nearest the money?). Until it is: the first row, in the deterministic table
+ * order, that can be quoted AND has liquidity left AND a payout above zero.
+ * The market page used to land on whatever came first that could be quoted,
+ * which on a real BTC book was a row reading "Max payout 0×" — the worst thing
+ * in the book presented as the default trade (screenshot pass, 2026-09-05).
+ *
+ * The fallbacks keep the old behaviour exactly: if no row qualifies, the first
+ * QUOTABLE row (so the ticket still does not open on a refusal when a tradeable
+ * row exists), and failing that the first row with its own reason shown.
+ */
+export function pickDefaultStructure(
+	structures: readonly LiveStructure[],
+	quotable: (structure: LiveStructure) => boolean,
+): LiveStructure {
+	const first = structures[0];
+	if (first === undefined) throw new Error("No structures to choose from");
+	let firstQuotable: LiveStructure | undefined;
+	for (const candidate of structures) {
+		if (!quotable(candidate)) continue;
+		if (structureWorthOpening(candidate)) return candidate;
+		firstQuotable ??= candidate;
+	}
+	return firstQuotable ?? first;
+}
+
 function defaultStructure(asset: LiveAsset, options: GetMarketPageOptions): LiveStructure {
-	const first = asset.structures[0];
-	if (first === undefined) throw new Error(`Asset ${asset.asset} has no structures`);
+	if (asset.structures[0] === undefined) throw new Error(`Asset ${asset.asset} has no structures`);
 	const client = readClient();
-	for (const candidate of asset.structures) {
-		for (const side of ["buy", "sell"] as const) {
+	return pickDefaultStructure(asset.structures, (candidate) =>
+		(["buy", "sell"] as const).some((side) => {
 			const order = candidate[side];
-			if (order === null) continue;
+			if (order === null) return false;
 			const quote = quoteStructure({
 				client,
 				market: order,
@@ -412,10 +452,9 @@ function defaultStructure(asset: LiveAsset, options: GetMarketPageOptions): Live
 			});
 			// A budget of one base unit only asks "is this side quotable at all";
 			// ZERO_CONTRACTS at that size still means the side is open.
-			if (quote.ok || quote.code === "ZERO_CONTRACTS") return candidate;
-		}
-	}
-	return first;
+			return quote.ok || quote.code === "ZERO_CONTRACTS";
+		}),
+	);
 }
 
 export type { QuoteResult, StructureQuote, TakerSide };

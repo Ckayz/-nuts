@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Avatar } from "@/components/primitives";
 import { getSession } from "@/lib/auth/session";
 import { usingDatabase } from "@/lib/data/source";
-import { position } from "@/lib/display";
+import { PNL_BASIS_SHORT, position } from "@/lib/display";
 
 /**
  * "Your <asset> positions" — the mockup's last card in the market page's right
@@ -38,16 +38,22 @@ export async function YourPositionsRail({ asset }: { asset: string }) {
 					return (
 						<Link className="row" key={row.id} href={{ pathname: `/p/${row.id}` }}>
 							<Avatar asset={row.underlyingAsset} initials={row.underlyingAsset} tone="asset" size={30} />
+							{/* D5: the lifecycle chip and the P&L basis, both visible. The
+							    rail filtered on the PERSISTED status alone, so an option
+							    that had already expired sat here under "N open" with a live
+							    estimate beside it. */}
 							<span className="t">
 								<b>{row.thesisHeadline || row.underlyingAsset}</b>
 								<i>
-									{view.side === "bull" ? "Bull" : "Bear"} · {view.riskedUsd.usd} risked
+									{view.side === "bull" ? "Bull" : "Bear"} · {view.riskedUsd.usd} risked ·{" "}
+									<span className={`chip ${view.statusTone}`}>{view.statusLabel}</span>
 								</i>
 							</span>
 							<span className="v">
 								<b className={`${view.livePnlUsd.pnlClass} num`}>
 									{view.livePnlUsd.signed}
 								</b>
+								<i>{PNL_BASIS_SHORT[view.basis]}</i>
 							</span>
 						</Link>
 					);

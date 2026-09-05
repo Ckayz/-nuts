@@ -25,6 +25,7 @@ import { comments, follows, likes, positions, theses, users } from "@nuts/db/sch
 import type { Position as PositionRow, Thesis as ThesisRow, User as UserRow } from "@nuts/db/schema/index";
 import type * as Domain from "@/types";
 import {
+	ACTIVITY_PAGE_SIZE,
 	CREATOR_PAGE_SIZE,
 	RANKED_THESIS_LIMIT,
 	LEADERBOARD_LIMIT,
@@ -447,7 +448,7 @@ export async function getFollowStates(viewerUserId: string | null, userIds: read
 }
 
 /** Public activity only; a draft headline or failed fill must not leak here. */
-export async function listActivity(userId: string, options: ReadOptions & { thesisId?: string } = {}): Promise<Domain.ActivityItem[]> {
+export async function listActivity(userId: string, options: ReadOptions & { thesisId?: string; limit?: number } = {}): Promise<Domain.ActivityItem[]> {
 	if (!UUID.test(userId) || (options.thesisId !== undefined && !UUID.test(options.thesisId))) return [];
 	const database = options.database ?? defaultDb;
 	const target = alias(users, "activity_target_user");
@@ -460,7 +461,11 @@ export async function listActivity(userId: string, options: ReadOptions & { thes
 			inArray(theses.status, [...SOCIAL_PUBLIC_STATUSES]),
 			and(eq(activityRows.eventType, "follow"), isNull(activityRows.thesisId), isNull(activityRows.positionId), sql`${target.id} is not null`),
 		)))
-		.orderBy(desc(activityRows.createdAt), activityRows.id);
+		.orderBy(desc(activityRows.createdAt), activityRows.id)
+		// TODO-OWNER: ACTIVITY_PAGE_SIZE is a placeholder page size. The
+		// filters below run in JS over this page, so a page can render FEWER
+		// than the bound; the bound is on what the database returns.
+		.limit(options.limit ?? ACTIVITY_PAGE_SIZE);
 	return rows.filter(row => row.event.eventType !== "position_confirmed" || (row.position !== null && FILLED_POSITION_STATUSES.some(s => s === row.position!.status) && row.position.confirmedAt !== null))
 		.filter(row => ["like", "comment", "follow", "thesis_published", "position_confirmed"].includes(row.event.eventType))
 		.map(row => ({

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { endingSoon, getFollowStates, leaderboard, settled, trending, type Database } from "./reads";
+import { endingSoon, getFollowStates, leaderboard, listActivity, settled, trending, type Database } from "./reads";
+import { ACTIVITY_PAGE_SIZE } from "./constants";
 
 const id = "00000000-0000-4000-8000-000000000001";
 function capture() {
@@ -31,4 +32,15 @@ test("follow states use one SQL query for the complete deduplicated set", async 
 	expect(queries).toHaveLength(1);
 	expect(queries[0]!.text).toContain("exists(select 1");
 	expect(queries[0]!.values).toEqual([id, id, "00000000-0000-4000-8000-000000000002"]);
+});
+test("listActivity emits SQL LIMIT after ORDER BY, defaulting to the page size", async () => {
+	const { database, queries } = capture();
+	await listActivity(id, { database, limit: 2 });
+	expect(queries[0]!.text).toMatch(/order by[\s\S]+limit \$\d+/i);
+	expect(queries[0]!.values.at(-1)).toBe(2);
+
+	const fallback = capture();
+	await listActivity(id, { database: fallback.database });
+	expect(fallback.queries[0]!.text).toMatch(/order by[\s\S]+limit \$\d+/i);
+	expect(fallback.queries[0]!.values.at(-1)).toBe(ACTIVITY_PAGE_SIZE);
 });

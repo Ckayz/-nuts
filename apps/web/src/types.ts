@@ -185,6 +185,30 @@ export interface Position {
     entrySpotPriceUsd: string | null;
     economics: ThesisAiContext["economics"];
     verification: ThesisAiContext["verification"];
+    /**
+     * C#9. Why a `failed` row failed, verbatim from `positions.failure_reason`.
+     *
+     * `failed` is not one outcome. A REVERTED transaction means nothing
+     * happened; `fill_quantity_unproven` means the fill IS on chain and only
+     * the contract count could not be proven from it (`lib/trade/record.ts`).
+     * Telling a holder of a real position that "this transaction failed, so
+     * there is no position" is a false statement about their money, so the
+     * reason has to reach the view layer. Optional: the typed fixtures predate
+     * it and never carry one.
+     */
+    failureReason?: string | null;
+    /**
+     * D5. When this position's option expires, ISO 8601, or null when the order
+     * snapshot cannot be decoded.
+     *
+     * Decoded by the SAME `positionInstrument` reader `/p/[id]` uses. Without
+     * it a list row could only read the PERSISTED status — and nothing moves a
+     * row to `expired` (no reconciliation exists yet), so the feed showed
+     * "Open · syncing · +$612 (estimate)" for an option whose own page said
+     * "Settlement pending · — (unavailable)". Optional: the typed fixtures
+     * carry no snapshot.
+     */
+    expiryAt?: string | null;
     createdAt: string;
     mockTransactionFragment: string | null;
 }

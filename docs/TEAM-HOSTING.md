@@ -21,7 +21,7 @@ From `apps/web/.env.example` and `packages/env/src/server.ts`:
 | `OPENROUTER_API_KEY` | the team's OpenRouter key | Required (the AI agent). |
 | `AGENT_MODEL`, `AGENT_GATE_MODEL`, `BASE_RPC_URL`, `THETANUTS_ORDERS_URL`, `THESIS_REFERRER` | as in `apps/web/.env.example` | Optional with defaults; `THESIS_REFERRER` defaults to the owner's referrer wallet — keep it, that is the revenue address. |
 
-The owner's laptop can push its gitignored `apps/web/.env` to Vercel with `bun run env:production` (`scripts/sync-vercel-env.ts`), but the dashboard is the simpler path for the team. Never commit any of these values.
+The owner's laptop can push its gitignored `apps/web/.env` to Vercel with `bun run env:production -- --yes` (`scripts/sync-vercel-env.ts`), but the dashboard is the simpler path for the team. That script is fail-closed: it pushes only keys in the validated env schemas (so the owner's `PROD_*`/`SUPABASE_*` keys are skipped by name), refuses the whole run when a value it would push is local (`localhost`, `127.0.0.1`, `0.0.0.0`, `file:`) or empty in `production`, and refuses to overwrite without `--yes` (`-- --dry-run` prints the plan instead). Never commit any of these values.
 
 ## 3. Production database — migrate BEFORE the first deploy
 The app needs tables `users`, `theses`, `positions`, … Production currently holds only the teammate's migration `0000_agent_tables` (measured 2026-09-05 18:0x). From a laptop with the repo:

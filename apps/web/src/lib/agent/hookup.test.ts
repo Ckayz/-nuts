@@ -115,7 +115,12 @@ describe("agent money path", () => {
 
 	test("the receipt is recorded through recordTrade, and a held hash is never re-filled", () => {
 		const component = read("../../components/agent/trade-execution.tsx");
-		expect(component).toContain("recordTrade({ token: ready.token, txHash: fillHash })");
+		// C#3/#4-r3: ONE handler interprets every recording answer, and both the
+		// first submit and the retry call it. Round 2 had two readers and the
+		// retry's said "Confirmed on Base and recorded." for a REVERTED fill.
+		expect(component).toContain("const recorded = await recordTrade({ token: fill.token, txHash: fill.hash });");
+		expect(component.match(/await recordTrade\(/g)?.length).toBe(1);
+		expect(component.match(/await finishRecording\(/g)?.length).toBe(2);
 		// C6 / C5-r2: a sent fill short-circuits into recording, before any send —
 		// and before the QUOTE-EXPIRY check, which has nothing to do with money
 		// that has already moved.
@@ -128,11 +133,15 @@ describe("agent money path", () => {
 		);
 		// C5-r2: recovered with the token that BUILT the calldata, never
 		// `trade.token` (which is empty whenever an approval was needed).
-		expect(component).toContain("recordTrade({ token: sent.token, txHash: sent.hash })");
-		// The sent pair is stored before anything that can throw after the send.
-		expect(component.indexOf("setSent({ hash: fillHash, token: ready.token });")).toBeLessThan(
-			component.indexOf("const recorded = await recordTrade("),
+		expect(component).toContain("await finishRecording(sent);");
+		// The sent pair is HELD (state + sessionStorage, C#2-r3) before anything
+		// that can throw after the send.
+		expect(component.indexOf("holdSent({ hash: fillHash, token: ready.token });")).toBeLessThan(
+			component.indexOf("await finishRecording({ hash: fillHash, token: ready.token });"),
 		);
+		// Behaviour for all of the above is pinned by
+		// `components/agent/trade-execution.probe.test.ts`, which drives the real
+		// component; these string pins only keep the SHAPE from drifting back.
 	});
 
 	test("displayed and signed economics are compared before the fill", () => {

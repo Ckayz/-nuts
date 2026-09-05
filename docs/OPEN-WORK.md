@@ -143,6 +143,8 @@ The owner (2026-09-05 18:3x): "some work here my team continue better. list them
 
 ## 7. Owner decisions still open
 
+- **`listActivity` page size (lane B second pass, 2026-09-05 21:50):** the activity feed has no LIMIT and no owner number exists for it; the fold writer stopped rather than invent one.
+
 - **From the screenshot pass (2026-09-05 21:2x, `.research/thetanuts/demo-seed-report.md` D1–D9):** default structure on the market page is the worst in the book (which row should be selected by default?); the ticket sentence prints the raw premium "249.999966 USDC" (rounding/precision for copy); rails print handles where the feed prints display names; "since Sep 26"; TODO-OWNER chips are visible in production (keep as honesty markers or hide?); `/new` has no left rail (mockup?); search box hidden at 390 px (mockup rule); one-section search results.
 
 - **From the lane B confirming pass (2026-09-05 21:18):** (a) B-m3 wallet switch: a signed-in session stays valid while a different account is connected; the header shows "Sign in" but likes/comments/follows still act as the old identity — sign the server session out on mismatch, or keep? (b) OG images: `next/og` downloads twemoji SVGs from jsDelivr when a headline contains an emoji, so an emoji post's share image fails during a CDN outage — strip emoji in OG text, or accept the CDN?

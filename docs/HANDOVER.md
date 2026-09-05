@@ -150,3 +150,80 @@ refusing on live orders (13.107829 and 19.999996 USD on two ETH puts). The tiny
 real fill remains the owner's step, and it is what proves the non-USDC contract
 units and unlocks the gated buy orders.
 
+---
+
+## 9. Autonomous trading — researched, parked, resumable
+
+The owner put autonomous signing in scope at 20:xx and revised it to a stretch goal at 21:xx
+once the build cost was clear. **Nothing autonomous is in main.** What ships is unchanged: the
+agent prepares, the wallet signs.
+
+Recording the findings so nobody spends the hours again.
+
+### The constraint, re-verified twice
+
+`fillOrder(order, signature, referrer)` takes **no recipient**; the position goes to
+`msg.sender`. Checked further for an escape hatch and there is none: the `Order` struct has no
+taker field, `swapAndFillOrder` has no recipient either, and across the whole
+`OPTION_BOOK_ABI` there is no `fillOrderFor`, no meta-transaction entry point and no relayer
+path. An agent signing from its own EOA owns the user's option. The only fix is to control
+`msg.sender`.
+
+### Coinbase Spend Permissions alone cannot do it
+
+`SpendPermissionManager` (`0xf85210B2…67Ad`, Base, 12,610 bytes, `eip712Domain()` verified)
+implements `spend()` as `requireSender(spendPermission.spender)` then
+`_transferFrom(token, account, spender, value)` — it **pulls tokens to the spender**. Its
+internal `_execute` is hardcoded to `token.approve(manager, value)`; the spender chooses
+neither target nor calldata. Coinbase's own README: *"This approach does not enable apps to
+make arbitrary external calls from user accounts."* So a spend permission granted to an agent
+EOA reproduces exactly the bug above.
+
+### What does work: Base Sub Accounts
+
+A Sub Account is a Coinbase Smart Wallet (ERC-4337, **EntryPoint v0.6**) co-owned by the user's
+universal Base Account and by a key the app chooses — and that key may be a plain private key
+held on a server. `createSubAccountSigner.ts` in `base/account-sdk` shows the send path is
+`wallet_prepareCalls` → `owner.sign({hash})` → `wallet_sendPreparedCalls`, with no popup and no
+passkey. Unattended server signing is supported and documented.
+
+The shape that solves the ownership problem:
+
+1. Browser, once: `wallet_addSubAccount` with the server EOA among `keys`.
+2. Browser, once: `requestSpendPermission` where **the spender is the Sub Account address, not
+   the agent**. Granting it to the agent EOA out of habit collapses the design back to the
+   original bug and would not be discovered until mainnet.
+3. Server, unattended: one `executeBatch` from the Sub Account containing
+   `SpendPermissionManager.spend(permission, premium)` → `USDC.approve(OptionBook, premium)` →
+   `OptionBook.fillOrder(...)`. `msg.sender` is the Sub Account throughout, and the user's Base
+   Account owns it.
+
+### The trust caveat, to be stated to users in these words
+
+Coinbase Smart Wallet has no module or policy system — `execute` is `onlyEntryPointOrOwner` and
+ownership is flat. **The server key is a full owner of the Sub Account** and can move anything
+it holds, including the positions. The user's protection is that the Sub Account is scoped to
+this app and holds little, and that the spend permission caps what can be pulled from their main
+balance per period. That is better than custody. It is not "the agent can only trade."
+
+### What is already available, and what is missing
+
+`viem@2.56.3` — already installed — ships `toCoinbaseSmartAccount` and `entryPoint06Address`, so
+the server side needs no new package. Missing: `@base-org/account` (browser opt-in only) and a
+**bundler that supports EntryPoint v0.6 on Base**. Coinbase Smart Wallet is v0.6 while most
+bundlers default to v0.7; the mismatch fails with opaque validation errors rather than a clear
+message. Verify the bundler's v0.6 support before writing any trading logic.
+
+Two further traps worth knowing: signatures must be wrapped as `(uint8 ownerIndex, bytes sig)`
+over a replay-safe EIP-712 digest, and the owner index must be read from chain at startup rather
+than hardcoded to 1; and the `spend()` call must sit in the same batch as the approve and fill,
+or the premium is not there when the fill runs.
+
+### Parked work
+
+`origin/agent-auto-r1`: `agent_hedge_rules` (migration 0009, applied locally only, never to
+production) and `apps/web/src/lib/agent/hedge.ts` — a pure evaluator with 26 tests covering both
+sides of the floor to one ten-millionth, the exact-cap case, the UTC day rollover, cooling off,
+and five malformed-rule shapes. Unmerged on purpose: an unused table in the production migration
+chain is a liability during review with no upside.
+

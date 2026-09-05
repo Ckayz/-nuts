@@ -56,9 +56,9 @@ describe("D5: list rows carry the lifecycle vocabulary", () => {
 		expect(seen.get("expired")).toBe("Settlement pending");
 		expect(seen.get("settled")).toBe("Settled");
 		expect(seen.get("failed")).toBe("Failed");
-		// Six statuses, five distinct labels (`confirmed` and `indexed` are both
-		// open, and the PRD words that difference as "syncing"), so no two
-		// lifecycle states outside that pair render alike.
+		// Six statuses, six distinct labels: even the two open states differ,
+		// because the PRD words the un-indexed one as "syncing". No two
+		// lifecycle states render alike.
 		expect(new Set(seen.values()).size).toBe(6);
 	});
 

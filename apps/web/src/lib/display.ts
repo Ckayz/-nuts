@@ -176,7 +176,7 @@ export function thesisWithOrigin(value: Domain.Thesis, siteOrigin: string | read
     // structure group null-or-complete), so no expiry means no structure chip.
     const struct = value.structure === null || value.market === null || value.market.expiryAt === null ? null : structure(value.structure, value.market.expiryAt);
     return { id: value.id, slug: value.slug, headline: value.thesis.headline, note: value.thesis.rationale,
-        asset: value.market?.underlyingAsset ?? null, creator: creator(value.creator), status, statusLabel,
+        asset: value.market?.underlyingAsset ?? null, direction: value.thesis.direction, creator: creator(value.creator), status, statusLabel,
         postedLabel: settled ? `· settled ${value.backing?.mock.settledAgoMinutes ?? "—"}m` : `· ${elapsed(value.thesis.createdAt, value.dataAsOf)}`,
         tag: value.market === null ? null : { slug: marketSlug(value.market.underlyingAsset), asset: value.market.underlyingAsset, structureLabel: struct === null ? null : `${struct.strikesLabel} · ${struct.expiryLabel}` },
         structure: struct, backing: value.backing === null ? null : backing(value, settled),
@@ -401,7 +401,23 @@ export const PNL_BASIS_SHORT: Record<View.PnlBasis, string> = {
     unavailable: "not available yet",
 };
 
-export function position(value: Domain.Position, asOf: Date = new Date()): View.Position {
+/**
+ * B1. The live valuation of ONE row, computed by the server.
+ *
+ * The risk model lives in `lib/position/pnl.ts`, which imports `@nuts/thetanuts`
+ * — a bundle that reaches for `fs/promises` — and THIS file is imported by
+ * client components (see the import note at the top). So the caller runs
+ * `lib/position/view.ts` `listRowPnl` and passes only its answer here. Absent,
+ * every row keeps its recorded-column behaviour exactly as before.
+ */
+export interface LiveRowPnl {
+    readonly spotUsd8: string | null;
+    readonly derivedPnlUsd: string | null;
+    /** Whether the risk model had its inputs at all; see `resolvePnl`'s last branch. */
+    readonly derivable: boolean;
+}
+
+export function position(value: Domain.Position, asOf: Date = new Date(), live?: LiveRowPnl): View.Position {
     const status = lifecycleStatus(value.status, value.expiryAt ?? null, asOf.toISOString());
     const display = positionStatusDisplay(status, value.failureReason);
     const settled = status === "settled";
@@ -415,10 +431,14 @@ export function position(value: Domain.Position, asOf: Date = new Date()): View.
         finalPnlUsd: value.economics.finalPnlUsd,
         estimatedPnlUsd: value.economics.estimatedPnlUsd,
         settlementPriceUsd: value.economics.settlementPriceUsd,
-        // A list reads no order snapshot and no spot, so nothing is derived here.
-        derivable: false,
-        derivedPnlUsd: null,
-        spotUsd8: null,
+        // B1. A list row IS derivable now: `lib/data/map.ts` carries the decoded
+        // instrument and the raw fill amounts on the row, and the page resolves
+        // one live price book for every row it draws. Without one (mock mode, an
+        // unreadable feed, a fixture with no snapshot) both values are null and
+        // this falls back to the recorded columns exactly as before.
+        derivable: live?.derivable ?? false,
+        derivedPnlUsd: live?.derivedPnlUsd ?? null,
+        spotUsd8: live?.spotUsd8 ?? null,
         unavailableReason: "No P&L recorded for this fill yet.",
         expiryAt: value.expiryAt ?? null,
         asOf: asOf.toISOString(),
@@ -426,8 +446,8 @@ export function position(value: Domain.Position, asOf: Date = new Date()): View.
     return { id: value.id, thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(pnl.pnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled,
         statusLabel: display.label, statusTone: display.tone, pnlLabel: settled ? "Result" : "Live P&L", pnlBasisLabel: pnl.detail, basis: pnl.basis };
 }
-export function participant(value: Domain.Participant, asOf: Date = new Date()): View.Participant {
-    return { ...position(value, asOf), creator: creator(value.creator), says: value.says, isCreator: value.role === "creator" };
+export function participant(value: Domain.Participant, asOf: Date = new Date(), live?: LiveRowPnl): View.Participant {
+    return { ...position(value, asOf, live), creator: creator(value.creator), says: value.says, isCreator: value.role === "creator" };
 }
 export function activity(value: Domain.ActivityItem): View.ActivityItem {
     if (value.socialDetail !== undefined) return { id: value.id, creator: creator(value.creator), action: value.action, detail: value.socialDetail, offchain: value.transactionHash === null, tx: tx(value.transactionHash, null) ?? { label: "", href: "" } };

@@ -209,6 +209,18 @@ export interface Position {
      * carry no snapshot.
      */
     expiryAt?: string | null;
+    /**
+     * B1. The instrument and the raw fill amounts, decoded from the SAME stored
+     * order snapshot `/p/[id]` reads (`lib/data/map.ts` `mapPosition`, which
+     * already decoded the snapshot for `expiryAt`).
+     *
+     * Without them a list row could only print a P&L column the indexer had
+     * written, so a profile row and the portfolio said "Live P&L · not available
+     * yet" about the very fill whose own page computed "−$1.00". Optional, and
+     * both stay optional, because the typed fixtures carry no order snapshot.
+     */
+    instrument?: PositionInstrument | null;
+    quantities?: PositionQuantities | null;
     createdAt: string;
     mockTransactionFragment: string | null;
 }

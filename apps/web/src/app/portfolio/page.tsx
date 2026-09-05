@@ -21,6 +21,10 @@ export default async function PortfolioPage() {
   <Leaderboard entries={discover.leaderboard} signedIn={discover.signedIn} databaseMode={discover.databaseMode} />
   <div className="card-f">P&amp;L is 1W, from onchain fills and settlements. Ranking formula<TodoOwner /></div>
  </section>}>
+  {/* m4: signed in, `CreatorStats profile` renders the owner's name as the
+      page heading. Signed out there is no header at all, so the route had no
+      `h1`; the nav's own word for it stands in, out of the picture. */}
+  {currentUser ? null : <h1 className="a11y-hidden">Portfolio</h1>}
   {/* TODO-OWNER: own-profile link copy. */}
   {currentUser ? <><CreatorStats creator={currentUser} profile self /><Link className="btn sec" href={`/u/${currentUser.handle}`}>Your profile</Link></> : null}
   <PositionRows title="Positions" rows={[...openPositions, ...settledPositions]} />

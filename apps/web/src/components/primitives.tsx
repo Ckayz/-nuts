@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { avatarDataUri } from "@/lib/avatar";
 import { assetIconPath } from "@/lib/market/asset-icon";
+import { postTypeBadge } from "@/lib/post-type";
 import type { CSSProperties, ReactNode } from "react";
-import type { Tag, ThesisStatus } from "@/lib/display-types";
+import type { Tag, Thesis, ThesisStatus } from "@/lib/display-types";
 
 /**
  * The shared primitives, ported from docs/mockups/thesis-fun-mockup.html.
@@ -138,6 +139,33 @@ export function StatusChip({
 		<Chip flat={status === "settled"} style={style}>
 			{label}
 		</Chip>
+	);
+}
+
+/**
+ * The post type pill: fomo marks every feed post with one
+ * (docs/design/FOMO-DIGEST.md, "Feed"). Our words, not theirs — `Thesis` for a
+ * pure text opinion, `Bull` / `Bear` for the direction the post names.
+ * `lib/post-type.ts` owns the rule, the vocabulary and the reason the direction
+ * cannot be read off the structure or the backing card; this is only its
+ * markup.
+ *
+ * RULE TENSION, recorded rather than resolved here. CLAUDE.md: "Colour only on
+ * money (never bars, labels, names)." A badge is a label, so the pill itself
+ * stays neutral — surface ground, hairline, muted or plain text — and the money
+ * colour appears only on the 6px dot. That is the same compromise CLAUDE.md
+ * already makes one sentence later for the percent beside a P&L ("neutral with
+ * a coloured arrow"). TODO-OWNER: if the owner wants fomo's fully tinted pill,
+ * it is a colour change on `.ptype.bull` / `.ptype.bear` in `index.css` and
+ * nothing here moves.
+ */
+export function PostTypeBadge({ thesis }: { thesis: Pick<Thesis, "direction"> }) {
+	const badge = postTypeBadge(thesis);
+	return (
+		<span className={badge.tone === "neutral" ? "ptype" : `ptype ${badge.tone}`}>
+			<span className="dot" aria-hidden />
+			{badge.label}
+		</span>
 	);
 }
 

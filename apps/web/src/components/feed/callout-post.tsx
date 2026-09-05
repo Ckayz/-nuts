@@ -4,7 +4,7 @@ import { CopyLink } from "@/components/position/copy-link";
 import { LikeButton } from "@/components/feed/like-button";
 import { PostText, TradeCards } from "@/components/feed/trade-card";
 import { PnlCard } from "@/components/position/pnl-card";
-import { Avatar, StatusChip, TagRow } from "@/components/primitives";
+import { Avatar, PostTypeBadge, StatusChip, TagRow } from "@/components/primitives";
 import type { Thesis } from "@/lib/display-types";
 
 /**
@@ -54,6 +54,12 @@ export function CalloutPost({
 					<Link className="p-name" href={`/u/${thesis.creator.handle}`}>
 						{thesis.creator.displayName}
 					</Link>
+					{/* fomo's type pill, in the byline (docs/design/FOMO-DIGEST.md,
+					    "Feed"). It names WHAT the post is — a pure text opinion, or the
+					    direction it takes — which is a different fact from the "Backed"
+					    chip below (whether the author put their own money behind it)
+					    and from the lifecycle chip (how long it has left). */}
+					<PostTypeBadge thesis={thesis} />
 					<span className="p-handle">@{thesis.creator.handleLabel}</span>
 					<span className="p-time">{thesis.postedLabel}</span>
 					{thesis.status && thesis.statusLabel ? (

@@ -381,6 +381,10 @@ export function mapPosition(input: MapPositionInput): Domain.Position {
 		entrySpotPriceUsd: null,
 		economics: economics(position),
 		verification: verification(position),
+		// C#9. `failed` is not one outcome: a REVERTED transaction means nothing
+		// happened, while `fill_quantity_unproven` means the fill IS on chain and
+		// only the contract count could not be proven from it.
+		failureReason: position.failureReason,
 		createdAt: position.createdAt.toISOString(),
 		mockTransactionFragment: null,
 	};

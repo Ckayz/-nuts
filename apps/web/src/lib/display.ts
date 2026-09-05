@@ -2,6 +2,7 @@
 import type * as Domain from "@/types";
 import type * as View from "./display-types";
 import { renderTextWithLinks, tradeLinkHref } from "./thesis/links";
+import { failedButOnChain } from "./position/pnl";
 /** Validate and split decimal strings without a binary floating-point conversion. */
 function decimal(value: string) {
     if (!/^-?\d+(?:\.\d+)?$/.test(value))
@@ -217,6 +218,31 @@ export const POSITION_STATUS_DISPLAY: Record<Domain.PositionStatus, { label: str
     failed: { label: "Failed", tone: "ending" },
 };
 
+/**
+ * C#9. The chip for a position, given WHY a failed row failed.
+ *
+ * `failed` covers two different things. A reverted transaction is "Failed":
+ * nothing happened, nothing is owed. A `fill_quantity_unproven` row is a fill
+ * that IS on chain whose contract count could not be proven from the
+ * transaction (`lib/trade/record.ts`), so styling it as a revert tells the
+ * holder of a real position that their money did nothing.
+ *
+ * The tone stays inside the mockup's three (`live`/`ending`/`settled`); the
+ * word is the shortest honest one. TODO-OWNER: the label.
+ */
+export const FILL_UNPROVEN_DISPLAY = { label: "Not tracked yet", tone: "settled" } as const satisfies {
+    label: string;
+    tone: View.ThesisStatus;
+};
+
+export function positionStatusDisplay(
+    status: Domain.PositionStatus,
+    failureReason?: string | null,
+): { label: string; tone: View.ThesisStatus } {
+    if (failedButOnChain(status, failureReason)) return FILL_UNPROVEN_DISPLAY;
+    return POSITION_STATUS_DISPLAY[status];
+}
+
 /** The fill's own date, e.g. "5 Sep 2026". UTC, like every other instant here. */
 export function dateLabel(iso: string): string {
     const date = new Date(iso);
@@ -262,6 +288,8 @@ export interface PnlCardInput {
     readonly id: string;
     readonly owner: Domain.Creator;
     readonly status: Domain.PositionStatus;
+    /** C#9. `positions.failure_reason`; a fill that is on chain is not a revert. */
+    readonly failureReason?: string | null;
     /** ISO instant the fill was recorded; the share card's top-right date. */
     readonly createdAt: string;
     /** Title line, e.g. "BTC put spread". Never empty. */
@@ -287,7 +315,9 @@ export interface PnlCardInput {
 }
 
 export function pnlCard(input: PnlCardInput): View.PnlCard {
-    const status = POSITION_STATUS_DISPLAY[input.status];
+    // C#9: the chip reads the failure REASON, so a fill that is on chain is
+    // never styled as a reverted transaction.
+    const status = positionStatusDisplay(input.status, input.failureReason);
     const settled = input.status === "settled";
     return {
         id: input.id,

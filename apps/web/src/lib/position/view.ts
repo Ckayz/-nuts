@@ -170,6 +170,9 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 
 	const pnl = resolvePnl({
 		status: position.status,
+		// C#9: a `fill_quantity_unproven` row is a fill that IS on chain, not a
+		// reverted transaction.
+		failureReason: position.failureReason,
 		finalPnlUsd: economics.finalPnlUsd,
 		estimatedPnlUsd: economics.estimatedPnlUsd,
 		settlementPriceUsd: economics.settlementPriceUsd,
@@ -221,6 +224,9 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 		// stored status never reaches `indexed`->`expired` on its own because no
 		// reconciliation exists yet.
 		status: lifecycleStatus(position.status, instrument?.expiryAt ?? null, asOf.toISOString()),
+		// C#9: the chip reads the reason too, so a fill that is on chain is never
+		// styled as a revert.
+		failureReason: position.failureReason,
 		createdAt: position.createdAt,
 		instrumentLabel: parts.title,
 		asset,

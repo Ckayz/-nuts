@@ -185,6 +185,18 @@ export interface Position {
     entrySpotPriceUsd: string | null;
     economics: ThesisAiContext["economics"];
     verification: ThesisAiContext["verification"];
+    /**
+     * C#9. Why a `failed` row failed, verbatim from `positions.failure_reason`.
+     *
+     * `failed` is not one outcome. A REVERTED transaction means nothing
+     * happened; `fill_quantity_unproven` means the fill IS on chain and only
+     * the contract count could not be proven from it (`lib/trade/record.ts`).
+     * Telling a holder of a real position that "this transaction failed, so
+     * there is no position" is a false statement about their money, so the
+     * reason has to reach the view layer. Optional: the typed fixtures predate
+     * it and never carry one.
+     */
+    failureReason?: string | null;
     createdAt: string;
     mockTransactionFragment: string | null;
 }

@@ -8,6 +8,9 @@ import { deriveSlug } from "@nuts/db/slug";
 import { createOrFetchUser } from "@/lib/auth/store";
 import { formatBaseUnits } from "@/lib/market/units";
 import { structureIdOf } from "@/lib/market/structures";
+import { mapPosition } from "@/lib/data/map";
+import { resolvePnl } from "@/lib/position/pnl";
+import { positionStatusDisplay } from "@/lib/display";
 import { prepareTradeFor } from "./prepare";
 import { findUnrecordedFill, UNRECORDED_FILL_WINDOW_MS } from "./store";
 import { recordTradeFor, type ChainReader } from "./record";
@@ -233,6 +236,29 @@ describeLive("recordTrade cross-checks every number against the chain", () => {
 			// Nothing economic was written from the browser's numbers.
 			expect(row?.confirmedAt).toBeNull();
 			expect(row?.optionAddress).toBeNull();
+
+			// C#9-r3. That row is a REAL FILL whose contract count could not be
+			// proven — not a reverted transaction. The page must not tell its
+			// holder there is no position.
+			const mapped = mapPosition({ position: row!, thesis: null });
+			expect(mapped.failureReason).toBe("fill_quantity_unproven");
+			const resolved = resolvePnl({
+				status: mapped.status,
+				failureReason: mapped.failureReason,
+				finalPnlUsd: null,
+				estimatedPnlUsd: null,
+				settlementPriceUsd: null,
+				derivation: null,
+				spotUsd8: null,
+				unavailableReason: "no derivation",
+				expiryAt: null,
+				asOf: new Date().toISOString(),
+			});
+			expect(resolved.detail).toContain("Your fill is on chain");
+			expect(resolved.detail).not.toContain("transaction failed");
+			expect(resolved.pnlUsd).toBeNull();
+			expect(positionStatusDisplay(mapped.status, mapped.failureReason).label).toBe("Not tracked yet");
+
 			await dropPosition(row?.id);
 		}
 	}, 60_000);

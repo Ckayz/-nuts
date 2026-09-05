@@ -56,8 +56,32 @@ export interface DerivationInputs {
 	readonly collateralUsdPrice8: string;
 }
 
+/**
+ * C#9 (lane C confirming pass, finding 9). The `failure_reason` that means the
+ * fill IS on chain.
+ *
+ * `lib/trade/record.ts` writes it when a transaction carries a matched
+ * OptionBook fill for this wallet but does not expose the `fillOrder` call, so
+ * the contract count cannot be proven (a batched smart-wallet execution, an
+ * ERC-4337 UserOperation). The guard stays closed — nothing is recorded from
+ * the browser's own figure — but the money DID move, and the reviewer measured
+ * the page telling that holder "This transaction failed, so there is no
+ * position." (`record.ts:266` -> `pnl.ts:268`).
+ *
+ * No new `position_status` value and no migration: the row already carries the
+ * reason, and it is the reason that distinguishes the two outcomes.
+ */
+export const FILL_ON_CHAIN_UNPROVEN = "fill_quantity_unproven";
+
+/** C#9. Is this `failed` row a REVERTED transaction, or a proof failure? */
+export function failedButOnChain(status: PositionStatus, failureReason: string | null | undefined): boolean {
+	return status === "failed" && failureReason === FILL_ON_CHAIN_UNPROVEN;
+}
+
 export interface PnlInputs {
 	readonly status: PositionStatus;
+	/** C#9. `positions.failure_reason`; only read when `status` is `failed`. */
+	readonly failureReason?: string | null;
 	readonly finalPnlUsd: string | null;
 	readonly estimatedPnlUsd: string | null;
 	readonly settlementPriceUsd: string | null;
@@ -265,6 +289,18 @@ export function resolvePnl(inputs: PnlInputs): PnlResolution {
 	const settlementPrice = decimalOrNull(inputs.settlementPriceUsd);
 
 	if (inputs.status === "failed") {
+		// C#9. A quantity-unproven fill is NOT a reverted transaction: the money
+		// left the wallet and the option exists. Saying otherwise is a false
+		// statement about a real position.
+		if (failedButOnChain(inputs.status, inputs.failureReason)) {
+			return {
+				pnlUsd: null,
+				basis: "unavailable",
+				// TODO-OWNER: wording.
+				detail:
+					"Your fill is on chain, but the contract count could not be proven from this transaction, so the position is not tracked yet.",
+			};
+		}
 		return { pnlUsd: null, basis: "unavailable", detail: "This transaction failed, so there is no position." };
 	}
 	if (inputs.status === "pending") {

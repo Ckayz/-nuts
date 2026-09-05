@@ -151,7 +151,14 @@ describe("the preload fences the RESOLVED database, not the one it was started w
 		const result = runPreload("DATABASE_URL=postgresql://u:p@127.0.0.1:54322/from_env_file\n", UNSET);
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout.trim()).toBe('RESOLVED=""');
-		expect(result.stderr).toContain("IGNORED");
+		// A2-3 / CL-8: the announcement used to assert "No DATABASE_URL was passed
+		// to this run", which is false for the operator who exported the file's own
+		// value — a case this branch cannot tell apart from this one. It now states
+		// only what is known. `packages/db/test/database-fence.test.ts` pins both
+		// halves and mutates them.
+		expect(result.stderr).toContain("env file supplies");
+		expect(result.stderr).toContain("the live suites SKIP");
+		expect(result.stderr).not.toContain("No DATABASE_URL was passed");
 	});
 
 	test("a URL the operator passed IS a selection and survives untouched", () => {

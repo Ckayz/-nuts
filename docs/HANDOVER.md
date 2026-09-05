@@ -373,3 +373,72 @@ too.
 - Devfolio was submitted at 22:50, before faults 1-5 were fixed. The submitted
   link was broken when it was filed and works now.
 
+---
+
+## 12. `fold-C-r3` cannot build — one import, traced (2026-09-06)
+
+`origin/fold-C-r3` fails `next build` at its own head (`14a05ee`), with my work
+nowhere near it. Verified by checking out that commit clean and building:
+
+```
+Error: Module not found: Can't resolve 'fs/promises'
+  @thetanuts-finance/thetanuts-client/dist/index.mjs:11607
+  @thetanuts-finance/thetanuts-client/dist/index.mjs:11628
+```
+
+`main` builds fine, so this arrived with the branch.
+
+### The cause
+
+`apps/web/src/lib/display.ts` line 5, added by that branch:
+
+```ts
+import { failedButOnChain, lifecycleStatus, resolvePnl } from "./position/pnl";
+```
+
+A **value** import, not `import type`. `components/market/take-a-side.tsx` is a
+client component and imports `expiryLabel` from `display.ts`, so the whole chain
+is now bundled for the browser:
+
+```
+take-a-side.tsx [client]
+  -> lib/display.ts
+    -> lib/position/pnl.ts
+      -> @nuts/thetanuts            (barrel: packages/thetanuts/src/index.ts)
+        -> packages/thetanuts/src/receipt.ts
+          -> @thetanuts-finance/thetanuts-client
+            -> await import('fs/promises')     <- Node only
+```
+
+The two failing lines are the SDK's **file-backed RFQ key storage**
+(`ensureDirectory` and `set`), which writes to `~/.thetanuts-keys/`. It is
+Node-only by design and cannot exist in a browser bundle.
+
+`main` avoids this because its `display.ts` imports only types plus
+`thesis/links` — nothing that reaches the barrel.
+
+### Three ways out, cheapest first
+
+1. **Don't reach the barrel from client-reachable code.** Import
+   `packages/thetanuts/src/risk.ts` directly rather than through
+   `@nuts/thetanuts`, so `receipt.ts` is never pulled in.
+2. **Split `display.ts`.** Keep the pure formatters that `take-a-side` needs in
+   one module and put the P&L resolution in another, so a client component does
+   not drag the server-side chain across the boundary.
+3. **Give the SDK's key storage a browser-safe path.** `createReadClient` already
+   passes `MemoryStorageProvider`, but the file-backed provider is still reachable
+   in the module graph, so bundling it is a build-time concern rather than a
+   runtime one.
+
+(1) is the smallest change and keeps the barrel honest for server code.
+
+### Why this is worth flagging rather than fixing here
+
+`components/agent/` and `lib/display.ts` are that branch's lane, and it is
+mid-review. `agent-ux-r1` is cut from `fold-C-r3` for exactly that reason and
+inherits the failure; the wallet work is on `main` and is unaffected.
+
+`bun run verify --offline` does **not** catch this: step 7 is the only build step
+and it is skipped offline. The failure appears only in a full `next build`, which
+is what Vercel runs.
+

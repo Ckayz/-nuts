@@ -183,8 +183,8 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 
 	const pnl = resolvePnl({
 		status: position.status,
-		// C#9: a `fill_quantity_unproven` row is a fill that IS on chain, not a
-		// reverted transaction.
+		// C#9 / C-R4: `ON_CHAIN_REFUSAL_REASONS` (lifecycle.ts) are fills that ARE
+		// on chain, not reverted transactions.
 		failureReason: position.failureReason,
 		finalPnlUsd: economics.finalPnlUsd,
 		estimatedPnlUsd: economics.estimatedPnlUsd,

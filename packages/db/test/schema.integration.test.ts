@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Client } from "pg";
+import { deriveSlug } from "../src/slug";
+import { slugCases } from "./fixtures/slug";
 import { canonicalFillEvent } from "./fixtures/fill-event";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -44,15 +46,58 @@ if (!databaseUrl) {
   console.log("schema integration skipped: DATABASE_URL is not set");
   test.skip("migrated schema constraints require DATABASE_URL", () => {});
 } else describe("migrated schema constraints", () => {
+  probe("slug unique, format and not-null fences", async client => {
+    await rejects(client, "UPDATE public.theses SET slug=(SELECT slug FROM public.theses WHERE id=$1) WHERE id=$2", [t1,t2], { code: "23505", constraint: "theses_slug_unique" });
+    for (const slug of ["Upper", "a_b", "-a", "a-", "a--b", "", "é"]) {
+      await rejects(client, "UPDATE public.theses SET slug=$1 WHERE id=$2", [slug,t1], check("theses_slug_format"));
+    }
+    await rejects(client, "UPDATE public.theses SET slug=NULL WHERE id=$1", [t1], { code: "23502" });
+  });
+  probe("handles nullable, unique, lowercase ASCII and bounded", async client => {
+    expect((await client.query("SELECT handle FROM public.users WHERE id IN ($1,$2)", [u1,u2])).rows).toEqual([{ handle: null }, { handle: null }]);
+    await client.query("UPDATE public.users SET handle='a_1' WHERE id=$1", [u1]);
+    await rejects(client, "UPDATE public.users SET handle='a_1' WHERE id=$1", [u2], { code: "23505", constraint: "users_handle_unique" });
+    for (const handle of ["UPPER", "has-dash", "has space", "é"]) {
+      await rejects(client, "UPDATE public.users SET handle=$1 WHERE id=$2", [handle,u1], check("users_handle_format"));
+    }
+    await rejects(client, "UPDATE public.users SET handle=$1 WHERE id=$2", ["a".repeat(33),u1], check("users_handle_length"));
+    await rejects(client, "UPDATE public.users SET handle='' WHERE id=$1", [u1], { code: "23514" });
+    for (const handle of ["a", "a".repeat(32), null]) await client.query("UPDATE public.users SET handle=$1 WHERE id=$2", [handle,u1]);
+  });
+  probe("actual 0005 SQL backfill agrees with TypeScript on Unicode and collisions", async client => {
+    const migration = await Bun.file(new URL("../src/migrations/0005_slugs_and_handles.sql", import.meta.url)).text();
+    const block = migration.slice(migration.indexOf("DO $$"), migration.indexOf("END $$;") + "END $$;".length);
+    // The migration only backfills existing rows. Restore that state in this rollback transaction.
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query('ALTER TABLE public.theses DISABLE TRIGGER theses_creator_position_invariant');
+    await client.query('ALTER TABLE public.theses ALTER COLUMN slug DROP NOT NULL');
+    const cases = [...slugCases.filter(([headline]) => headline.trim() !== ""), ...Array.from({ length: 40 }, () => ["same headline", "same-headline"] as const)];
+    for (const [index, [headline]] of cases.entries()) {
+      const id = `abcd0000-0000-4000-8000-${index.toString(16).padStart(12,"0")}`;
+      await client.query("INSERT INTO public.theses(id,slug,creator_user_id,headline,status) VALUES ($1::uuid,$1::text,$2,$3,'open')", [id,u1,headline]);
+    }
+    await client.query("UPDATE public.theses SET slug=NULL");
+    await client.query(block);
+    const rows = await client.query<{id: string; headline: string; slug: string}>("SELECT id,headline,slug FROM public.theses ORDER BY id");
+    const occupied = new Set<string>();
+    for (const row of rows.rows) {
+      expect(row.slug).toBe(deriveSlug(row.headline, row.id, occupied));
+      expect(occupied.has(row.slug)).toBe(false);
+      occupied.add(row.slug);
+    }
+    await client.query('ALTER TABLE public.theses ALTER COLUMN slug SET NOT NULL');
+    await client.query('ALTER TABLE public.theses ENABLE TRIGGER theses_creator_position_invariant');
+  });
+
   for (const headline of ["", "   ", "\n\t", "\u00a0", "\u2007", "\ufeff", "\u202f"]) {
     probe(`headline rejects ${JSON.stringify(headline)} on insert and update`, async (client) => {
-      await rejects(client, "INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,$2,'open')", [u1, headline], check("theses_headline_nonblank"));
+      await rejects(client, "INSERT INTO public.theses(slug,creator_user_id,headline,status) VALUES ('insert-fixture',$1,$2,'open')", [u1, headline], check("theses_headline_nonblank"));
       await rejects(client, "UPDATE public.theses SET headline=$1 WHERE id=$2", [headline, t1], check("theses_headline_nonblank"));
     });
   }
   for (const headline of ["A normal headline", "Words\u00a0between"]) {
     probe(`headline accepts ${JSON.stringify(headline)}`, async (client) => {
-      const result = await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,$2,'open') RETURNING headline", [u1, headline]);
+      const result = await client.query("INSERT INTO public.theses(slug,creator_user_id,headline,status) VALUES ('insert-fixture',$1,$2,'open') RETURNING headline", [u1, headline]);
       expect(result.rows).toEqual([{ headline }]);
       await client.query("UPDATE public.theses SET headline=$1 WHERE id=$2", [headline, t1]);
     });
@@ -82,6 +127,22 @@ if (!databaseUrl) {
     expect((await client.query("SELECT tagged_asset FROM public.theses WHERE id=$1", [t1])).rows).toEqual([{ tagged_asset: "ETH" }]);
   }
   probe("tag backfill preserves round-6 linked draft after creator wallet change", backfillLinkedDraft);
+  probe("slug backfill preserves linked drafts and restores relationship enforcement", async client => {
+    await backfillLinkedDraft(client);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query('ALTER TABLE public.theses DISABLE TRIGGER theses_creator_position_invariant');
+    await client.query('ALTER TABLE public.theses ALTER COLUMN slug DROP NOT NULL');
+    await client.query("UPDATE public.theses SET slug=NULL");
+    await client.query('ALTER TABLE public.theses ENABLE TRIGGER theses_creator_position_invariant');
+    const migration = await Bun.file(new URL("../src/migrations/0005_slugs_and_handles.sql", import.meta.url)).text();
+    const start = migration.indexOf('ALTER TABLE "theses" DISABLE TRIGGER');
+    const end = migration.indexOf('CREATE UNIQUE INDEX "theses_slug_unique"');
+    for (const statement of migration.slice(start,end).split("--> statement-breakpoint")) {
+      if (statement.trim()) await client.query(statement);
+    }
+    expect((await client.query("SELECT slug FROM public.theses WHERE id=$1", [t1])).rows).toEqual([{ slug: deriveSlug("h",t1) }]);
+    await rejects(client, "UPDATE public.theses SET creator_position_id=$1 WHERE id=$2", [p1,t1], { code: "23514", message: `invalid creator position for thesis ${t1}` });
+  });
   probe("tag backfill restores creator position trigger enforcement", async (client) => {
     await backfillLinkedDraft(client);
     await rejects(client, "UPDATE public.theses SET creator_position_id=$1 WHERE id=$2", [p1, t1], { code: "23514", message: `invalid creator position for thesis ${t1}` });
@@ -152,39 +213,39 @@ if (!databaseUrl) {
     expect((await client.query("SELECT status,creator_position_id FROM public.theses WHERE id=$1", [t1])).rows).toEqual([{ status: "open", creator_position_id: null }]);
   });
   probe("text-only published insert accepted", async (client) => {
-    const result = await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,'h','open') RETURNING direction,strikes,creator_position_id", [u1]);
+    const result = await client.query("INSERT INTO public.theses(slug,creator_user_id,headline,status) VALUES ('insert-fixture',$1,'h','open') RETURNING direction,strikes,creator_position_id", [u1]);
     expect(result.rows).toEqual([{ direction: null, strikes: null, creator_position_id: null }]);
   });
   probe("market-only published insert accepted", async (client) => {
-    await client.query("INSERT INTO public.theses(creator_user_id,headline,status,tagged_asset) VALUES ($1,'h','open','ETH')", [u1]);
+    await client.query("INSERT INTO public.theses(slug,creator_user_id,headline,status,tagged_asset) VALUES ('insert-fixture',$1,'h','open','ETH')", [u1]);
   });
   for (const column of ["direction", "underlying_asset", "expiry_at", "product_type", "is_call", "is_long", "strikes", "strike_decimals", "collateral_address", "collateral_symbol", "collateral_decimals"]) probe(
     `partial structure rejects missing ${column}`, async (client) => {
       await rejects(client, `UPDATE public.theses SET ${column}=NULL WHERE id=$1`, [t1], check("theses_structure_all_or_nothing"));
     });
   probe("partial structure rejects absent snapshot on insert", async (client) => {
-    await rejects(client, "INSERT INTO public.theses(creator_user_id,headline,status,direction,underlying_asset,expiry_at,product_type,is_call,is_long,strikes,strike_decimals,collateral_address,collateral_symbol,collateral_decimals,tagged_asset) SELECT creator_user_id,headline,status,direction,underlying_asset,expiry_at,product_type,is_call,is_long,strikes,strike_decimals,collateral_address,collateral_symbol,collateral_decimals,tagged_asset FROM public.theses WHERE id=$1", [t1], check("theses_structure_all_or_nothing"));
+    await rejects(client, "INSERT INTO public.theses(slug,creator_user_id,headline,status,direction,underlying_asset,expiry_at,product_type,is_call,is_long,strikes,strike_decimals,collateral_address,collateral_symbol,collateral_decimals,tagged_asset) SELECT 'insert-fixture',creator_user_id,headline,status,direction,underlying_asset,expiry_at,product_type,is_call,is_long,strikes,strike_decimals,collateral_address,collateral_symbol,collateral_decimals,tagged_asset FROM public.theses WHERE id=$1", [t1], check("theses_structure_all_or_nothing"));
   });
   probe("direction alone is a partial structure", async (client) => {
-    await rejects(client, "INSERT INTO public.theses(creator_user_id,headline,status,direction) VALUES ($1,'h','open','bull')", [u1], check("theses_structure_all_or_nothing"));
+    await rejects(client, "INSERT INTO public.theses(slug,creator_user_id,headline,status,direction) VALUES ('insert-fixture',$1,'h','open','bull')", [u1], check("theses_structure_all_or_nothing"));
   });
   probe("tagged asset lowercase rejected", async (client) => {
-    await rejects(client, "INSERT INTO public.theses(creator_user_id,headline,status,tagged_asset) VALUES ($1,'h','open','eth')", [u1], check("theses_tagged_asset_uppercase"));
+    await rejects(client, "INSERT INTO public.theses(slug,creator_user_id,headline,status,tagged_asset) VALUES ('insert-fixture',$1,'h','open','eth')", [u1], check("theses_tagged_asset_uppercase"));
   });
   for (const tag of ["BTC", null]) probe(`structure rejects mismatched tag ${tag}`, async (client) => {
     await rejects(client, "UPDATE public.theses SET tagged_asset=$2 WHERE id=$1", [t1,tag], check("theses_tagged_asset_matches_structure"));
   });
   probe("backing without structure rejected", async (client) => {
-    await rejects(client, "INSERT INTO public.theses(creator_user_id,headline,status,creator_position_id) VALUES ($1,'h','open',$2)", [u1,p1], check("theses_backing_requires_structure"));
+    await rejects(client, "INSERT INTO public.theses(slug,creator_user_id,headline,status,creator_position_id) VALUES ('insert-fixture',$1,'h','open',$2)", [u1,p1], check("theses_backing_requires_structure"));
   });
   probe("unbacked public post does not fence creator wallet", async (client) => {
-    await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,'h','open')", [u1]);
+    await client.query("INSERT INTO public.theses(slug,creator_user_id,headline,status) VALUES ('insert-fixture',$1,'h','open')", [u1]);
     await client.query("UPDATE public.theses SET status='open' WHERE id=$1", [t1]);
     await client.query("SET CONSTRAINTS ALL IMMEDIATE");
     await client.query("UPDATE public.users SET wallet_address='0xaaa' WHERE id=$1", [u1]);
   });
   probe("unbacked sibling does not weaken linked public wallet fence", async (client) => {
-    await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,'h','open')", [u1]);
+    await client.query("INSERT INTO public.theses(slug,creator_user_id,headline,status) VALUES ('insert-fixture',$1,'h','open')", [u1]);
     await publish(client);
     await rejects(client, "UPDATE public.users SET wallet_address='0xaaa' WHERE id=$1", [u1], { code: "23514", message: "cannot change wallet of a public thesis creator" });
   });
@@ -203,7 +264,7 @@ if (!databaseUrl) {
     await rejects(client, "INSERT INTO public.likes(user_id,thesis_id) VALUES ($1,$2)", [crypto.randomUUID(),t1], { code: "23503", constraint: "likes_user_id_users_id_fk" });
   });
   probe("text-only post can be liked", async (client) => {
-    const post = await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,'h','open') RETURNING id", [u1]);
+    const post = await client.query("INSERT INTO public.theses(slug,creator_user_id,headline,status) VALUES ('insert-fixture',$1,'h','open') RETURNING id", [u1]);
     await client.query("INSERT INTO public.likes(user_id,thesis_id) VALUES ($1,$2)", [u2,post.rows[0].id]);
   });
 

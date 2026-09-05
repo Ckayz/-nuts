@@ -56,6 +56,16 @@ test("Create never shrinks or wraps: it left the overflow-x nav to stop being cl
 	expect(css.match(/\.nav\{[^}]*\}/)?.[0] ?? "").toContain("overflow-x:auto");
 });
 
+test("below 400px the top bar is tightened so Create fits without scrolling the page", () => {
+	// MEASURED: with Create in the bar and no tightening, `/` at 320px signed
+	// out gave documentElement.scrollWidth 337 against clientWidth 320. These
+	// four rules are what removes it; the re-measurement is in the report.
+	const narrow = css.split("@media (max-width:400px){")[1]?.split("\n}")[0] ?? "";
+	expect(narrow).toContain(".top{gap:8px;padding:0 10px}");
+	expect(narrow).toContain(".brand{font-size:18px}");
+	expect(narrow).toContain(".top-create{padding:0 10px}");
+});
+
 /* ---------- decision 7: the leaderboard on phones ---------- */
 
 const phone = css.split("@media (max-width:900px){")[1] ?? "";

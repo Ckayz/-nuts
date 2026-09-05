@@ -618,6 +618,22 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
   .feed-head .pills{margin-left:0}
 }
 
+/* Owner decision 5, second half: Create has to FIT, not merely exist.
+   MEASURED at 320px on `/` in database mode, signed out (the widest wallet
+   state, "Connect wallet" at 132px), with Create in the top bar and the rules
+   above applied: `.top` scrollWidth 337 against clientWidth 320 — brand 100 +
+   gap 12 + top-r 212 + padding 28. The DOCUMENT scrolled sideways, which the
+   design rules forbid.
+   These four are the tightening that removes it, in the order that costs the
+   least: the bar's own padding and gap, then the button's padding, then the
+   brand's step. Re-measured after: see the fold report. Nothing about the
+   layout at 360px and up changes except the same tightening. */
+@media (max-width:400px){
+  .top{gap:8px;padding:0 10px}
+  .brand{font-size:18px}
+  .top-create{padding:0 10px}
+}
+
 }
 
 /* Search retains the existing .search <=900px visibility rule. TODO-OWNER: mobile search access. */

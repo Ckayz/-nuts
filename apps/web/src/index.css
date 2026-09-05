@@ -431,8 +431,12 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
      DOCUMENT at the viewport width (measured: /m/btc at 390px, scrollWidth 390 =
      clientWidth 390). But `Create` then sits past the right edge and has to be
      found by scrolling, so the row is tightened here until all five items fit.
-     Measured at 390px after this rule: `.nav` scrollWidth 362 = clientWidth 362,
-     i.e. nothing is hidden. */
+     Measured at 390px with FIVE items: `.nav` scrollWidth 362 = clientWidth 362,
+     i.e. nothing was hidden. A sixth item (Agent) was added on 2026-09-06 and
+     that measurement no longer holds — the row is expected to scroll at 390px,
+     so `Create` may sit past the right edge again. The nav is `overflow-x:auto`
+     so nothing is unreachable, but this is UNVERIFIED in a browser.
+     TODO-OWNER: tighten the gap, shorten a label, or accept the scroll. */
   .nav{padding:0 12px;gap:14px}
   .nav a.btn{padding:0 11px}
   .post{padding:16px 16px;border-radius:16px;gap:12px}

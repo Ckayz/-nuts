@@ -8,7 +8,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 
-import { Button } from "@nuts/ui/components/button";
 import {
 	InputGroup,
 	InputGroupAddon,
@@ -16,6 +15,8 @@ import {
 	InputGroupTextarea,
 } from "@nuts/ui/components/input-group";
 
+import "@/styles/agent.css";
+import { suggestionsFor } from "@/lib/agent/suggestions";
 import { AgentMarkdown } from "./agent-markdown";
 import { ToolActivity } from "./tool-activity";
 import { TradeApproval } from "./trade-approval";
@@ -200,17 +201,17 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 						<p className="text-muted-foreground text-sm">
 							Ask about options, markets, or what a small budget could buy.
 						</p>
-						<div className="flex flex-wrap gap-2">
+						<div className="pills">
 							{STARTERS.map((s) => (
-								<Button
+								<button
+									type="button"
 									key={s}
-									variant="outline"
-									size="sm"
+									className="pill"
 									onClick={() => submit(s)}
 									disabled={busy}
 								>
 									{s}
-								</Button>
+								</button>
 							))}
 						</div>
 					</div>
@@ -276,6 +277,31 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 						})}
 					</article>
 				))}
+
+				{/* Follow-ups for the newest assistant turn only, derived in code from
+				    the tool results that turn actually produced, so a chip can never
+				    name an instrument the agent did not just see. */}
+				{(() => {
+					if (busy) return null;
+					const last = messages[messages.length - 1];
+					if (last === undefined || last.role !== "assistant") return null;
+					const chips = suggestionsFor(last.parts as never);
+					if (chips.length === 0) return null;
+					return (
+						<div className="pills agent-suggest">
+							{chips.map((chip) => (
+								<button
+									type="button"
+									key={chip.label}
+									className="pill"
+									onClick={() => submit(chip.send)}
+								>
+									{chip.label}
+								</button>
+							))}
+						</div>
+					);
+				})()}
 
 				{busy && <p className="text-muted-foreground text-sm">Thinking…</p>}
 				{error && (

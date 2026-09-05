@@ -1,16 +1,12 @@
 import Link from "next/link";
 import { WalletBar } from "@/components/auth/wallet-bar";
-import { SearchIcon } from "@/components/icons";
+import { Search } from "./search";
 import { usingDatabase } from "@/lib/data/source";
 import { wallet } from "@/lib/view-data";
 
 /**
  * The slim top bar: logo, centred search, wallet chip
  * (docs/mockups/thesis-fun-mockup.html, `.top`).
- *
- * The search is a static field, not a button: nothing searches yet and a
- * control that does nothing when clicked is worse than one that does not
- * invite the click. It becomes a button the day search exists.
  */
 export function TopBar() {
 	return (
@@ -18,11 +14,7 @@ export function TopBar() {
 			<Link className="brand" href="/">
 				thesis<em>.fun</em>
 			</Link>
-			<div className="search">
-				<SearchIcon style={{ width: "15px", height: "15px" }} />
-				Search theses, markets and traders
-				<kbd>⌘ K</kbd>
-			</div>
+			<Search />
 			<div className="top-r">
 				{/* The badge is true only of the fixtures. In database mode the rows
 				    are real, so it would be a false claim about the numbers. */}

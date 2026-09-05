@@ -7,9 +7,9 @@
 
 ## 1. Product Summary
 
-Thesis.fun is a social options platform where market opinions are backed by real onchain positions on Thetanuts, executed on Base mainnet.
+Thesis.fun is a social options platform where a thesis is a post, optionally tagged with a market or structure and optionally backed by a real onchain position on Thetanuts, executed on Base mainnet.
 
-A creator publishes a market thesis, commits capital, and signs a real Thetanuts transaction. Other users can inspect the thesis, see its bounded payoff and risk, and either back or counter it with their own independently previewed and signed Thetanuts position. Creator performance and participant P&L are tied to verifiable onchain transactions.
+A creator publishes a text post and may tag a market or structure. The creator may optionally commit capital and sign a real Thetanuts transaction; a confirmed creator position earns the verified badge. Other users can like, comment on, follow, and share posts, inspect any tagged structure and its risk, and trade from the per-asset market page with their own independently previewed and signed Thetanuts position. Creator performance and participant P&L are tied to verifiable onchain transactions.
 
 The embedded AI trading agent turns a plain-language goal or selected thesis into up to three bounded-risk choices using live Thetanuts data. It may prepare OptionBook fills and custom OptionFactory RFQs, but it never signs or submits transactions. The connected wallet must approve every onchain action.
 
@@ -33,7 +33,7 @@ Thesis.fun connects social discovery to verifiable execution. Every backed thesi
 
 ### 3.1 Goals
 
-1. Make a real Thetanuts option position understandable and executable from a social thesis.
+1. Make a thesis a social post with optional market or structure tags and optional onchain backing, with trading on a per-asset market page.
 2. Require financial skin in the game before a thesis is publicly marked as backed.
 3. Let users discover, back, or counter theses using their own budget and wallet.
 4. Display transaction-backed creator history and participant positions.
@@ -103,19 +103,16 @@ A thesis contains:
 
 - Creator wallet and public profile.
 - Creator-written headline and optional rationale.
-- Underlying asset derived from a live OptionBook order.
-- Direction: `bull` or `bear` for v1.
-- Expiry.
-- Selected product type and strike set.
-- Immutable snapshot of the order used for the creator's entry.
-- Creator transaction hash, option address, entry economics, and confirmation state.
+- Optional market tag independent of a structure.
+- Optional complete structure derived from a live OptionBook order: underlying asset, direction (`bull` or `bear` for v1), expiry, product type, strikes, collateral metadata, and immutable order snapshot.
+- Optional creator backing position, including transaction hash, option address, entry economics, and confirmation state; confirmed backing earns the verified badge.
 - Aggregate participant and social activity.
 
 The public thesis state is one of:
 
 - `draft`: not public and no successful creator trade.
 - `pending`: creator transaction submitted but not confirmed.
-- `open`: creator transaction confirmed and expiry is in the future.
+- `open`: published, with or without a structure or creator backing position.
 - `expired`: expiry passed but settlement is not yet available.
 - `settled`: settlement and final payout are available.
 - `cancelled`: draft or failed creation intentionally abandoned.
@@ -152,22 +149,22 @@ The badge is shown only after the application verifies a successful Base mainnet
 6. The server verifies address, signature, domain, nonce, and expiration, then establishes a secure session.
 7. No private key or seed phrase enters the application.
 
-### 8.2 Create and back a thesis
+### 8.2 Create and optionally back a thesis
 
-1. Authenticated creator opens the creation flow.
-2. App fetches current OptionBook orders.
-3. Creator filters available markets and manually selects an order.
-4. App derives asset, expiry, product type, strikes, collateral, and direction from the selected order.
-5. Creator enters a headline, rationale, and budget.
+1. Authenticated creator opens the creation flow and writes the required post text; rationale, market tag, structure, and creator backing are optional. A text-only post can be published immediately.
+2. If the creator chooses a structure, the app fetches current OptionBook orders.
+3. Creator may tag a market alone or manually select an order to tag a complete structure.
+4. For a selected structure, app derives asset, expiry, product type, strikes, collateral, and direction from the selected order. The post may be published without backing.
+5. If the creator chooses to back the post, they enter a budget on the per-asset market page; the following execution steps apply only to optional backing.
 6. App previews the fill and displays cost, fees, maximum loss, maximum payout, expiry, and payoff scenarios.
 7. Creator explicitly acknowledges the risk summary.
 8. App requests collateral approval only when current allowance is insufficient.
 9. App refetches the exact order and previews it again immediately before execution.
 10. Creator signs and submits the fill through their wallet.
-11. App waits for a successful receipt, records the transaction and returned position identifiers, then publishes the thesis.
+11. App waits for a successful receipt, records the transaction and returned position identifiers, then marks the thesis Backed Onchain.
 12. Indexer delay is represented as a syncing state, not a failed trade.
 
-If execution fails or the order is stale, the thesis remains a private draft and is not marked Backed Onchain.
+If execution fails or the order is stale, the position is not marked Backed Onchain; publishing a post does not require a successful trade.
 
 ### 8.3 Discover theses
 
@@ -178,12 +175,12 @@ The feed supports these views:
 - Ending soon.
 - Settled.
 
-Every card shows creator, headline, asset, direction, expiry, backed status, participation summary, and the creator position's current or final status. Ranking formulas and numeric thresholds remain owner-controlled decisions.
+Every card shows creator, headline, social activity including likes, and any market or structure tag. Direction and expiry appear when a structure is present; backed status and the creator position's current or final status appear when backing is present. Posts have social actions; trading lives on the per-asset market page. Ranking formulas and numeric thresholds remain owner-controlled decisions.
 
 ### 8.4 Back or counter a thesis
 
-1. User opens a thesis and reviews its creator position.
-2. User selects Back or Counter.
+1. User opens a thesis and reviews any tagged structure and optional creator position.
+2. For a tagged structure, user opens the per-asset market page and selects Back or Counter there; posts contain no trade buttons.
 3. App fetches compatible live orders for that asset, expiry, and direction.
 4. User manually selects an available order and enters a budget.
 5. App previews that user's actual fill and displays their own economics.
@@ -223,7 +220,7 @@ If no compatible order is available, the relevant action is disabled with an exp
 - Collateral allowance check and approval.
 - User-signed OptionBook fill using the Thetanuts SDK's external-wallet calldata path.
 - Transaction receipt verification and position persistence.
-- Thesis creation gated by the creator's confirmed transaction.
+- Text-post creation with optional market or structure tags and optional creator backing; the verified badge is gated by the creator's confirmed transaction.
 - Feed, thesis detail, create flow, and portfolio.
 - Open, expired, syncing, failed, and settled states.
 - Responsive `/agent` workspace with discovery and thesis-context entry points.
@@ -234,7 +231,7 @@ If no compatible order is available, the relevant action is disabled with an exp
 ### 9.2 P1 — Important after the end-to-end trade works
 
 - Back and Counter participant flows.
-- Comments and follows.
+- Likes, comments and follows.
 - Activity feed.
 - Creator history and verified performance display.
 - New, trending, ending-soon, and settled feed filters.
@@ -490,7 +487,7 @@ agent. This is a required test case, not an aspiration.
 
 - Hosted Supabase project `-nuts` (AWS ap-northeast-1), shared by both developers. Hosting is Vercel.
 - Schema changes ship as drizzle migrations, never `drizzle-kit push`. `push` reshapes the database to match the schema of whoever runs it and can drop the other developer's tables.
-- Each developer owns their own tables. The AI track owns the `agent_*` tables; the core product owns users, theses, positions, follows, comments and activity. Both export from `packages/db/src/schema/index.ts`.
+- Each developer owns their own tables. The AI track owns the `agent_*` tables; the core product owns users, theses, positions, follows, comments, likes and activity. Both export from `packages/db/src/schema/index.ts`.
 - The app connects through Supabase's transaction pooler; migrations use the direct connection.
 - PostgreSQL with Drizzle.
 - Database stores social state and an indexed record of app-originated transactions.
@@ -522,12 +519,11 @@ agent. This is a required test case, not an aspiration.
 ### `theses`
 
 - Internal ID and creator user ID.
-- Headline and rationale.
-- Direction and lifecycle status.
-- Underlying asset and expiry.
-- Product type, call/put and long/short flags, strikes, and collateral metadata.
-- Immutable creator order snapshot.
-- Creator position ID once confirmed.
+- Required headline (post text) and optional rationale.
+- Lifecycle status; `open` means published, backed or unbacked.
+- Optional uppercase `tagged_asset`, independent of the structure; when a structure is present it must equal `underlying_asset`.
+- Optional all-or-nothing structure: direction, underlying asset, expiry, product type, call/put and long/short flags, strikes and strike decimals, collateral metadata, and immutable creator order snapshot. Direction belongs to the selected structure, not to a text-only post.
+- Optional creator position ID once confirmed; a linked position requires a complete structure and earns the verified badge only after verification.
 - Created, published, expired, and settled timestamps.
 
 ### `positions`
@@ -543,11 +539,11 @@ agent. This is a required test case, not an aspiration.
 - Settlement and final P&L values when available.
 - Created, confirmed, indexed, and settled timestamps.
 
-Transaction hash plus chain ID must be unique. A public thesis must reference exactly one confirmed creator position.
+Transaction hash plus chain ID must be unique. A public thesis may have no creator position. If linked, the creator position must be confirmed and validated against the thesis and creator.
 
-### `comments`, `follows`, and `activity`
+### `comments`, `follows`, `likes`, and `activity`
 
-Conventional social relationships tied to users and theses. Activity records references to confirmed domain events; it does not replace the underlying record.
+Conventional social relationships tied to users and theses. Likes have user and thesis foreign keys, a composite primary key `(user_id, thesis_id)`, and a creation timestamp. Activity records references to confirmed domain events; it does not replace the underlying record.
 
 ## 13. Error and Edge-Case Requirements
 
@@ -623,6 +619,8 @@ Owns:
 
 Neither developer changes the shared contract without notifying the other and updating this PRD.
 
+**2026-09-05 owner decision — DB round 7:** a thesis is a post with optional market/structure tags, optional creator backing, and likes. Trading lives on the per-asset market page. The shared §10.3 `ThesisAiContext` is unchanged; the availability wrapper adds `no_structure` before other checks, while a structured post without backing remains `no_creator_position`. This is the integration handoff for the AI developer.
+
 ## 16. Acceptance Criteria
 
 ### Core product
@@ -632,8 +630,8 @@ Neither developer changes the shared contract without notifying the other and up
 - A creator can manually select an order and preview a budget.
 - The preview clearly shows bounded risk and expiry.
 - A creator can approve collateral and complete a real small Base mainnet fill.
-- A thesis is published only after receipt verification.
-- A second wallet can complete a participant fill from the thesis page.
+- A thesis can be published as text alone, with a market or structure tag, or optionally backed; only verified creator backing receives the badge.
+- A second wallet can complete a participant fill from the per-asset market page reached through a tagged thesis.
 - Both positions appear in their respective portfolios.
 - Expired and settled positions display the correct state without premature final P&L.
 

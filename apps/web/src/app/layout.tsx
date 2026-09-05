@@ -74,6 +74,14 @@ export default async function RootLayout({
 					<footer className="foot">
 						{usingDatabase() ? "Base · Thetanuts OptionBook" : footerSource}
 					</footer>
+					{/* D-R3-2 (pass 3): the document-level layer every modal portals
+					    into. The connect dialog used to render inside the sticky top
+					    bar, whose `z-index:30` trapped the scrim's `z-index:60`
+					    inside that stacking context, so the agent launcher and its
+					    panel (`z-index:38`, document level) painted above the modal
+					    and stayed clickable through it. Last child of `<body>`, so
+					    the scrim competes in the ROOT stacking context. */}
+					<div id="modal-root" />
 				</Providers>
 			</body>
 		</html>

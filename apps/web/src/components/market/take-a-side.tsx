@@ -207,6 +207,50 @@ export function ticketClick(sent: SentFill | null): TicketClick {
  * second fill gets sent. A refusal that cannot be retried away is escaped by
  * reloading the page, which is a deliberate act rather than one more click.
  */
+/**
+ * C#1 (lane C confirming pass, finding 1). The exact ticket a `sign()` started
+ * from.
+ *
+ * A preparation is a round trip to the server, and the side control, the amount
+ * field and the market table's "Select" link all stayed live during it. The
+ * reviewer's probe started a Buy preparation, switched to Bear, let the Sell
+ * requote land — and the released Buy preparation still reached
+ * `eth_sendTransaction`: `{"bearDisabled":false,"sends":["0xBUY_A"]}` while the
+ * panel showed Sell. Nothing in the economics comparison caught it, because
+ * that comparison reads the quote captured when `sign()` started.
+ *
+ * So every send is now fenced by the identity below, re-read from a ref that
+ * the newest render owns. The controls are disabled during a preparation as
+ * well; the fence is what makes that safe rather than merely tidy, because a
+ * disabled control is not a guarantee (a preset click and a blur requote can
+ * both land in the same tick).
+ */
+export interface TicketRequest {
+	readonly structureId: string | null;
+	readonly side: Side;
+	readonly budgetInput: string;
+	/** Lowercase, so a checksum-cased address is not a different wallet. */
+	readonly wallet: string | null;
+}
+
+/** Fails closed: an unknown identity on either side is never "the same ticket". */
+export function sameRequest(a: TicketRequest | null, b: TicketRequest | null): boolean {
+	if (a === null || b === null) return false;
+	return (
+		a.structureId === b.structureId && a.side === b.side && a.budgetInput === b.budgetInput && a.wallet === b.wallet
+	);
+}
+
+/**
+ * C#1. What the panel says when a send was abandoned because the ticket moved
+ * under it. It is not the price-drift sentence: nothing here says the price
+ * moved, and saying so would be untrue.
+ *
+ * TODO-OWNER: wording.
+ */
+export const TICKET_CHANGED_MESSAGE =
+	"The ticket changed while this was being prepared, so nothing was sent. Check the figures and press Trade again.";
+
 export function recordingSettled(result: RecordResult): result is RecordSuccess {
 	return result.ok;
 }
@@ -267,6 +311,13 @@ export function TakeASide({
 	const quotedFor = useRef<{ structureId: string; side: Side; budgetInput: string } | null>(
 		trade === undefined ? null : { structureId: trade.structureId, side: trade.quote.side, budgetInput: trade.quote.budgetInput },
 	);
+
+	/**
+	 * C#1. The ticket identity the NEWEST render owns. Written after every
+	 * render, so an async body that closed over an older render can ask what the
+	 * panel is showing NOW instead of what it showed when it started.
+	 */
+	const requestRef = useRef<TicketRequest | null>(null);
 
 	const config = useConfig();
 	// F14. `useChainId()` returns the CONFIG's chain, and `lib/wagmi.ts`
@@ -343,6 +394,20 @@ export function TakeASide({
 	}, [budgetInput, requote, side, trade]);
 
 	/**
+	 * C#1. No dependency array on purpose: this must be true after EVERY render,
+	 * including one caused by a prop change (the market table's "Select" is a
+	 * client-side navigation, so a new structure arrives as a prop).
+	 */
+	useEffect(() => {
+		requestRef.current = {
+			structureId: trade?.structureId ?? null,
+			side,
+			budgetInput,
+			wallet: address?.toLowerCase() ?? null,
+		};
+	});
+
+	/**
 	 * C6-r2. Hands one sent fill to the server and interprets the answer. The
 	 * SAME function runs on the first attempt and on every retry, so a retry can
 	 * never present different arguments than the send did.
@@ -413,8 +478,22 @@ export function TakeASide({
 			return;
 		}
 		const account = address as `0x${string}`;
+		// C#1. The exact ticket this click is for. Every send below re-reads the
+		// panel's CURRENT identity and refuses if it has moved.
+		const request: TicketRequest = {
+			structureId: trade.structureId,
+			side,
+			budgetInput,
+			wallet: account.toLowerCase(),
+		};
 
 		startTransition(async () => {
+			/** C#1. True only while the panel still shows the ticket this click started from. */
+			const stillMine = () => sameRequest(request, requestRef.current);
+			const abandon = () => {
+				setPhase("idle");
+				setMessage(TICKET_CHANGED_MESSAGE);
+			};
 			try {
 				setPhase("preparing");
 				const first = await prepareTrade({
@@ -431,6 +510,10 @@ export function TakeASide({
 				}
 				let ready = first;
 				if (ready.stage === "approve") {
+					// C#1. An allowance is signed for a token and an amount that belong
+					// to THIS ticket. If the panel moved while the server was preparing,
+					// nothing is sent.
+					if (!stillMine()) return abandon();
 					setPhase("approving");
 					setMessage(ready.note);
 					// C4. `chainId` and `account` are pinned on every send: without
@@ -501,6 +584,11 @@ export function TakeASide({
 					return;
 				}
 
+				// C#1. The last check before the money moves. `sameEconomics` above
+				// compares NUMBERS; this compares WHICH TRADE, which is the thing that
+				// changed in the reviewer's probe while the numbers stayed self-
+				// consistent.
+				if (!stillMine()) return abandon();
 				setPhase("filling");
 				setMessage(ready.note);
 				const hash = await sendTransactionAsync({
@@ -553,6 +641,13 @@ export function TakeASide({
 	const bull = trade?.sides.bull;
 	const bear = trade?.sides.bear;
 	const busy = pending || phase === "approving" || phase === "filling" || phase === "recording";
+	/**
+	 * C#1. While a preparation is in flight — or while a sent fill is still
+	 * unrecorded — the ticket is not a ticket, and the side, the amount and the
+	 * presets must not move under it. `sameRequest` is what actually stops a
+	 * send; this is what stops the user being invited to try.
+	 */
+	const locked = busy || sent !== null;
 	// F20: a stale panel must not be signed for — the figures below belong to the
 	// previous amount. The requote happens on blur, so leaving the field clears
 	// this by itself.
@@ -578,6 +673,8 @@ export function TakeASide({
 				aria-label="Take a side"
 				onKeyDown={(event) => {
 					if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+					// C#1. The keyboard path must be fenced exactly like the click path.
+					if (locked) return;
 					event.preventDefault();
 					const next = event.key === "Home" ? "bull" : event.key === "End" ? "bear" : side === "bull" ? "bear" : "bull";
 					chooseSide(next);
@@ -590,7 +687,7 @@ export function TakeASide({
 					aria-checked={side === "bull"}
 					ref={bullRef}
 					tabIndex={side === "bull" ? 0 : -1}
-					disabled={bull !== undefined && !bull.available}
+					disabled={locked || (bull !== undefined && !bull.available)}
 					onClick={() => chooseSide("bull")}
 				>
 					Bull · buy
@@ -601,7 +698,7 @@ export function TakeASide({
 					aria-checked={side === "bear"}
 					ref={bearRef}
 					tabIndex={side === "bear" ? 0 : -1}
-					disabled={bear !== undefined && !bear.available}
+					disabled={locked || (bear !== undefined && !bear.available)}
 					onClick={() => chooseSide("bear")}
 				>
 					Bear · sell
@@ -628,6 +725,7 @@ export function TakeASide({
 					<input
 						value={budgetInput}
 						inputMode="decimal"
+						disabled={locked}
 						aria-label={`Amount in ${shown.collateralSymbol}`}
 						onChange={(event) => setBudgetInput(event.target.value)}
 						onBlur={() => requote(side, budgetInput)}
@@ -641,6 +739,7 @@ export function TakeASide({
 						type="button"
 						className="pill"
 						key={v.raw}
+						disabled={locked}
 						onClick={
 							trade === undefined
 								? undefined

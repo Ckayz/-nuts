@@ -48,22 +48,22 @@ Scope conflict of 2026-09-05 (teammate's PRD v2.0 vs companion-only) resolved by
   - Preview returns no max loss or max payout. Settlement is automatic on r12; `client.option.payout()` throws.
   - Do not use: `filterOrders` (drops `rawApiData`), `client.events.getOrderFillEvents` (stale event layout), `mmPricing` beyond ETH/BTC, `swapAndFillOrder`, RFQ, MCP.
 - **Fill debits VERIFIED from decoded production fills 2026-09-05** (`.research/thetanuts/finding-fill-debits.md`, tx hashes inside): taker-BUY pays premium = numContracts × price / 1e8 in the collateral token (fee 12.5% of premium carved out of what the maker receives; maker posts strike × contracts or spread width × contracts); taker-SELL (put) posts collateral = strike × numContracts / 1e8 in the collateral token and receives premium − fee. `numContracts` is in 1e6 units for USDC/aBasUSDC orders (10000 = 0.01). Sell-side CALL collateral (SDK doc: 1:1 underlying) still needs a decoded example.
-- **UNVERIFIED until tested with small real money** (see the report's open questions): contract-size decimals per collateral; what the taker pays when the maker is the buyer (our Bear side, gated behind a flag in code); capped-budget rounding; settlement timing and indexer P&L accounting. Code that touches these says so in its doc comment.
+- **UNVERIFIED until tested with small real money** (see the report's open questions), after today's decoded fills: contract-size units for non-USDC-family collateral (cbBTC, aBasWETH); the taker-sell debit for anything other than PHYSICAL_PUT + aBasUSDC (calls, spreads, RANGER as seller); capped-budget rounding on chain; the fee's notional branch; settlement timing and indexer P&L accounting. Code that touches these says so in its doc comment and stays gated.
 - `@thetanuts-finance/mcp` was audited clean but is for AI chat clients; the owner ruled it out for the app.
 - **Teammate-measured on Base mainnet 2026-09-05 (`docs/HANDOVER.md` §5; NOT re-verified by Claude):** maker signatures expire in 59–113 s and are re-signed about every 60 s, so approve collateral first, then re-fetch and build calldata within ~30 s; the SDK WebSocket host does not resolve (poll 20–30 s); `availableAmount` is the maker's collateral budget, not contracts; the book carries binaries (e.g. "ETH 2460 Up 1D"); tradeable set is USDC-collateral orders with `isLong: false` (~200 of 367); position read-back after a fill needs `api.triggerIndexerUpdate()` and polling; the seven `PHYSICAL_*` multi-leg implementations are not deployed on Base; RFQ has had no offers since 2026-08-20. Treat each as a hypothesis until our own tiny fills confirm it.
 
 ## Build order (owner-approved 2026-09-05, revised the same day)
 
 Owner's order: **UI first, then Thetanuts core logic, then DB and socials.** Concretely:
-1. **Core trade logic** in `packages/thetanuts` (framework-agnostic): read client, market universe from live orders, quote with recomputed premium, approve + fill calldata for viem, receipt parsing, position readers, payoff math. Offline tests.
-2. **UI on typed mock data** in `apps/web` from the mockup: `/`, `/t/[slug]`, `/u/[handle]`, `/portfolio`, `/new`. No DB, no wallet library yet.
-3. **Wire UI to logic + wallet** (wagmi + viem, Coinbase Smart Wallet). Real fills with tiny size on mainnet to settle the UNVERIFIED list.
-4. **Foundation + socials**: Drizzle schema (users, theses, positions, follows, comments, activity), sign-in with wallet, follow, comment, activity, leaderboard, trending, creator payouts.
+1. **Core trade logic** in `packages/thetanuts` (framework-agnostic) — buy side DONE (GREEN); sell side in review: read client, market universe from live orders, quote with recomputed premium, approve + fill calldata for viem, receipt parsing, position readers, payoff math. Offline tests.
+2. **UI on typed mock data** in `apps/web` from the mockup: `/`, `/t/[slug]`, `/u/[handle]`, `/portfolio`, `/new` — DONE (rounds 1–5 GREEN, merged).
+3. **Wire UI to logic + wallet** (wagmi + viem, Coinbase Smart Wallet; providers already in place from the teammate) — NEXT, after the rewire. Real fills with tiny size on mainnet to settle the UNVERIFIED list.
+4. **Foundation + socials**: Drizzle schema (users, theses, positions, follows, comments, activity) — DONE (GREEN, merged); still to do: sign-in with wallet (connect creates the profile), follow, comment, activity, leaderboard, trending. Creator payouts: roadmap.
 5. **Polish and ship**: Open Graph share cards, verified badges, Vercel.
 
 Parallel track (teammate): AI track per `docs/PRD.md` v2.0 (`/agent` workspace, `apps/web/src/lib/thetanuts/*`, `packages/db/src/schema/agent.ts`, migration `0000_agent_tables`). Scope ruling above.
 
-Shared contract with the teammate: `docs/PRD.md` §10.2 defines `ThesisAiContext`; the core side (us) builds and validates it and provides a fixture plus server function. Neither side changes it without telling the other and updating the PRD (PRD §15).
+Shared contract with the teammate: `docs/PRD.md` v2.0 §10.3 (v1.0 §10.2) defines `ThesisAiContext`; the core side (us) builds and validates it and provides a fixture plus server function. Neither side changes it without telling the other and updating the PRD (PRD §15).
 
 ## How work is done here (owner rules, verbatim where it matters)
 
@@ -115,7 +115,7 @@ cd packages/db && bunx drizzle-kit migrate                    # apply it
 
 # Vercel
 bun run deploy:setup        # vercel link (once)
-bun run env:preview | env:production   # push apps/web/.env to Vercel
+bun run env:preview | env:production   # push apps/web/.env to Vercel (scripts/sync-vercel-env.ts reads .env only, NOT .env.local)
 bun run deploy | deploy:prod | deploy:check
 ```
 
@@ -129,12 +129,12 @@ Turborepo monorepo, all TypeScript, ESM. Workspaces: `apps/*` and `packages/*`. 
 apps/web             Next.js 16 app (App Router, React 19, React Compiler on, typedRoutes on)
 packages/thetanuts   @nuts/thetanuts: framework-agnostic trade logic on the Thetanuts SDK (+ bun tests)
 packages/db          Drizzle ORM + node-postgres. Schema in src/schema, migrations in src/migrations
-packages/env         Validated env via t3-env. `@nuts/env/server` (DATABASE_URL, NODE_ENV) and `@nuts/env/web`
+packages/env         Validated env via t3-env. `@nuts/env/server` (DATABASE_URL, DIRECT_DATABASE_URL?, NODE_ENV, OPENROUTER_API_KEY, AGENT_MODEL, AGENT_GATE_MODEL, BASE_RPC_URL, THETANUTS_ORDERS_URL), `@nuts/env/web`, `@nuts/env/load` (repo-relative .env.local/.env loader)
 packages/ui          Shared shadcn/ui components on @base-ui/react + Tailwind v4. Exports globals.css, components/*, lib/*, hooks/*
 packages/config      Shared tsconfig.base.json (strict, noUncheckedIndexedAccess, noUnused*)
-docs/                Tracked knowledge: SDK research report, UI mockup
+docs/                Tracked knowledge: PRD.md (v2.0), HANDOVER.md (teammate), SDK research report, UI mockup
 scripts/             sync-vercel-env.ts (used by env:preview / env:production)
-.research/, .demo/   Gitignored: sol briefs and transcripts, reference videos and screenshots
+.research/, .demo/   Gitignored: Astra/sol briefs, transcripts, review diffs, findings; reference videos and screenshots
 ```
 
 How the pieces connect:
@@ -146,14 +146,14 @@ How the pieces connect:
 - **Bun installs into an isolated store**: packages resolve through `node_modules/.bun/<name>@<version>/node_modules/...` and per-package `node_modules` symlinks, not a flat root `node_modules/<name>`.
 - **UI imports**: `import { Button } from "@nuts/ui/components/button"`. The web app's `index.css` imports `@nuts/ui/globals.css`; design tokens live in `packages/ui/src/styles/globals.css`.
 - **Path aliases** in `apps/web`: `@/*` → `apps/web/src/*`, `@nuts/ui/*` → `packages/ui/src/*`.
-- **Providers**: `apps/web/src/components/providers.tsx` wraps the app in next-themes and the sonner `Toaster`. Wallet and query providers belong there when added.
+- **Providers**: `apps/web/src/components/providers.tsx` wraps the app in the teammate's `WagmiProvider` (`apps/web/src/lib/wagmi.ts`: Base only, injected + Coinbase Smart Wallet, cookie storage) and `QueryClientProvider`, then the forced-dark next-themes `ThemeProvider` and the sonner `Toaster`.
 - **Vercel**: `vercel.json` deploys `apps/web` as the single `web` service with a root-level `bun install`.
 
 ## Next.js version warning
 
 `apps/web/AGENTS.md` is auto-generated by `next dev` and says this Next.js 16 differs from training data. Before writing Next.js code, read the relevant guide under `apps/web/node_modules/next/dist/docs/`. Do not delete that file; `next dev` re-creates it.
 
-## Current state (keep this true; last updated 2026-09-05 11:09 +0800)
+## Current state (keep this true; last updated 2026-09-05 11:10 +0800)
 
 - **`main` = teammate's AI track (origin/main `c30a4e2`) + UI rounds 1–4 (`b88b580`) + DB rounds 1–6 (`0fbd4d6`).** Push of main authorized by the owner on DB GREEN and executed after this update; from here on pushing waits for an explicit owner command again. Fetch origin at the start of every work block.
 - **Process**: writers are codex `gpt-6-astra` low; reviews are Claude hands-on + Astra medium; no Opus workers. Codex sandboxes have no network, no DB, and cannot write a worktree's git lock: writers leave trees uncommitted, Claude verifies live and commits. Queue launches with the wrapper counter `pgrep -f '^/bin/bash .*run-astra-'` (never a pattern that matches Claude's own wait shells). Briefs pass values via environment variables to Python, never through unquoted heredocs (a backtick once spliced a `git diff` into a brief).
@@ -163,5 +163,5 @@ How the pieces connect:
 - **Rewire** (owner order): checkpoint `f932072` on branch `rewire` (agent `getThesisContext` tool reads `@nuts/db`). Order adapter and sizing (B/C) wait for core r6 GREEN, then both sides on `@nuts/thetanuts` with honest sell-side copy in the agent tools.
 - **Revenue**: Thetanuts referrer fees (docs "Referrer Fees"): pass the platform address on every fill; fee `min(0.06% notional, 12.5% premium)`; our share `fee × splitBps / 10000` accrues per collateral token; self-claim with `claimFees(token)` FROM the referrer wallet (it must transact on Base and hold gas). The OptionBook owner must whitelist the address and set the split; unwhitelisted = 0 (seen live). Memo: `.research/thetanuts/monetisation-memo.md`. **Platform referrer wallet (owner, 2026-09-05): `THESIS_REFERRER = 0xd5E66B6d957C2d5e6C8c167707a49a029D1247dd`** (EOA on Base; measured at 11:0x +08: `referrerFeeSplitBps` = 0, i.e. not yet whitelisted; ETH balance 0, needs gas before any `claimFees`). Pass it on every quote and fill; owner still has to request the whitelist from Thetanuts. Creator payouts: roadmap only.
 - **Verified market facts** (2026-09-05, decoded production fills; `.research/thetanuts/finding-fill-debits.md`, `finding-isLong-side.md`): raw `isLong` is the maker's side; taker-buy pays `contracts × price / 1e8` (fee carved out of what the maker receives); taker-sell put posts `strike × contracts / 1e8`; RANGER seller posts inner width × contracts; contract units 1e6 for USDC-family collateral. Still UNVERIFIED: call-side and spread seller collateral beyond RANGER, non-6-decimal contract units, on-chain rounding, the fee's notional branch, signature-expiry timing (teammate: 59–113 s).
-- **Open owner items**: referrer wallet + Thetanuts whitelist; every `TODO-OWNER` (budget presets, trending/ending rules, leaderboard formula, content limits, lock/statement timeouts); `ThesisStatus` display mapping; `/new` composer copy; single detail fixture; connected user unnamed; gap G1 (AI context for draft/pending theses).
+- **Open owner items**: Thetanuts whitelist of the referrer wallet (given) and gas for it; every `TODO-OWNER` (budget presets, trending/ending rules, leaderboard formula, content limits, lock/statement timeouts); `ThesisStatus` display mapping; `/new` composer copy; single detail fixture; connected user unnamed; gap G1 (AI context for draft/pending theses).
 - **Incidents today**: machine crash ~05:34 (Astra runs relaunched fresh; OrbStack needs `open -a OrbStack` after reboot); a UI worker's `pkill -f "turbo run dev -F web"` killed the owner's unrelated `naise-ai` dev server (~04:20); Claude briefs twice named non-existent things (`brief-db-writer.md`, `positions.updated_at`) — every name in a brief is verified at the bytes first.

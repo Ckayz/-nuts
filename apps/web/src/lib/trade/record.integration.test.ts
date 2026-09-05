@@ -550,11 +550,14 @@ describeLive("money-path fences (C1 receipt binding, C2 hash squatting, C3 ticke
 
 	test("C1: a DIFFERENT strike in the snapshot is refused by the decoded calldata", async () => {
 		const { fill, user, ticket, input, txHash } = await buyFixture();
-		const raw = ticket.orderSnapshot.rawApiData;
+		const raw = fill.order.rawApiData;
 		if (!raw) throw new Error("fixture snapshot has no rawApiData");
 		const snapshot = {
 			...ticket.orderSnapshot,
-			rawApiData: { ...raw, strikes: raw.strikes.map((strike) => (BigInt(strike) + 100_000_000n).toString()) },
+			rawApiData: {
+				...ticket.orderSnapshot.rawApiData,
+				strikes: raw.strikes.map((strike) => (BigInt(strike) + 100_000_000n).toString()),
+			},
 		} as typeof ticket.orderSnapshot;
 		// The transaction IS a direct `fillOrder`, so the decoded order is
 		// compared field by field; the premium still reproduces, which is exactly
@@ -822,6 +825,34 @@ describeLive("money-path fences (C1 receipt binding, C2 hash squatting, C3 ticke
 		expect(row?.status).toBe("confirmed");
 		expect(row?.premium).toBe(expectation.premium.toString());
 		await dropPosition(retry.positionId);
+	}, 60_000);
+
+	test("C6: a share card that THROWS does not reject the recording", async () => {
+		const { expectation, fill, user, ticket, input, txHash } = await buyFixture();
+		// The real failure mode: `fillCard` runs after the confirming transaction
+		// commits, and a throw there used to reject the whole action. The browser
+		// would return to idle with no position id and the next "Trade" click
+		// would send a SECOND fill against money already spent.
+		const result = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(ticket), txHash },
+			directReader(fill, input),
+			async () => {
+				throw new Error("card builder exploded");
+			},
+		);
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("the card must not fail the recording");
+		expect(result.status).toBe("confirmed");
+		expect(result.positionId).toBeTruthy();
+		expect(result.txHash).toBe(txHash);
+		// The card is the only thing lost; everything else is intact.
+		expect(result.card).toBeNull();
+		expect(result.settled?.premium).toBe(expectation.premium.toString());
+		const [row] = await db.select().from(positions).where(eq(positions.id, result.positionId));
+		expect(row?.status).toBe("confirmed");
+		expect(row?.premium).toBe(expectation.premium.toString());
+		await dropPosition(result.positionId);
 	}, 60_000);
 
 	test("C3: two concurrent confirmations write ONE row and ONE activity entry", async () => {

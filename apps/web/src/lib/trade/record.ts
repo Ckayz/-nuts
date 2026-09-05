@@ -187,6 +187,7 @@ export async function recordTradeFor(
 	session: { userId: string; walletAddress: string } | null,
 	input: RecordTradeInput,
 	reader: ChainReader = publicClient(),
+	buildCard: CardBuilder = fillCard,
 ): Promise<RecordResult> {
 	if (session === null) return fail("NO_SESSION", "Sign in with your wallet first.");
 	const ticket = decodeTradeTicket(input.token);
@@ -211,7 +212,7 @@ export async function recordTradeFor(
 	if (pending.status !== "pending") {
 		// Already recorded: the partial unique index makes this idempotent, so a
 		// retry returns the stored row rather than a second one.
-		return await result(ticket, pending, txHash);
+		return await result(ticket, pending, txHash, buildCard);
 	}
 	// C3. A pending row created by a DIFFERENT ticket must not be confirmed with
 	// this ticket's economics. Rows written before migration 0008 carry no
@@ -234,7 +235,7 @@ export async function recordTradeFor(
 			.where(and(eq(positions.id, pending.id), eq(positions.walletAddress, ticket.wallet)))
 			.returning();
 		if (!row) throw new Error(`Position ${pending.id} vanished while marking it failed`);
-		return await result(ticket, row, txHash);
+		return await result(ticket, row, txHash, buildCard);
 	}
 
 	const event = matchFillEvent(receipt.logs, ticket, snapshot);
@@ -332,14 +333,14 @@ export async function recordTradeFor(
 	if (updated === null) {
 		const [current] = await db.select().from(positions).where(eq(positions.id, pending.id)).limit(1);
 		if (!current) throw new Error(`Position ${pending.id} vanished while confirming`);
-		return await result(ticket, current, txHash);
+		return await result(ticket, current, txHash, buildCard);
 	}
 
 	// FOLLOW-UP: `api.triggerIndexerUpdate()` then polling `getIndexedPositions`
 	// is what moves a row from `confirmed` to `indexed` (teammate-measured, not
 	// re-verified here). It is deliberately not on this path: confirmation must
 	// not wait on an indexer. See `markIndexed` below.
-	return await result(ticket, updated, txHash);
+	return await result(ticket, updated, txHash, buildCard);
 }
 
 /**
@@ -424,17 +425,33 @@ async function fillCard(ticket: TradeTicketPayload, row: Position): Promise<Fill
 	return { ...card, positionPath: `/p/${row.id}`, composePath: `/new?link=/p/${row.id}` };
 }
 
-/** C6. `fillCard`, but a failure yields null instead of rejecting the action. */
-async function safeFillCard(ticket: TradeTicketPayload, row: Position): Promise<FillCard | null> {
+/**
+ * C6. The card builder, as a seam — the same shape as the `session` and
+ * `reader` seams above, so a test can supply one that throws and prove the
+ * recording survives it. `recordTrade` always passes the real `fillCard`.
+ */
+export type CardBuilder = (ticket: TradeTicketPayload, row: Position) => Promise<FillCard>;
+
+/** `fillCard`, but a failure yields null instead of rejecting the action. */
+async function safeFillCard(
+	build: CardBuilder,
+	ticket: TradeTicketPayload,
+	row: Position,
+): Promise<FillCard | null> {
 	try {
-		return await fillCard(ticket, row);
+		return await build(ticket, row);
 	} catch (error) {
 		console.error(`Could not build the share card for position ${row.id}:`, error);
 		return null;
 	}
 }
 
-async function result(ticket: TradeTicketPayload, row: Position, txHash: string): Promise<RecordResult> {
+async function result(
+	ticket: TradeTicketPayload,
+	row: Position,
+	txHash: string,
+	build: CardBuilder,
+): Promise<RecordResult> {
 	return {
 		ok: true,
 		status: row.status === "failed" ? "failed" : "confirmed",
@@ -446,7 +463,7 @@ async function result(ticket: TradeTicketPayload, row: Position, txHash: string)
 		// error) must NOT reject the action: the browser would return to idle and
 		// the next Trade click would send a SECOND fill. The caller has
 		// `positionId` and can open `/p/<id>`, which builds the same card.
-		card: row.status === "failed" ? null : await safeFillCard(ticket, row),
+		card: row.status === "failed" ? null : await safeFillCard(build, ticket, row),
 		settled:
 			row.status === "failed"
 				? null

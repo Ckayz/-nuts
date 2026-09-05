@@ -106,6 +106,33 @@ const NEYNAR_SEARCH_URL = "https://api.neynar.com/v2/farcaster/cast/search";
 export const FARCASTER_SEARCH_QUERY = "implied volatility";
 
 /**
+ * The two things asked about each asset, and why there are two.
+ *
+ * MEASURED 2026-09-06, each with the `after:` window and the filters below:
+ *
+ *   BTC volatility  40 raw -> 5 kept, 0-8 days     BTC price   40 -> 5, 1-4 days
+ *   ETH volatility  40 raw -> 5 kept, 14-22 days   ETH price   40 -> 5, 4-6 days
+ *   SOL volatility   0 raw -> 0                    SOL price   40 -> 5, 5-13 days
+ *   AVAX volatility  0 raw -> 0                    AVAX price   9 -> 1
+ *   XRP volatility   0 raw -> 0                    XRP price    1 -> 1
+ *
+ * `volatility` carries the better content — it is what surfaced an actual Base
+ * options quote ("$ETH at $2,281 — Covered call ($2,300): 71% APR") — but it
+ * returns NOTHING for SOL, AVAX or XRP. `price` returns something for all six
+ * live assets. The asset list is derived from the book, so tomorrow's deepest
+ * market may be one of those; asking both is what keeps the rail from going
+ * empty on that day. TODO-OWNER: the two terms.
+ */
+const ASSET_TERMS = ["volatility", "price"] as const;
+
+/**
+ * How many markets the rail follows. Two, per the owner: the two deepest are
+ * 74.6% of the live book. Each asset costs two search requests.
+ * TODO-OWNER: how many markets the rail should follow.
+ */
+export const FARCASTER_ASSET_COUNT = 2;
+
+/**
  * How far back the rail will look, as an `after:YYYY-MM-DD` operator.
  *
  * MEASURED: the newest genuine options post found in any probe was 30 days old.
@@ -183,6 +210,35 @@ export function citesALevel(text: string): boolean {
 }
 
 /**
+ * Round-robin the pages: first cast of each query, then the second of each.
+ *
+ * MEASURED 2026-09-06: concatenating the pages instead filled all five rail
+ * slots with BTC and left ETH — the second-deepest market, a third of the book
+ * — with none, because BTC's page is returned first and is never short. The
+ * rail is supposed to reflect the markets this product trades, so it must not
+ * be a queue.
+ *
+ * Deduped on `hash` here so a cast returned by two queries cannot consume two
+ * positions before `selectRelevantCasts` ever sees it. No per-asset QUOTA is
+ * imposed: an asset with nothing worth showing yields its turn rather than
+ * holding a slot open for a worse cast.
+ */
+export function interleavePages(pages: readonly (readonly FarcasterRailCast[])[]): FarcasterRailCast[] {
+	const merged: FarcasterRailCast[] = [];
+	const seen = new Set<string>();
+	const deepest = pages.reduce((max, page) => Math.max(max, page.length), 0);
+	for (let rank = 0; rank < deepest; rank++) {
+		for (const page of pages) {
+			const cast = page[rank];
+			if (cast === undefined || seen.has(cast.hash)) continue;
+			seen.add(cast.hash);
+			merged.push(cast);
+		}
+	}
+	return merged;
+}
+
+/**
  * Choose what the rail shows, in the order Neynar returned it.
  *
  * Pure, so the rules are testable without the network. Every rejection is one
@@ -232,7 +288,29 @@ export function searchQueryFor(now: Date = new Date(), maxAgeDays = FARCASTER_MA
 	return `${FARCASTER_SEARCH_QUERY} after:${day}`;
 }
 
-const NEYNAR_CHANNEL_FEED_URL = "https://api.neynar.com/v2/farcaster/feed/channels/";
+/**
+ * One query per asset per term — never a combined one.
+ *
+ * MEASURED: hybrid mode ANDs its terms, so `BTC ETH volatility` returns ZERO
+ * casts, as does any third term. Each query here is therefore exactly two words
+ * plus the dated window, and asking about two assets means four requests.
+ *
+ * An empty asset list falls back to the generic query rather than emitting
+ * none: the book being unreadable is not a reason for the rail to go blank, and
+ * "implied volatility" is already proven to return real casts.
+ */
+export function searchQueriesFor(
+	assets: readonly string[],
+	now: Date = new Date(),
+	maxAgeDays = FARCASTER_MAX_AGE_DAYS,
+): string[] {
+	const since = new Date(now.getTime() - maxAgeDays * 86_400_000);
+	const day = since.toISOString().slice(0, 10);
+	const clean = assets.map((asset) => asset.trim()).filter((asset) => asset !== "");
+	if (clean.length === 0) return [searchQueryFor(now, maxAgeDays)];
+	return clean.flatMap((asset) => ASSET_TERMS.map((term) => `${asset} ${term} after:${day}`));
+}
+
 
 /** A cast reduced to exactly what the rail draws. Nothing here is derived or guessed. */
 export interface FarcasterRailCast {
@@ -374,6 +452,37 @@ export function parseCast(row: unknown, limit = FARCASTER_TEXT_LIMIT): Farcaster
 }
 
 /**
+ * One response page, understood but NOT yet chosen from.
+ *
+ * Split out because the rail now issues several queries and the dedupe and
+ * one-cast-per-author rules have to apply ACROSS them: filtering each page on
+ * its own would let `BTC price` and `BTC volatility` each contribute the same
+ * cast, and the same author twice.
+ */
+export function readCastPage(
+	body: unknown,
+	textLimit = FARCASTER_TEXT_LIMIT,
+): { ok: true; casts: FarcasterRailCast[] } | { ok: false; detail: string } {
+	const parsed = feedResponseSchema.safeParse(body);
+	if (!parsed.success) {
+		return { ok: false, detail: "The Neynar response carried no `casts` array, so the Farcaster feed could not be read." };
+	}
+	const rows = parsed.data.casts;
+	const understood: FarcasterRailCast[] = [];
+	for (const row of rows) {
+		const cast = parseCast(row, textLimit);
+		if (cast !== null) understood.push(cast);
+	}
+	if (understood.length === 0 && rows.length > 0) {
+		return {
+			ok: false,
+			detail: `Neynar returned ${rows.length} cast(s) and none matched the documented shape, so the Farcaster feed could not be read.`,
+		};
+	}
+	return { ok: true, casts: understood };
+}
+
+/**
  * Turn a decoded response body into rail state.
  *
  * A body that is not a `{casts: [...]}` object is a shape this adapter does not
@@ -433,30 +542,23 @@ export function parseFarcasterFeed(
  * No key means no request is made at all — the rail says it is not configured
  * and nothing reaches the network.
  */
-export async function loadFarcasterRail(
-	apiKey: string | undefined,
-	options: {
-		limit?: number;
-		query?: string;
-		now?: Date;
-		minFollowers?: number;
-		maxAgeDays?: number;
-		fetchImpl?: typeof fetch;
-	} = {},
-): Promise<FarcasterRailState> {
-	if (apiKey === undefined || apiKey.trim() === "") return { status: "unconfigured" };
-	const limit = options.limit ?? FARCASTER_RAIL_LIMIT;
+/** One search request. Returns the page it understood, or why it could not. */
+async function fetchOnePage(
+	apiKey: string,
+	query: string,
+	limit: number,
+	request: typeof fetch,
+): Promise<{ ok: true; casts: FarcasterRailCast[] } | { ok: false; detail: string }> {
 	const url = new URL(NEYNAR_SEARCH_URL);
-	url.searchParams.set("q", options.query ?? searchQueryFor(options.now));
+	url.searchParams.set("q", query);
 	// hybrid, not semantic: semantic returned 470-511 day old casts from
 	// 0-follower accounts, and ignored sort_type. See FARCASTER_SEARCH_QUERY.
 	url.searchParams.set("mode", "hybrid");
-	// Over-fetch, because the filters below reject most of a page: the seven
-	// casts of one probe collapsed to one after dedupe. Documented bounds are
-	// 1..100, and cast search is the one endpoint rate-limited at 120 RPM.
+	// Over-fetch, because the filters reject most of a page: one probe's seven
+	// casts collapsed to one after dedupe. Documented bounds are 1..100, and
+	// cast search is the one endpoint rate-limited at 120 RPM.
 	url.searchParams.set("limit", String(Math.min(Math.max(limit * OVERFETCH, 1), 100)));
 
-	const request = options.fetchImpl ?? fetch;
 	let response: Response;
 	try {
 		response = await request(url, {
@@ -465,27 +567,77 @@ export async function loadFarcasterRail(
 			next: { revalidate: FARCASTER_REVALIDATE_SECONDS },
 		});
 	} catch (error) {
-		return {
-			status: "unavailable",
-			detail: `Neynar could not be reached (${error instanceof Error ? error.message : String(error)}), so the Farcaster feed could not be read.`,
-		};
+		return { ok: false, detail: `Neynar could not be reached (${error instanceof Error ? error.message : String(error)}).` };
 	}
-	if (!response.ok) {
-		// The status is deliberately not shown to visitors; the rail copy is fixed.
-		return { status: "unavailable", detail: `Neynar returned HTTP ${response.status}.` };
-	}
+	if (!response.ok) return { ok: false, detail: `Neynar returned HTTP ${response.status}.` };
 	let body: unknown;
 	try {
 		body = await response.json();
 	} catch {
-		return { status: "unavailable", detail: "Neynar returned a body that is not JSON." };
+		return { ok: false, detail: "Neynar returned a body that is not JSON." };
 	}
-	return parseFarcasterFeed(body, {
-		limit,
-		minFollowers: options.minFollowers,
-		maxAgeDays: options.maxAgeDays,
-		now: options.now,
-	});
+	return readCastPage(body);
+}
+
+/**
+ * The whole read, with the key passed in so the unconfigured path is testable
+ * without a live environment. `farcasterRail()` below is what pages call.
+ *
+ * No key means no request is made at all. Otherwise one request per query —
+ * two per asset, because hybrid mode ANDs its terms and a combined query
+ * returns zero — issued together, merged in query order, and filtered ONCE
+ * over the merged pool so dedupe and one-cast-per-author apply across queries.
+ *
+ * A query that fails does not sink the rail: a partial answer is still a true
+ * one. Only when EVERY query fails is the feed genuinely unreadable.
+ *
+ * Cost: 4 requests per 300s revalidate is 0.8/min against a documented 120 RPM
+ * cast-search cap. Per-request credit price is NOT published by Neynar, so the
+ * share of the monthly allowance is not estimated here.
+ */
+export async function loadFarcasterRail(
+	apiKey: string | undefined,
+	options: {
+		limit?: number;
+		assets?: readonly string[];
+		queries?: readonly string[];
+		now?: Date;
+		minFollowers?: number;
+		maxAgeDays?: number;
+		fetchImpl?: typeof fetch;
+	} = {},
+): Promise<FarcasterRailState> {
+	if (apiKey === undefined || apiKey.trim() === "") return { status: "unconfigured" };
+	const limit = options.limit ?? FARCASTER_RAIL_LIMIT;
+	const queries = options.queries ?? searchQueriesFor(options.assets ?? [], options.now, options.maxAgeDays);
+	const request = options.fetchImpl ?? fetch;
+
+	const pages = await Promise.all(queries.map((query) => fetchOnePage(apiKey, query, limit, request)));
+
+	const understood: FarcasterRailCast[][] = [];
+	let lastFailure: string | null = null;
+	for (const page of pages) {
+		if (page.ok) understood.push(page.casts);
+		else lastFailure = page.detail;
+	}
+	// Interleaved, not concatenated: see interleavePages.
+	const merged = interleavePages(understood);
+	const anySucceeded = pages.some((page) => page.ok);
+	if (!anySucceeded) {
+		return {
+			status: "unavailable",
+			detail: lastFailure ?? "The Farcaster feed could not be read.",
+		};
+	}
+	return {
+		status: "ready",
+		casts: selectRelevantCasts(merged, {
+			limit,
+			minFollowers: options.minFollowers,
+			maxAgeDays: options.maxAgeDays,
+			now: options.now,
+		}),
+	};
 }
 
 /**
@@ -493,5 +645,24 @@ export async function loadFarcasterRail(
  * module is `server-only` and the rail component receives already-reduced casts.
  */
 export async function farcasterRail(limit = FARCASTER_RAIL_LIMIT): Promise<FarcasterRailState> {
-	return loadFarcasterRail(env.NEYNAR_API_KEY, { limit });
+	// The assets are resolved HERE rather than passed down from the page, and
+	// that costs nothing: `readRailAssets` reads the same `getOrderSnapshot`
+	// cache the market summaries already read, so no second network round trip
+	// happens and the page's three reads still run in parallel. Threading the
+	// assets through the page would have serialised the rail behind the book.
+	//
+	// An empty list is the honest answer in mock mode and whenever the book is
+	// unreadable; `searchQueriesFor` falls back to the generic query for it.
+	const { getAvailableAssets, isFeedUnavailable } = await import("@/lib/thetanuts/orders");
+	const { rankAssets } = await import("./assets");
+	let assets: string[] = [];
+	try {
+		const rows = await getAvailableAssets();
+		if (!isFeedUnavailable(rows)) assets = rankAssets(rows, FARCASTER_ASSET_COUNT);
+	} catch {
+		// The book being unreadable is not this rail's story to tell; it falls
+		// back to the generic query rather than reporting somebody else's outage.
+		assets = [];
+	}
+	return loadFarcasterRail(env.NEYNAR_API_KEY, { limit, assets });
 }

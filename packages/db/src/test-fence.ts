@@ -151,9 +151,16 @@ export function databaseUrlRefusal(
  * preload module is evaluated. (`@nuts/env/load` is the mechanism only for
  * `packages/db`, whose directory has no `.env`.) So the question "did a human
  * pass this?" is answered by reading the env files back and comparing:
- * `envFileValues()` in `packages/env/src/load.ts`. The one false "explicit" this
- * can produce — an operator who exports a value byte-identical to the env file's
- * — still has to pass the loopback fence above.
+ * `envFileValues()` in `packages/env/src/load.ts`.
+ *
+ * That comparison is one-directional, and the direction is the SAFE one. It can
+ * never call an unchosen database chosen; it can only call a chosen one
+ * unchosen — an operator who exports a value byte-identical to the env file's is
+ * indistinguishable from one who exports nothing, so the run skips. (An earlier
+ * version of this comment called that "the one false explicit", which is
+ * backwards.) A2-3 / CL-8, one-shot review pass 2: the skip is right, but it
+ * used to be announced with a sentence that was false half the time, so the
+ * branch below now says only what is actually known.
  *
  * Step 3 also sets `SKIP_ENV_VALIDATION` when the operator has not, because
  * `DATABASE_URL` is a required key in `@nuts/env/server` and
@@ -176,10 +183,22 @@ export async function fenceTestDatabase(): Promise<void> {
 	const selectedByHand = resolved !== undefined && resolved.trim() !== "" && resolved !== fromFiles;
 	if (selectedByHand) return;
 
+	// Reaching here with a non-empty value means exactly one thing: it EQUALS the
+	// env file's — which is what an operator who exported that same URL produces
+	// AND what an operator who exported nothing produces, because by this point the
+	// file has been read into the environment either way. The two are genuinely
+	// indistinguishable, so the message must be true of both.
+	//
+	// A2-3 / CL-8 (one-shot review pass 2): the old line asserted "No DATABASE_URL
+	// was passed to this run", which is a false claim in half the cases that print
+	// it. Say what is actually known — the value is the file's, and nothing here
+	// can tell whether a human chose it — and name the way out.
 	if (resolved !== undefined && resolved.trim() !== "") {
 		console.error(
-			"No DATABASE_URL was passed to this run, so the env file's value is IGNORED and the live suites skip. " +
-				"Pass DATABASE_URL=<migrated loopback throwaway> to run them.",
+			"DATABASE_URL is exactly the value this repository's env file supplies, so this run cannot tell whether " +
+				"anyone chose it, and treats it as unselected: the live suites SKIP. Export a DIFFERENT value — a " +
+				"migrated loopback throwaway database, e.g. postgresql://postgres:postgres@127.0.0.1:54322/<throwaway> " +
+				"— to run them.",
 		);
 	}
 	process.env.DATABASE_URL = "";

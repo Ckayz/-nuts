@@ -1,5 +1,5 @@
 import { relations, sql } from "drizzle-orm";
-import { boolean, check, integer, jsonb, numeric, pgTable, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { boolean, check, index, integer, jsonb, numeric, pgTable, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { activity } from "./activity";
 import { likes } from "./likes";
 import { comments } from "./comments";
@@ -47,6 +47,11 @@ export const theses = pgTable(
   },
   (table) => [
     uniqueIndex("theses_slug_unique").on(table.slug),
+    // The market page lists every open thesis tagged to one asset, newest
+    // first. Without this the query is a full scan of the table, because
+    // `tagged_asset` carried no index at all: the page used to filter the
+    // newest 50 site-wide posts in JS instead, which silently hid older posts.
+    index("theses_tagged_asset_created_at_idx").on(table.taggedAsset, table.createdAt),
     check("theses_slug_format", sql`${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`),
     check("theses_headline_nonblank", sql`btrim(${table.headline}, ${headlineWhitespaceSql}) <> ''`),
     check("theses_structure_all_or_nothing", sql`(${table.direction} is null and ${table.underlyingAsset} is null and ${table.expiryAt} is null and ${table.productType} is null and ${table.isCall} is null and ${table.isLong} is null and ${table.strikes} is null and ${table.strikeDecimals} is null and ${table.collateralAddress} is null and ${table.collateralSymbol} is null and ${table.collateralDecimals} is null and ${table.creatorOrderSnapshot} is null) or (${table.direction} is not null and ${table.underlyingAsset} is not null and ${table.expiryAt} is not null and ${table.productType} is not null and ${table.isCall} is not null and ${table.isLong} is not null and ${table.strikes} is not null and ${table.strikeDecimals} is not null and ${table.collateralAddress} is not null and ${table.collateralSymbol} is not null and ${table.collateralDecimals} is not null and ${table.creatorOrderSnapshot} is not null)`),

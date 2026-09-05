@@ -1,0 +1,1 @@
+CREATE INDEX "theses_tagged_asset_created_at_idx" ON "theses" USING btree ("tagged_asset","created_at");

@@ -21,8 +21,9 @@ import { comments, likes, positions, theses, users } from "@nuts/db/schema/index
 import type { NewPosition, NewThesis } from "@nuts/db/schema/index";
 import { encodeFillEventSnapshot } from "@nuts/db/fill-event-snapshot";
 import { orderSnapshotV1Schema } from "@nuts/db/order-snapshot";
+import { FEED_PAGE_SIZE } from "./constants";
 import type { Database } from "./reads";
-import { getCreator, getPortfolio, getThread, leaderboard, listFeed, listPositionsByIds, trending } from "./reads";
+import { getCreator, getPortfolio, getThread, leaderboard, listFeed, listPositionsByIds, listThesesByAsset, trending } from "./reads";
 import { readPositionDetail } from "@/lib/position/read";
 import { thesisWithOrigin } from "@/lib/display";
 
@@ -190,6 +191,57 @@ if (!databaseUrl) {
 			}
 		});
 	}
+
+	describe("listThesesByAsset", () => {
+		probe("returns only the asset's open posts", async (tx) => {
+			const btc = await listThesesByAsset("BTC", { database: tx });
+			expect(btc.map((thesis) => thesis.id)).toContain(T_TAGGED);
+			// T_TEXT carries no tag and T_BACKED is tagged elsewhere by STRUCTURE.
+			expect(btc.map((thesis) => thesis.id)).not.toContain(T_TEXT);
+			// A draft is never public, on this list as on every other.
+			expect(btc.map((thesis) => thesis.id)).not.toContain(T_DRAFT);
+		});
+
+		probe("the asset is matched uppercase, as the column stores it", async (tx) => {
+			// `theses_tagged_asset_uppercase` enforces the stored case, so lowering
+			// the column would both miss and defeat the index.
+			for (const spelling of ["btc", "BTC", " Btc "]) {
+				const rows = await listThesesByAsset(spelling, { database: tx });
+				expect(rows.map((thesis) => thesis.id)).toContain(T_TAGGED);
+			}
+			expect(await listThesesByAsset("", { database: tx })).toEqual([]);
+			expect(await listThesesByAsset("   ", { database: tx })).toEqual([]);
+		});
+
+		probe("a post older than a whole page of site-wide posts still appears", async (tx) => {
+			// THE BUG THIS REPLACES. The market page used to take listFeed() — the
+			// newest FEED_PAGE_SIZE posts across EVERY market — and filter by asset
+			// in JS, so a BTC post that had fallen past that window vanished from
+			// the BTC page entirely. Bury T_TAGGED under a full page of newer posts
+			// from other markets and it must still be found.
+			const filler = Array.from({ length: FEED_PAGE_SIZE + 5 }, (_, index) => ({
+				id: `33330000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+				slug: `filler-post-${index}`,
+				creatorUserId: ALICE,
+				headline: `Filler ${index}`,
+				status: "open" as const,
+				publishedAt: new Date(),
+				// Newer than the seeded posts, and tagged to a DIFFERENT market.
+				createdAt: new Date(Date.now() + (index + 1) * 60_000),
+				taggedAsset: "ETH",
+			}));
+			await tx.insert(theses).values(filler as NewThesis[]);
+
+			// The old approach, reproduced: it loses the post.
+			const siteWide = await listFeed({ database: tx });
+			expect(siteWide.length).toBe(FEED_PAGE_SIZE);
+			expect(siteWide.map((thesis) => thesis.id)).not.toContain(T_TAGGED);
+
+			// The query does not.
+			const btc = await listThesesByAsset("BTC", { database: tx });
+			expect(btc.map((thesis) => thesis.id)).toContain(T_TAGGED);
+		});
+	});
 
 	describe("listFeed", () => {
 		probe("returns the three open posts and not the draft", async (tx) => {

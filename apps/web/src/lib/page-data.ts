@@ -105,6 +105,13 @@ export interface CreatorPageData {
 	following: boolean;
 	self: boolean;
 	creator: View.Creator;
+	/**
+	 * Owner decision 6 (2026-09-06): the stored profile bio, or null. Rendered
+	 * under the name and handle by `components/creator/creator-stats.tsx`; empty
+	 * and whitespace-only values render nothing. Mock mode has no bio column, so
+	 * the fixtures answer null.
+	 */
+	bio: string | null;
 	callouts: View.Thesis[];
 	positions: View.Participant[];
 	activity: View.ActivityItem[];
@@ -438,6 +445,8 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		return {
 			signedIn: false, databaseMode: false, following: false, self: false, isOwner: false,
 			creator,
+			// The fixtures carry no bio; null is the honest answer, never "".
+			bio: null,
 			callouts: await toPosts(mockSource.theses.filter((post) => post.creator.handle === handle)),
 			positions: mock.participantsByCreator(handle),
 			activity: mock.activityByCreator(handle),
@@ -455,6 +464,7 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		signedIn: signedIn !== null, databaseMode: true, self: signedIn?.userId === profile.creator.id,
 		following: (await getFollowState(signedIn?.userId ?? null, profile.creator.id)).following,
 		creator: display.creator(profile.creator),
+		bio: profile.bio,
 		callouts: await toPosts(await enrichWithTradeLinks(profile.theses.filter((thesis) => renderableStatus(thesis.thesis.status)), listPositionsByIds, await siteOrigins())),
 		positions: await (async () => {
 			const live = await rowPnl(profile.positions);

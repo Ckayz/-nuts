@@ -507,6 +507,17 @@ if (!databaseUrl) {
 			expect(profile?.creator.walletAddress).toBe(ALICE_WALLET);
 		});
 
+		// Owner decision 6 (2026-09-06). The bio was stored and never read back
+		// out of the database by anything but the OWNER's own editor; the profile
+		// page needs it for every visitor.
+		probe("carries the stored bio, and null when there is none", async (tx) => {
+			const text = "Selling weekend vol. Every fill is on chain.";
+			await tx.execute(sql`update users set bio = ${text} where id = ${ALICE}::uuid`);
+			await tx.execute(sql`update users set bio = null where id = ${BOB}::uuid`);
+			expect((await getCreator(ALICE_WALLET, { database: tx }))?.bio).toBe(text);
+			expect((await getCreator(BOB_WALLET, { database: tx }))?.bio).toBeNull();
+		});
+
 		probe("an address that is not a wallet, or is unknown, is a miss", async (tx) => {
 			expect(await getCreator("merkle_mike", { database: tx })).toBeNull();
 			expect(await getCreator("0x000000000000000000000000000000000000dead", { database: tx })).toBeNull();

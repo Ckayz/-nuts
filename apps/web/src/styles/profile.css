@@ -4,6 +4,10 @@
 .prof h1{font-size:30px;font-weight:800;letter-spacing:-.025em;line-height:1.1;overflow-wrap:anywhere}
 .prof .handle{margin-top:4px;font-size:15px;color:var(--muted);font-weight:500;overflow-wrap:anywhere}
 .prof .meta{margin-top:8px;font-size:13px;color:var(--muted);font-weight:500;overflow-wrap:anywhere}
+/* Owner decision 6 (2026-09-06): the bio is the SAME muted `.meta` text as the
+   address line; these two declarations only let a sentence wrap and hold its
+   line height. No colour, no size and no weight of its own. */
+.prof .bio{line-height:1.5;white-space:pre-wrap;max-width:62ch}
 .prof .counts{display:flex;gap:20px;margin-top:14px;font-size:13.5px;font-weight:500;color:var(--muted);flex-wrap:wrap}
 .prof .counts b{color:var(--text);font-weight:700}
 .prof-act{margin-left:auto;display:flex;gap:8px;flex:none}

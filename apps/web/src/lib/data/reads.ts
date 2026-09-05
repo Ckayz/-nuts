@@ -380,6 +380,18 @@ export interface CreatorProfile {
 	creator: Domain.Creator;
 	theses: Domain.Thesis[];
 	positions: Domain.Participant[];
+	/**
+	 * Owner decision 6 (2026-09-06): the profile bio, rendered under the name and
+	 * handle on `/u/<handle>`. It was WRITE-ONLY before — `users.bio` was
+	 * collected by the profile editor and displayed nowhere (fold-final-D §5).
+	 *
+	 * It rides on the user row `getCreator` already selects, so showing it costs
+	 * no query. It is deliberately NOT on `Domain.Creator`: that type extends the
+	 * FROZEN `ThesisAiContext["creator"]` contract (PRD §10.3), which neither
+	 * side changes unilaterally, and a bio is a profile-page fact rather than
+	 * something every creator reference carries.
+	 */
+	bio: string | null;
 }
 
 /** Resolve a stored handle, or a wallet address for existing links and handle-less users. */
@@ -450,6 +462,7 @@ export async function getCreator(
 
 	return {
 		creator,
+		bio: user.bio ?? null,
 		theses: thesisRows.map((row: { thesis: ThesisRow; creatorPosition: PositionRow | null }) =>
 			mapThesis({
 				thesis: row.thesis,

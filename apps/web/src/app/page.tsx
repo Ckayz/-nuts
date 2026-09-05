@@ -4,20 +4,17 @@ import { Leaderboard } from "@/components/creator/leaderboard";
 import { PageFrame } from "@/components/shell/page-frame";
 import { TodoOwner } from "@/components/primitives";
 import { discoverData } from "@/lib/page-data";
-import { marketSummaries } from "@/lib/view-data";
+import { marketSummariesData } from "@/lib/market/summaries";
 
 /**
  * The feed (docs/mockups/thesis-fun-mockup.html, `#feed`): traders to follow on
  * the left, the posts in the middle, your positions and the markets on the
  * right. It is the one page with no left FEED rail — it IS the feed.
  *
- * GAP, reported: the Markets panel reads `marketSummaries` from the mock
- * boundary in both modes. There is no database read for markets — assets come
- * from live OptionBook orders — and the icon rail this replaces resolved its
- * Markets link the same way.
  */
 export default async function DiscoverPage() {
 	const { leaderboard, following, top, ranked, yourPositions, signedIn, databaseMode } = await discoverData();
+	const { markets: marketSummaries, unavailable } = await marketSummariesData();
 	return (
 		<PageFrame
 			variant="feed"
@@ -50,9 +47,10 @@ export default async function DiscoverPage() {
 					<section className="card">
 						<div className="card-h">
 							<h2>Markets</h2>
-							<span className="x num">{marketSummaries.length} live</span>
+							<span className="x num">{unavailable ? "—" : `${marketSummaries.length} live`}</span>
 						</div>
-						<MarketList markets={marketSummaries} />
+						{/* TODO-OWNER: market feed failure copy. */}
+						{unavailable ? <p className="card-b">Markets unavailable. <TodoOwner /></p> : <MarketList markets={marketSummaries} />}
 						<div className="card-f">
 							Assets, strikes and expiries come from live OptionBook orders. Nothing
 							here is a hardcoded list.

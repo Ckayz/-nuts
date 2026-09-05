@@ -24,8 +24,7 @@ export function linkedPositionIds(
 ): string[] {
 	const ids: string[] = [];
 	for (const post of posts) {
-		if (post.thesis.rationale === null) continue;
-		for (const id of extractTradeLinks(post.thesis.rationale, siteOrigin)) {
+		for (const id of extractTradeLinks(`${post.thesis.headline}\n${post.thesis.rationale ?? ""}`, siteOrigin)) {
 			if (!ids.includes(id)) ids.push(id);
 		}
 	}
@@ -46,9 +45,7 @@ export function attachLinkedPositions<T extends Domain.Thesis>(
 	siteOrigin?: string,
 ): T[] {
 	return posts.map((post) => {
-		const rationale = post.thesis.rationale;
-		if (rationale === null) return post;
-		const linked = extractTradeLinks(rationale, siteOrigin)
+		const linked = extractTradeLinks(`${post.thesis.headline}\n${post.thesis.rationale ?? ""}`, siteOrigin)
 			.map((id) => resolved.get(id))
 			.filter((value): value is Domain.LinkedPosition => value !== undefined);
 		return linked.length === 0 ? post : { ...post, linkedPositions: linked };

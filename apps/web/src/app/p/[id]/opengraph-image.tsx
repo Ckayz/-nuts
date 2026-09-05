@@ -1,3 +1,4 @@
+import { ogFonts } from "@/lib/og-fonts";
 import { ImageResponse } from "next/og";
 import { notFound } from "next/navigation";
 import { positionPageData } from "@/lib/page-data";
@@ -15,8 +16,6 @@ import { positionPageData } from "@/lib/page-data";
  * page. The palette below is the mockup's `:root`, written out literally for the
  * same reason.
  *
- * TODO: load Manrope at runtime when available; offline generation uses
- * ImageResponse's bundled default font, exactly as `/t/[slug]`'s card does.
  */
 export const alt = "Thesis.fun position";
 export const size = { width: 1200, height: 630 };
@@ -24,7 +23,7 @@ export const contentType = "image/png";
 
 /** docs/mockups/thesis-fun-mockup.html `:root`, lines 34-57. */
 const BG = "#0b0b10";
-const CARD = "#0a0a0f";
+const CARD = "#14141b";
 const SURFACE_2 = "#1b1b24";
 const LINE = "#25252f";
 const TEXT = "#f2f2f5";
@@ -41,6 +40,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 	const { card } = page;
 	const pnlColor = card.pnl.pnlClass === "bull" ? GAIN : card.pnl.pnlClass === "bear" ? LOSS : TEXT;
 	const settled = card.statusTone === "settled";
+	// TODO-OWNER: OG typography/layout accommodates the required basis and instrument terms.
 	return new ImageResponse(
 		<div
 			style={{
@@ -48,8 +48,9 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 				width: "100%",
 				height: "100%",
 				background: BG,
+				fontFamily: "Manrope",
 				color: TEXT,
-				padding: 40,
+				padding: 28,
 			}}
 		>
 			<div
@@ -59,7 +60,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 					flex: 1,
 					background: ACCENT,
 					borderRadius: 32,
-					padding: "26px 26px 18px",
+					padding: "18px 18px 14px",
 				}}
 			>
 				<div
@@ -69,7 +70,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 						flex: 1,
 						background: CARD,
 						borderRadius: 24,
-						padding: "28px 38px 22px",
+						padding: "20px 28px 18px",
 					}}
 				>
 					{/* Satori lays flex children out with no collapsing and no wrapping
@@ -82,8 +83,8 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 								display: "flex",
 								alignItems: "center",
 								justifyContent: "center",
-								width: 60,
-								height: 60,
+								width: 48,
+								height: 48,
 								flexShrink: 0,
 								borderRadius: 999,
 								background: SURFACE_2,
@@ -95,7 +96,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 							{card.owner.initials}
 						</div>
 						<div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-							<span style={{ fontSize: 32, fontWeight: 700 }}>{card.owner.displayName}</span>
+							<span style={{ fontSize: 26, fontWeight: 700 }}>{card.owner.displayName}</span>
 							<span
 								style={{
 									display: "flex",
@@ -115,24 +116,25 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 						<span style={{ marginLeft: "auto", fontSize: 22, color: MUTED }}>{card.dateLabel}</span>
 					</div>
 
-					<div style={{ display: "flex", marginTop: 18, fontSize: 30, fontWeight: 700, flexShrink: 0 }}>
+					<div style={{ display: "flex", marginTop: 12, fontSize: 26, fontWeight: 700, flexShrink: 0 }}>
 						{card.instrumentLabel}
 					</div>
-					<div style={{ display: "flex", marginTop: 8, fontSize: 22, color: MUTED, flexShrink: 0 }}>
-						{card.sideLabel} · Base · Thetanuts OptionBook
+					<div style={{ display: "flex", marginTop: 6, fontSize: 18, color: MUTED, flexShrink: 0 }}>
+						{[card.strikesLabel, card.expiryFullLabel, card.sideLabel, "Base"].filter(Boolean).join(" · ")}
 					</div>
 
-					<div style={{ display: "flex", alignItems: "baseline", gap: 20, marginTop: 14, flexShrink: 0 }}>
-						<span style={{ fontSize: 64, fontWeight: 700, letterSpacing: "-0.035em", color: pnlColor }}>
+					<div style={{ display: "flex", alignItems: "baseline", gap: 20, marginTop: 10, flexShrink: 0 }}>
+						<span style={{ fontSize: 56, fontWeight: 700, letterSpacing: "-0.035em", color: pnlColor }}>
 							{card.pnl.signed2}
 						</span>
 						{card.pnlPctLabel ? (
 							<span style={{ fontSize: 28, fontWeight: 700 }}>({card.pnlPctLabel})</span>
 						) : null}
 					</div>
-					<div style={{ display: "flex", marginTop: 6, fontSize: 20, color: MUTED, flexShrink: 0 }}>
+					<div style={{ display: "flex", marginTop: 4, fontSize: 18, color: MUTED, flexShrink: 0 }}>
 						{card.pnlLabel}
 					</div>
+					<div style={{ display: "flex", marginTop: 6, marginBottom: 10, fontSize: 16, color: MUTED, flexShrink: 0 }}>{card.pnlBasisLabel}</div>
 
 					<div
 						style={{
@@ -140,7 +142,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 							// Pinned to the card's foot: short content puts the space above
 							// the tiles, never between the figure and its label.
 							marginTop: "auto",
-							paddingTop: 14,
+							paddingTop: 10,
 							flexShrink: 0,
 							borderTop: `1px solid ${LINE}`,
 						}}
@@ -158,15 +160,15 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 									borderLeft: index === 0 ? "none" : `1px solid ${LINE}`,
 								}}
 							>
-								<span style={{ fontSize: 21, color: MUTED }}>{stat.label}</span>
-								<span style={{ fontSize: 28, fontWeight: 700 }}>{stat.value}</span>
+								<span style={{ fontSize: 18, color: MUTED }}>{stat.label}</span>
+								<span style={{ fontSize: 24, fontWeight: 700 }}>{stat.value}</span>
 							</div>
 						))}
 					</div>
 				</div>
 
-				<div style={{ display: "flex", alignItems: "center", padding: "14px 10px 2px", color: "#ffffff", flexShrink: 0 }}>
-					<span style={{ fontSize: 30, fontWeight: 700, letterSpacing: "-0.03em" }}>thesis.fun</span>
+				<div style={{ display: "flex", alignItems: "center", padding: "10px 10px 2px", color: "#f2f2f5", flexShrink: 0 }}>
+					<span style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.03em" }}>thesis.fun</span>
 					{/* Says "verified" only when the receipt says so (PRD 7.3). */}
 					<span style={{ marginLeft: "auto", fontSize: 22, fontWeight: 600, color: "rgba(255,255,255,.72)" }}>
 						{card.verified ? "Verified onchain · Base" : "Base · not confirmed yet"}
@@ -174,6 +176,6 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 				</div>
 			</div>
 		</div>,
-		size,
+		{ ...size, fonts: await ogFonts() },
 	);
 }

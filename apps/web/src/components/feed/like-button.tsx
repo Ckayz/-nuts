@@ -1,3 +1,4 @@
+// TODO-OWNER: "Sign in using the wallet control" hint copy.
 "use client";
 import { useOptimistic, useState, useTransition } from "react";
 import { HeartIcon } from "@/components/icons";

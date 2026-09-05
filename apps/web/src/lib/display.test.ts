@@ -76,12 +76,6 @@ describe("market page", () => {
             assert.equal(view.structureCount, source.structures.length);
             assert.equal(view.expiryCount, new Set(source.structures.map(s => s.expiryAt)).size);
             assert.equal(view.structures.filter(s => s.selected).length, 1);
-            assert.equal(view.series.length, 168);
-            assert.equal(view.series.at(-1)?.value.toFixed(2), source.currentSpotPriceUsd);
-            assert.equal(view.series.at(-1)?.time, Math.floor(Date.parse(source.dataAsOf) / 1000));
-            // Hourly, oldest first, and every point a real positive price.
-            assert.ok(view.series.every((p, i) => i === 0 || p.time - view.series[i - 1]!.time === 3600));
-            assert.ok(view.series.every(p => Number.isFinite(p.value) && p.value > 0));
         }
     });
     test("a market that selects a structure it does not list is rejected", () => {

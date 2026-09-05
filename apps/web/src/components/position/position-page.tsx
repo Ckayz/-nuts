@@ -71,13 +71,15 @@ export function PositionPage({ page, rail }: { page: PositionPageView; rail: The
 						{page.thesis ? "The post this backs" : "No post yet"}
 					</h3>
 					{page.thesis ? (
+						<><p className="fine">{page.thesis.headline}</p>
+						{/* TODO-OWNER: backing-post link label. */}
 						<Link
 							className="btn sec block"
 							style={{ marginTop: "12px" }}
 							href={`/t/${page.thesis.slug}`}
 						>
-							{page.thesis.headline}
-						</Link>
+							Open post
+						</Link></>
 					) : (
 						<p className="fine">
 							This trade belongs to no post. Its owner can write one and link this card into it.

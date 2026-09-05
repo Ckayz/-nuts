@@ -18,10 +18,10 @@ import "server-only";
 import { deriveMarkets, type Market } from "@nuts/thetanuts";
 import type { ThetanutsClient } from "@thetanuts-finance/thetanuts-client";
 import { env } from "@nuts/env/server";
-import { getOrderSnapshot, isFeedUnavailable, readClient as sharedReadClient } from "@/lib/thetanuts/orders";
+import { collateralUsdPrice, getOrderSnapshot, isFeedUnavailable, readClient as sharedReadClient } from "@/lib/thetanuts/orders";
 import type { FeedUnavailable } from "@/lib/thetanuts/types";
 import * as display from "@/lib/display";
-import type { Market as MarketView, MarketStructure, MarketSummary, SeriesPoint, Ticket } from "@/lib/display-types";
+import type { Market as MarketView, MarketStructure, MarketSummary, Ticket } from "@/lib/display-types";
 import { formatBaseUnits, formatUsd8, ratioToOneDecimal } from "./units";
 import { orderLabel, productLabel, riskKindFor, structureId } from "./structures";
 import { quoteStructure, type QuoteResult, type StructureQuote, type TakerSide } from "./quote";
@@ -188,18 +188,15 @@ export async function findStructure(
 	return null;
 }
 
-/**
- * NO PRICE SERIES (owner 2026-09-05, "remove the chart then"). Thetanuts
- * publishes a spot price and no history: `api.getMarketData()` returns
- * `{prices, metadata}` with no candles and no 24h change (measured
- * 2026-09-05), and this app must not call a third-party price API. The View
- * type still carries `series` because the mock market page and
- * `src/lib/display.test.ts` — both outside this round's fence — still use it,
- * so the live page supplies an empty one rather than example data.
- */
-const NO_SERIES: SeriesPoint[] = [];
-
 const NO_AMOUNT = display.amount(null);
+
+/** Historical *Usd field names are retained for the ticket contract; their display
+ * strings carry token units when no USD valuation exists. Raw stays in token units. */
+export function collateralAmount(value: string | null, symbol: string | null) {
+	if (value === null || collateralUsdPrice(symbol) === 1) return display.amount(value);
+	const label = `${display.quantity(value)} ${symbol ?? "—"}`;
+	return { raw: value, usd: label, usd2: label, signed: label, signed2: label, pnlClass: "" as const };
+}
 
 /**
  * The per-contract premium, and the payout multiple, for a book row.
@@ -217,6 +214,7 @@ function rowEconomics(structure: LiveStructure): { premiumPerContract: string | 
 	}
 	const price = order.pricePerContract;
 	const premiumPerContract = formatBaseUnits(price, 8);
+	if (collateralUsdPrice(structure.collateralSymbol) !== 1) return { premiumPerContract, payoutMultiple: null };
 	const kind = riskKindFor(structure.implementationName, structure.strikes.length);
 	const sorted = [...structure.strikes].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
 	let cap: bigint | null = null;
@@ -227,7 +225,7 @@ function rowEconomics(structure: LiveStructure): { premiumPerContract: string | 
 	return { premiumPerContract, payoutMultiple: ratioToOneDecimal(cap - price, price) };
 }
 
-function structureRow(structure: LiveStructure, selectedId: string): MarketStructure {
+export function structureRow(structure: LiveStructure, selectedId: string): MarketStructure {
 	const { premiumPerContract, payoutMultiple } = rowEconomics(structure);
 	const order = structure.buy ?? structure.sell;
 	const liquidity =
@@ -238,10 +236,10 @@ function structureRow(structure: LiveStructure, selectedId: string): MarketStruc
 		id: structure.id,
 		expiryLabel: display.expiryLabel(structure.expiryAt),
 		productType: `${structure.productType.charAt(0).toUpperCase()}${structure.productType.slice(1)}`,
-		strikesLabel: display.strikesLabel(structure.strikesUsd, structure.isCall),
-		premiumPerContractUsd: premiumPerContract === null ? NO_AMOUNT : display.amount(premiumPerContract),
+		strikesLabel: display.strikesLabel(structure.strikesUsd, display.strikeSide(structure.productType, structure.isCall)),
+		premiumPerContractUsd: collateralAmount(premiumPerContract, structure.collateralSymbol),
 		maxPayoutLabel: payoutMultiple === null ? "—" : `${payoutMultiple}×`,
-		liquidityLeftUsd: liquidity === null ? NO_AMOUNT : display.amount(liquidity),
+		liquidityLeftUsd: collateralAmount(liquidity, structure.collateralSymbol),
 		selected: structure.id === selectedId,
 	};
 }
@@ -253,7 +251,7 @@ export function ticketFrom(structure: LiveStructure, quote: QuoteResult, sideNot
 		sideNote,
 		maxLossUsd: NO_AMOUNT,
 		collateralSymbol: symbol,
-		presetsUsd: BUDGET_PRESETS.map((value) => display.amount(value)),
+		presetsUsd: BUDGET_PRESETS.map((value) => collateralAmount(value, structure.collateralSymbol)),
 		orderLabel: orderLabel(structure.strikesUsd, structure.implementationName, structure.isCall),
 		contracts: "—",
 		maxPayoutUsd: NO_AMOUNT,
@@ -267,7 +265,7 @@ export function ticketFrom(structure: LiveStructure, quote: QuoteResult, sideNot
 		contracts: display.quantity(formatBaseUnits(quote.numContracts, quote.contractSizeDecimals)) ?? "—",
 		maxPayoutUsd: quote.maxPayoutUsd8 === null ? NO_AMOUNT : display.amount(formatUsd8(quote.maxPayoutUsd8)),
 		breakEvenUsd: quote.breakEvenUsd8 === null ? NO_AMOUNT : display.amount(formatUsd8(quote.breakEvenUsd8)),
-		liquidityLeftUsd: display.amount(formatBaseUnits(quote.makerLiquidity, quote.collateralDecimals)),
+		liquidityLeftUsd: collateralAmount(formatBaseUnits(quote.makerLiquidity, quote.collateralDecimals), structure.collateralSymbol),
 	};
 }
 
@@ -280,7 +278,7 @@ export function ticketFrom(structure: LiveStructure, quote: QuoteResult, sideNot
  * sentence below it are not owner-approved.
  */
 export function sideNoteFor(structure: LiveStructure, side: TakerSide, quote: QuoteResult): string {
-	const label = `${structure.asset} ${structure.productType} ${display.strikesLabel(structure.strikesUsd, structure.isCall)}`;
+	const label = `${structure.asset} ${structure.productType} ${display.strikesLabel(structure.strikesUsd, display.strikeSide(structure.productType, structure.isCall))}`;
 	const symbol = structure.collateralSymbol ?? "collateral";
 	if (side === "buy") {
 		const head = `Bull buys the ${label} and pays premium. The premium is the most you can lose.`;
@@ -289,7 +287,7 @@ export function sideNoteFor(structure: LiveStructure, side: TakerSide, quote: Qu
 	}
 	const head = `Bear sells the ${label} and posts collateral. Your loss can reach the collateral you post.`;
 	if (!quote.ok) return head;
-	return `${head} You lock ${formatBaseUnits(quote.debit, quote.collateralDecimals)} ${symbol} and receive about ${formatBaseUnits(quote.credit, quote.collateralDecimals)} ${symbol} after the ${formatBaseUnits(quote.feeEstimate, quote.collateralDecimals)} ${symbol} fee.`;
+	return `${head} You lock ${formatBaseUnits(quote.debit, quote.collateralDecimals)} ${symbol} and receive about ${formatBaseUnits(quote.credit, quote.collateralDecimals)} ${symbol} after a fee of up to ${formatBaseUnits(quote.feeEstimate, quote.collateralDecimals)} ${symbol}.`;
 }
 
 export interface MarketPageView {
@@ -309,7 +307,7 @@ function summaryOf(asset: LiveAsset): MarketSummary {
 		// the ticker is the name rather than an invented one.
 		name: asset.asset,
 		spotUsd: asset.spotUsd === null ? NO_AMOUNT : display.amount(asset.spotUsd.toFixed(2)),
-		changeLabel: "—",
+		changeLabel: "",
 		changeClass: "",
 	};
 }
@@ -351,11 +349,10 @@ export async function getMarketPage(
 		bookLabel: `${asset.structures.length} structures · ${expiries.size} expiries`,
 		structureCount: asset.structures.length,
 		expiryCount: expiries.size,
-		series: NO_SERIES,
 		structures: asset.structures.map((candidate) => structureRow(candidate, structure.id)),
 		// The ticket is filled by the caller, which owns the side and budget.
 		ticket: ticketFrom(structure, { ok: false, code: "NOT_QUOTED", reason: "Not quoted." }, ""),
-		selectedLabel: `${asset.asset} ${structure.productType} ${display.strikesLabel(structure.strikesUsd, structure.isCall)}`,
+		selectedLabel: `${asset.asset} ${structure.productType} ${display.strikesLabel(structure.strikesUsd, display.strikeSide(structure.productType, structure.isCall))}`,
 		selectedExpiryLabel: display.expiryLabel(structure.expiryAt, true),
 	};
 

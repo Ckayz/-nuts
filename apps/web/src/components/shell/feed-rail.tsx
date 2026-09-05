@@ -10,6 +10,7 @@ import type { Thesis } from "@/lib/display-types";
  * page never pays for a second feed query and the rail is identical in mock and
  * database mode. Pages pass `theses` from their own `page-data` read.
  */
+// TODO-OWNER: provisional latest-post rail limit.
 export function FeedRail({ posts, limit = 5 }: { posts: Thesis[]; limit?: number }) {
 	return (
 		<section className="card">

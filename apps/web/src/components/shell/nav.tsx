@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { marketSummaries } from "@/lib/view-data";
 
 /**
  * The horizontal nav under the top bar: Feed · Markets · Leaderboard ·
@@ -23,22 +22,22 @@ import { marketSummaries } from "@/lib/view-data";
  * `/new`, so the Create button takes that slot — without it the composer would
  * be unreachable.
  */
-export function Nav() {
+export function Nav({ firstMarketSlug, unavailable = false }: { firstMarketSlug?: string; unavailable?: boolean }) {
 	const pathname = usePathname();
-	const firstMarket = marketSummaries[0];
+	// TODO-OWNER: markets-unavailable navigation copy.
 	return (
 		<nav className="nav" aria-label="Primary">
 			<Link href="/" aria-current={pathname === "/" ? "page" : undefined}>
 				Feed
 			</Link>
-			{firstMarket ? (
+			{firstMarketSlug ? (
 				<Link
-					href={`/m/${firstMarket.slug}`}
+					href={`/m/${firstMarketSlug}`}
 					aria-current={pathname.startsWith("/m/") ? "page" : undefined}
 				>
 					Markets
 				</Link>
-			) : null}
+			) : unavailable ? <span className="mut">Markets unavailable</span> : null}
 			<Link href={{ pathname: "/", hash: "top-traders" }}>Leaderboard</Link>
 			<Link href="/portfolio" aria-current={pathname === "/portfolio" ? "page" : undefined}>
 				Portfolio

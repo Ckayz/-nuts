@@ -12,9 +12,11 @@ test("the feed renders both controls: audience tabs and ranking pills", () => {
  const html = renderToStaticMarkup(<CalloutTabs ranked={EMPTY} following={[]} top={[]} signedIn={false} databaseMode={false} />);
  for (const label of ["All", "Following", "Top", "Trending", "Ending", "Settled"]) expect(html).toContain(label);
  expect(html).not.toContain("Callouts");
- expect(html.match(/role="tablist"/g)).toHaveLength(2);
- expect(html.match(/role="tab"/g)).toHaveLength(6);
- expect(html.match(/aria-selected="true"/g)).toHaveLength(2);
+ expect(html.match(/role="tablist"/g)).toHaveLength(1);
+ expect(html.match(/role="tab"/g)).toHaveLength(3);
+ expect(html.match(/aria-selected="true"/g)).toHaveLength(1);
+ expect(html.match(/aria-pressed="true"/g)).toHaveLength(1);
+ expect(html.match(/aria-pressed="false"/g)).toHaveLength(2);
  // ONE list: a single panel, not one per control.
  expect(html.match(/role="tabpanel"/g)).toHaveLength(1);
 });
@@ -49,4 +51,11 @@ test("actual tab handlers select on click and move focus on keyboard navigation"
  expect(selected).toBe(2); expect(focused).toBe(2); expect(prevented).toBe(true);
  buttons[1]?.props.onClick?.();
  expect(selected).toBe(1);
+});
+
+
+test("db feed omits the fixture new-post banner", () => {
+ const html = renderToStaticMarkup(<CalloutTabs ranked={EMPTY} following={[]} top={[]} signedIn databaseMode />);
+ expect(html).not.toContain("9 new");
+ expect(html).not.toContain('class="newbar"');
 });

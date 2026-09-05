@@ -135,7 +135,6 @@ em{font-style:normal}
 .card-h .x a:hover{color:var(--accent-lift)}
 .card-b{padding:0 12px 12px}
 .card-f{padding:12px 20px 16px;border-top:1px solid var(--line-soft);font-size:12.5px;color:var(--muted);line-height:1.5}
-.hr{height:1px;background:var(--line-soft);border:0;margin:0}
 
 /* ---------- buttons / pills ---------- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;padding:0 16px;
@@ -189,7 +188,6 @@ em{font-style:normal}
 .av-34{width:34px;height:34px;font-size:12.5px}
 .av-40{width:40px;height:40px;font-size:14px}
 .av-44{width:44px;height:44px;font-size:15px}
-.av-80{width:80px;height:80px;font-size:27px}
 .a-mk{background:#5b5570} .a-ns{background:#47614f} .a-ga{background:#6b5a49}
 .a-dv{background:#4c5a72} .a-jl{background:#6a4f5a} .a-0x{background:#555f6b}
 .a-tb{background:#5e6047} .a-rh{background:#6b5152}
@@ -224,7 +222,6 @@ em{font-style:normal}
 .act svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .act.on{color:var(--accent-lift)}
 .act.on svg{fill:currentColor;stroke:none}
-.act .sp{margin-left:auto}
 
 /* the "N new theses" banner above the feed */
 .newbar{display:flex;align-items:center;justify-content:center;gap:10px;
@@ -377,7 +374,6 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 .compose textarea{width:100%;min-height:96px;resize:vertical;font-size:18px;line-height:1.5;
   font-weight:400;outline:0}
 .compose textarea::placeholder{color:var(--muted)}
-.linkline{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);font-weight:500}
 
 /* ---------- dialog ---------- */
 .scrim{position:fixed;inset:0;background:rgba(6,6,10,.74);display:grid;place-items:center;
@@ -408,14 +404,11 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
    font: the direction is Manrope everywhere, numbers on tabular-nums.
    ============================================================ */
 .mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
-.dim{color:var(--muted)}
 .note{font-size:12.5px;color:var(--muted);line-height:1.5}
 .verified{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--gain)}
 .verified svg{width:12px;height:12px}
 .tx{font-size:12.5px;color:var(--muted);font-weight:500}
 .tx:hover{color:var(--accent-lift)}
-.acts{display:inline-flex;align-items:center;gap:10px;font-size:12.5px;font-weight:600;color:var(--muted)}
-.acts:hover{color:var(--text)}
 /* ---------- responsive ---------- */
 @media (max-width:1180px){
   .cols.feed,.cols.page{grid-template-columns:264px minmax(0,1fr)}

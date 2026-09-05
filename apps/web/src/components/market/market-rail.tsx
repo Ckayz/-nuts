@@ -11,6 +11,7 @@
  */
 import { useCallback, useState } from "react";
 import Link from "next/link";
+import { TodoOwner } from "@/components/primitives";
 import { TakeASide } from "@/components/market/take-a-side";
 import type { TradePanelContext } from "@/lib/trade/types";
 
@@ -45,8 +46,8 @@ export function MarketRail({
 			<section className="card pad mkt-panel">
 				<h3 style={{ fontSize: "15px" }}>Post about {trade.asset}</h3>
 				<p className="fine">
-					Write your read on this market. A post is text first — tag this structure if you want, and it shows
-					the verified badge only once your own fill confirms.
+					{/* TODO-OWNER: standalone trades cannot confer a verified post badge. */}
+					Write your read on this market. You can tag the market or link a trade. Linking a standalone trade does not add a verified badge. <TodoOwner />
 				</p>
 				<Link
 					className="btn sec block"

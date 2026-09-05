@@ -15,14 +15,15 @@ import { loadProductionFill, PRODUCTION_FILLS } from "@/lib/trade/production-fil
  * in the assertion, never copied from the code under test.
  */
 
-const book = await getLiveMarkets(true);
+const liveBookTests = process.env.LIVE_BOOK_TESTS === "1";
+const book = liveBookTests ? await getLiveMarkets(true) : { assets: [], fetchedAt: new Date(0) };
 if ("error" in book) throw new Error(`Order book unavailable: ${book.detail}`);
 const structures = book.assets.flatMap((asset) => asset.structures);
-console.log(
+if (liveBookTests) console.log(
 	`[live book] ${book.fetchedAt.toISOString()} assets=${book.assets.length} structures=${structures.length}`,
 );
 
-describe("taker side: the shared package against the chain", () => {
+describe.skipIf(!liveBookTests)("taker side: the shared package against the chain", () => {
 	test("the shared package agrees with the measured rule on every live order (core round 9 flipped it)", async () => {
 		let checked = 0;
 		let inverted = 0;
@@ -96,7 +97,7 @@ describe("taker side: the shared package against the chain", () => {
 	});
 });
 
-describe("taker-BUY money, reproduced from decoded fill 0x9c4bb1…", () => {
+describe.skipIf(!liveBookTests)("taker-BUY money, reproduced from decoded fill 0x9c4bb1…", () => {
 	const expectation = PRODUCTION_FILLS.find((fill) => fill.takerSide === "buy");
 	if (expectation === undefined) throw new Error("no buy fixture");
 
@@ -174,7 +175,7 @@ describe("taker-BUY money, reproduced from decoded fill 0x9c4bb1…", () => {
 	});
 });
 
-describe("taker-SELL money, reproduced from decoded fill 0xdf3323…", () => {
+describe.skipIf(!liveBookTests)("taker-SELL money, reproduced from decoded fill 0xdf3323…", () => {
 	const expectation = PRODUCTION_FILLS.find((fill) => fill.takerSide === "sell");
 	if (expectation === undefined) throw new Error("no sell fixture");
 

@@ -12,7 +12,8 @@ export function CreatorStats({ creator, following = false, signedIn = false, dat
 	const [state, optimistic] = useOptimistic(databaseMode ? { following, followers: creator.followerCount } : local);
 	const disabled = pending || self || (databaseMode && (!signedIn || !creator.id));
 
- const follow = <button type="button" className={profile ? "btn acc" : "btn out"} aria-pressed={state.following} disabled={disabled} title={databaseMode && !signedIn ? "Sign in using the wallet control" : undefined}
+ // TODO-OWNER: Like/Follow sign-in hint copy.
+ const follow = self ? null : <button type="button" className={profile ? "btn acc" : "btn out"} aria-pressed={state.following} disabled={disabled} title={databaseMode && !signedIn ? "Sign in using the wallet control" : undefined}
 					onClick={() => {
 						if (disabled) return;
 						const next = { following: !state.following, followers: state.followers === undefined ? undefined : state.followers + (state.following ? -1 : 1) };

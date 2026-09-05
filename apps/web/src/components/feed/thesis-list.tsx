@@ -52,7 +52,7 @@ export function MarketList({ markets }: { markets: MarketSummary[] }) {
 					</span>
 					<span className="v">
 						<b className="num">{market.spotUsd.usd2}</b>
-						<i className={`num ${market.changeClass}`}>{market.changeLabel}</i>
+						{market.changeLabel ? <i className={`num ${market.changeClass}`}>{market.changeLabel}</i> : null}
 					</span>
 				</Link>
 			))}

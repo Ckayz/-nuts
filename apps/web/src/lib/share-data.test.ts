@@ -4,16 +4,39 @@ import { thesisDetails as domainDetails } from "@/mock/data";
 import { thesisDetails } from "./view-data";
 import { shareVerification, thesisShareData } from "./share-data";
 
-test("image handler returns a 1200 by 630 PNG", async () => {
-  const fixture = thesisDetails[0]!;
-  const response = await Image({ params: Promise.resolve({ slug: fixture.thesis.slug }) });
-  expect(response.headers.get("content-type")).toContain("image/png");
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  expect([...bytes.slice(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
-  const header = new DataView(bytes.buffer);
-  expect(header.getUint32(16)).toBe(1200);
-  expect(header.getUint32(20)).toBe(630);
+test("both image handlers return 1200 by 630 PNGs (offline font substitute)", () => {
+  // Isolated renderer probe: exercises PNG/layout with bundled font bytes.
+  // Actual Manrope fetching is checked separately; this does not claim font fidelity.
+  const child = Bun.spawnSync([process.execPath, "--preload", "./test/setup.ts", "-e", `
+    import { plugin } from "bun";
+    import { readFile } from "node:fs/promises";
+    import { dirname, join } from "node:path";
+    const bytes = await readFile(join(dirname(import.meta.resolve("next/package.json").replace("file://", "")), "dist/compiled/@vercel/og/Geist-Regular.ttf"));
+    plugin({ name: "offline-og-font", setup(build) {
+      build.module("@/lib/og-fonts", () => ({ loader: "object", exports: { ogFonts: async () => [{ name: "Manrope", data: bytes, weight: 400, style: "normal" }] } }));
+    }});
+    const { default: Image } = await import("./src/app/t/[slug]/opengraph-image.tsx");
+    const { thesisDetails } = await import("./src/lib/view-data.ts");
+    const { default: PositionImage } = await import("./src/app/p/[id]/opengraph-image.tsx");
+    const { yourPositions } = await import("./src/lib/view-data.ts");
+    const responses = [
+      await Image({ params: Promise.resolve({ slug: thesisDetails[0].thesis.slug }) }),
+      await PositionImage({ params: Promise.resolve({ id: yourPositions[0].id }) }),
+    ];
+    const results = [];
+    for (const response of responses) {
+      const png = new Uint8Array(await response.arrayBuffer());
+      const header = new DataView(png.buffer);
+      results.push({ type: response.headers.get("content-type"), magic: [...png.slice(0, 8)], width: header.getUint32(16), height: header.getUint32(20) });
+    }
+    console.log(JSON.stringify(results));
+  `], { cwd: new URL("../..", import.meta.url).pathname, env: { ...process.env, DATABASE_URL: "", SKIP_ENV_VALIDATION: "1" }, stdout: "pipe", stderr: "pipe" });
+  expect({ code: child.exitCode, stderr: child.stderr.toString() }).toEqual({ code: 0, stderr: "" });
+  const results = JSON.parse(child.stdout.toString());
+  expect(results).toHaveLength(2);
+  for (const result of results) expect(result).toEqual({ type: "image/png", magic: [137, 80, 78, 71, 13, 10, 26, 10], width: 1200, height: 630 });
 });
+
 test("unconfirmed fixture never earns a verified mark or P&L", async () => {
   const fixture = thesisDetails[0]!;
   expect(await thesisShareData(fixture.thesis.slug)).toMatchObject({ verified: false, pnl: null });

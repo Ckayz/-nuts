@@ -6,8 +6,9 @@ import { CreatorStats } from "@/components/creator/creator-stats";
 import Link from "next/link";
 import { Avatar, TodoOwner } from "@/components/primitives";
 import { Leaderboard } from "@/components/creator/leaderboard";
+import { CopyLink } from "@/components/position/copy-link";
 import { LikeButton } from "@/components/feed/like-button";
-import { CommentIcon, ShareIcon } from "@/components/icons";
+import { CommentIcon, ShareIcon, SparkIcon } from "@/components/icons";
 import { PositionRows } from "@/components/thesis/position-rows";
 import { ProfileTabs } from "@/components/thesis/profile-tabs";
 import { FeedRail } from "@/components/shell/feed-rail";
@@ -63,6 +64,6 @@ export default async function CreatorPage({
  </section>}>
   <CreatorStats creator={creator} signedIn={data.signedIn} databaseMode={data.databaseMode} following={data.following} self={data.self} profile />
   {data.isOwner && data.editableProfile ? <ProfileEditor key={JSON.stringify(data.editableProfile)} profile={data.editableProfile} walletAddress={data.editableProfile.walletAddress} /> : null}
-  <ProfileTabs positions={<PositionRows rows={positions} />} posts={<section className="card profile-posts"><div className="card-h"><h3>Recent posts</h3><span className="x num">{callouts.length}</span></div><div className="card-b">{callouts.map(t => <article className="post" key={t.slug}><Avatar initials={t.creator.initials} size="s" /><div className="post-main"><div className="p-head"><span className="p-name">{t.creator.displayName}</span><span className="p-time">{t.postedLabel}</span>{t.backingCard ? <span className="chip">Backed</span> : null}</div><p className="p-body"><Link href={`/t/${t.slug}`}>{t.headline}</Link></p><div className="p-acts"><LikeButton thesisId={t.id} likes={t.likes} liked={t.likedByViewer} signedIn={data.signedIn} databaseMode={data.databaseMode} /><Link className="act" href={`/t/${t.slug}`} aria-label={`Comments, ${t.commentCount}`}><CommentIcon />{t.commentCount}</Link><button className="act" type="button"><ShareIcon />Share</button></div></div></article>)}</div></section>} />
+  <ProfileTabs positions={<PositionRows rows={positions} />} posts={<section className="card profile-posts"><div className="card-h"><h3>Recent posts</h3><span className="x num">{callouts.length}</span></div><div className="card-b">{callouts.map(t => <article className="post" key={t.slug}><Avatar initials={t.creator.initials} size="s" /><div className="post-main"><div className="p-head"><span className="p-name">{t.creator.displayName}</span><span className="p-time">{t.postedLabel}</span>{t.backingCard ? <span className="chip">Backed</span> : null}</div><p className="p-body"><Link href={`/t/${t.slug}`}>{t.headline}</Link></p><div className="p-acts"><LikeButton thesisId={t.id} likes={t.likes} liked={t.likedByViewer} signedIn={data.signedIn} databaseMode={data.databaseMode} /><Link className="act" href={`/t/${t.slug}`} aria-label={`Comments, ${t.commentCount}`}><CommentIcon />{t.commentCount}</Link><CopyLink path={`/t/${t.slug}`} className="act" label={<><ShareIcon />Share</>} /><Link className="act" href={`/agent?thesis=${t.id}`}><SparkIcon />Explain</Link></div></div></article>)}</div></section>} />
  </PageFrame>;
 }

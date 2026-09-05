@@ -19,11 +19,6 @@ export function tabKey(key: string, current: number, count: number): number | nu
  * underlined row the feed puts on the left (`.tabs`), `pills` the rounded
  * filter row it puts on the right (`.pill`).
  *
- * ARIA is unchanged from the previous round — a real `tablist` with roving
- * tabindex, which the keyboard tests in `lib/social/feeds-tabs.test.tsx` pin
- * attribute by attribute. The mockup draws its pills as `aria-pressed`
- * buttons; `index.css` styles `aria-selected` the same way so the look is the
- * mockup's without weakening the semantics.
  */
 export function TabHeading({ id, labels, selected, onSelect, variant = "tabs" }: {
 	id: string; labels: readonly string[]; selected: number; onSelect: (index: number) => void;
@@ -37,8 +32,9 @@ export function TabHeading({ id, labels, selected, onSelect, variant = "tabs" }:
 		const target = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next];
 		target?.focus();
 	}
-	return <div className={variant === "pills" ? "pills" : "tabs"} role="tablist" aria-label={labels[0]}>
-		{labels.map((label, index) => <button key={label} type="button" className={variant === "pills" ? "pill" : undefined}
+	if (variant === "pills") return <div className="pills">{labels.map((label, index) => <button key={label} type="button" className="pill" aria-pressed={selected === index} onClick={() => onSelect(index)}>{label}</button>)}</div>;
+	return <div className="tabs" role="tablist" aria-label={labels[0]}>
+		{labels.map((label, index) => <button key={label} type="button"
 			id={`${id}-tab-${index}`} role="tab" aria-selected={selected === index}
 			aria-controls={`${id}-panel`} tabIndex={selected === index ? 0 : -1}
 			onClick={() => onSelect(index)} onKeyDown={event => keyDown(event, index)}>{label}</button>)}

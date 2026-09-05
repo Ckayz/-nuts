@@ -22,14 +22,15 @@
  * labelled by its heading, focus moved in on open, Escape and backdrop close,
  * focus cycled inside, and focus returned to the opener. None of that changed.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
+import { CopyLink } from "@/components/position/copy-link";
 import { PnlCard } from "@/components/position/pnl-card";
 import { TodoOwner } from "@/components/primitives";
 import type { FillCard } from "@/lib/trade/types";
 import "@/styles/position.css";
 
-const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = 'input:not([disabled]), a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function FillDialog({
 	card,
@@ -44,7 +45,6 @@ export function FillDialog({
 }) {
 	const panel = useRef<HTMLDivElement>(null);
 	const opener = useRef<Element | null>(null);
-	const [copied, setCopied] = useState(false);
 
 	useEffect(() => {
 		opener.current = document.activeElement;
@@ -78,14 +78,6 @@ export function FillDialog({
 		[onClose],
 	);
 
-	const copy = useCallback(() => {
-		const url = new URL(card.positionPath, window.location.origin).toString();
-		navigator.clipboard
-			.writeText(url)
-			.then(() => setCopied(true))
-			.catch(() => setCopied(false));
-	}, [card.positionPath]);
-
 	return (
 		// The backdrop click is a convenience; Escape and the close button are the
 		// keyboard paths, and both are wired above.
@@ -114,9 +106,7 @@ export function FillDialog({
 				</a>
 
 				<div className="dlg-acts">
-					<button type="button" className="btn sec" onClick={copy}>
-						{copied ? "Link copied" : "Copy link"}
-					</button>
+					<CopyLink path={card.positionPath} />
 					<Link className="btn acc" href={{ pathname: "/new", query: { link: card.positionPath } }}>
 						Write a post about it
 					</Link>

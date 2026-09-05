@@ -137,10 +137,6 @@ function backing(value: Domain.Thesis, settled: boolean): View.Backing {
  * parameter of `thesis` because `theses.map(display.thesis)` would otherwise
  * hand the array index in as the origin (the compiler caught exactly that).
  *
- * GAP: nothing configures a site origin today — `packages/env` defines none and
- * `vercelOrigin` there is exported but unused — so no caller passes one yet and
- * only path-only `/p/<uuid>` links unfurl. That is the safe direction: a link
- * that cannot be PROVEN same-origin stays plain text.
  */
 export function thesisWithOrigin(value: Domain.Thesis, siteOrigin: string | undefined): View.Thesis {
     // TODO-OWNER: the mockup specifies no presentation for other PRD lifecycle states.
@@ -375,7 +371,6 @@ export function market(value: Domain.Market): View.Market {
         structureCount: value.structures.length, expiryCount: expiries.size,
         // Number() only after the same decimal validation every other value gets:
         // the chart library plots pixels from it, nothing else reads it.
-        series: value.series.map(p => { decimal(p.priceUsd); return { time: p.time, value: Number(p.priceUsd) }; }),
         structures: value.structures.map(s => marketStructure(s, value.selectedStructureId)),
         ticket: ticket(value.ticket),
         selectedLabel: `${value.underlyingAsset} ${selected.productType} ${strikesLabel(selected.strikesUsd, strikeSide(selected.productType, selected.isCall))}`,

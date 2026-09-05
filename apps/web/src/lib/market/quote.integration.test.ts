@@ -23,7 +23,7 @@ console.log(
 );
 
 describe("taker side: the shared package against the chain", () => {
-	test("the measured rule is the inverse of packages/thetanuts/src/side.ts, on every live order", async () => {
+	test("the shared package agrees with the measured rule on every live order (core round 9 flipped it)", async () => {
 		let checked = 0;
 		let inverted = 0;
 		for (const structure of structures) {
@@ -37,7 +37,7 @@ describe("taker side: the shared package against the chain", () => {
 		}
 		console.log(`[taker side] live orders checked ${checked}, package disagrees on ${inverted}`);
 		expect(checked).toBeGreaterThan(0);
-		expect(inverted).toBe(checked);
+		expect(inverted).toBe(0);
 	});
 
 	test("the two decoded production fills settle it: isLong true means the taker SOLD", async () => {
@@ -48,7 +48,7 @@ describe("taker side: the shared package against the chain", () => {
 			// `sellerWasMaker` is the chain's own statement of who took which side.
 			expect(fill.takerSide).toBe(expectation.takerSide);
 			expect(measuredTakerSide(raw.isLong)).toBe(expectation.takerSide);
-			expect(packageTakerSide(fill.order)).not.toBe(expectation.takerSide);
+			expect(packageTakerSide(fill.order)).toBe(expectation.takerSide);
 			console.log(
 				`[fill ${fill.hash.slice(0, 10)}] isLong=${raw.isLong} sellerWasMaker=${fill.event.sellerWasMaker} ` +
 					`chain says taker ${fill.takerSide.toUpperCase()}, package says ${packageTakerSide(fill.order).toUpperCase()}`,
@@ -56,24 +56,24 @@ describe("taker side: the shared package against the chain", () => {
 		}
 	});
 
-	test("the package contradicts itself: its own verified sell pair fails its own side gate", async () => {
-		// `VERIFIED_SELL_PAIRS` was derived from this very transaction, and
-		// `quoteSellFill` refuses the order it was derived from.
+	test("the package quotes its own verified sell pair (it refused it before core round 9)", async () => {
+		// `VERIFIED_SELL_PAIRS` was derived from this very transaction; since the
+		// side flip, `quoteSellFill` accepts the order it was derived from.
 		const expectation = PRODUCTION_FILLS.find((fill) => fill.takerSide === "sell");
 		if (expectation === undefined) throw new Error("no sell fixture");
 		const fill = await loadProductionFill(expectation.hash);
-		expect(() =>
-			quoteSellFill({
+		const quote = quoteSellFill({
 				client: readClient(),
 				order: fill.order,
 				collateralBudget: expectation.takerCollateral,
 				referrer: env.THESIS_REFERRER,
 				now: fill.blockTimeSeconds - 1,
-			}),
-		).toThrow(/Sell quotes require a taker-sell order/);
+			});
+		// strike 220000000000 × 10000 contracts / 1e8 = 22,000,000 aBasUSDC, the decoded transfer.
+		expect(quote.collateralRequired).toBe(22_000_000n);
 	});
 
-	test("no live structure can be quoted while the two disagree: this app fails closed", () => {
+	test("live 6-decimal structures quote OK now that the package and the chain agree", () => {
 		const codes = new Map<string, number>();
 		for (const structure of structures) {
 			for (const side of ["bull", "bear"] as const) {
@@ -91,8 +91,8 @@ describe("taker side: the shared package against the chain", () => {
 			}
 		}
 		console.log("[quote refusals]", Object.fromEntries(codes));
-		expect(codes.get("OK") ?? 0).toBe(0);
-		expect(codes.size).toBeGreaterThan(0);
+		expect(codes.get("OK") ?? 0).toBeGreaterThan(0);
+		expect(codes.get("TAKER_SIDE_CONTRADICTION") ?? 0).toBe(0);
 	});
 });
 
@@ -154,18 +154,23 @@ describe("taker-BUY money, reproduced from decoded fill 0x9c4bb1…", () => {
 		);
 	});
 
-	test("the package's buy API refuses this order, because its side rule is inverted", async () => {
+	test("the package's buy API quotes this order (it refused it before core round 9), sized by its own floor rounding", async () => {
 		const fill = await loadProductionFill(expectation.hash);
-		expect(() =>
-			quoteFill({
-				client: readClient(),
-				order: fill.order,
-				budget: expectation.premium,
-				referrer: env.THESIS_REFERRER,
-				now: fill.blockTimeSeconds - 1,
-			}),
-		).toThrow(/collateral-funded sell API/);
-		expect(takerSideDisagreement(fill.order)).toContain("Trading is blocked");
+		const quote = quoteFill({
+			client: readClient(),
+			order: fill.order,
+			budget: expectation.premium,
+			referrer: env.THESIS_REFERRER,
+			now: fill.blockTimeSeconds - 1,
+		});
+		// Sizing floors twice (contracts = floor(budget × 1e8 / price), then
+		// premium = floor(contracts × price / 1e8)), so the on-chain 389926 / 999998
+		// comes back one contract-unit short: floor(999998e8 / 256458427) = 389925,
+		// floor(389925 × 256458427 / 1e8) = 999995. Measured, not assumed.
+		expect(quote.numContracts).toBe(389925n);
+		expect(quote.premium).toBe(999995n);
+		expect(quote.pricePerContract).toBe(256458427n);
+		expect(takerSideDisagreement(fill.order)).toBeNull();
 	});
 });
 

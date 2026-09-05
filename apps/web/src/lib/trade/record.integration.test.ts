@@ -503,7 +503,7 @@ describe("prepareTrade refuses before any calldata exists", () => {
 		expect(result).toMatchObject({ ok: false, code: "STRUCTURE_GONE" });
 	}, 60_000);
 
-	test("on a live structure, because the package's taker side contradicts the chain", async () => {
+	test("on a live structure with an unfunded wallet, past the side gate (the package agrees with the chain since core round 9)", async () => {
 		const { getLiveMarkets } = await import("@/lib/market/live");
 		const book = await getLiveMarkets();
 		if ("error" in book) throw new Error(book.detail);
@@ -517,9 +517,16 @@ describe("prepareTrade refuses before any calldata exists", () => {
 			{ userId: user.id, walletAddress: wallet },
 			{ structureId: structure.id, side: "bull", budgetInput: "10" },
 		);
-		expect(result).toMatchObject({ ok: false, code: "TAKER_SIDE_CONTRADICTION" });
-		if (result.ok) throw new Error("unreachable");
-		console.log(`[prepare refused] ${result.reason}`);
+		// A fresh random wallet has no allowance, so preparation stops at the
+		// APPROVE stage: it hands back approval calldata only (nothing is sent,
+		// the fill is not even simulated yet) — and never the side gate. Measured.
+		if (result.ok) {
+			expect(result.stage).toBe("approve");
+			console.log(`[prepare] stage=${result.stage}`);
+		} else {
+			expect(result.code).not.toBe("TAKER_SIDE_CONTRADICTION");
+			console.log(`[prepare refused] ${result.code}: ${result.reason}`);
+		}
 		// Nothing was written: no draft post, no position.
 		const rows = await db.select({ total: sql<string>`count(*)` }).from(positions).where(eq(positions.userId, user.id));
 		expect(rows[0]?.total).toBe("0");

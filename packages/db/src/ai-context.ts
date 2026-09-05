@@ -144,13 +144,20 @@ function decimalFromBaseUnits(value: string, decimals: number): string {
  * The exact PRD contract cannot represent missing contracts, so a missing creator
  * position is rejected instead of being represented by an invented value.
  */
-export type ThesisAiContextErrorCode = "NO_CREATOR_POSITION" | "POSITION_MISMATCH" | "INVALID_POSITION" | "INVALID_VALUE";
+type StructuredThesis = Thesis & { [K in "direction" | "underlyingAsset" | "expiryAt" | "productType" | "isCall" | "isLong" | "strikes" | "strikeDecimals" | "collateralAddress" | "collateralSymbol" | "collateralDecimals" | "creatorOrderSnapshot"]: NonNullable<Thesis[K]> };
+function hasStructure(thesis: Thesis): thesis is StructuredThesis {
+  return thesis.direction !== null && thesis.underlyingAsset !== null && thesis.expiryAt !== null && thesis.productType !== null && thesis.isCall !== null && thesis.isLong !== null && thesis.strikes !== null && thesis.strikeDecimals !== null && thesis.collateralAddress !== null && thesis.collateralSymbol !== null && thesis.collateralDecimals !== null && thesis.creatorOrderSnapshot !== null;
+}
+
+export type ThesisAiContextErrorCode = "NO_STRUCTURE" | "NO_CREATOR_POSITION" | "POSITION_MISMATCH" | "INVALID_POSITION" | "INVALID_VALUE";
 export class ThesisAiContextError extends Error {
   constructor(readonly code: ThesisAiContextErrorCode, message: string) { super(message); this.name = "ThesisAiContextError"; }
 }
 const confirmedStatuses = new Set(["confirmed", "indexed", "expired", "settled"]);
 
 export function buildThesisAiContext(input: BuildThesisAiContextInput): ThesisAiContext {
+  const thesis = input.thesis;
+  if (!hasStructure(thesis)) throw new ThesisAiContextError("NO_STRUCTURE", "Cannot build ThesisAiContext without a complete structure");
   const position = input.creatorPosition;
   if (position === null) {
     throw new ThesisAiContextError("NO_CREATOR_POSITION", "Cannot build ThesisAiContext without creator position: structure.contracts is required by PRD v2.0 §10.3");
@@ -163,12 +170,12 @@ export function buildThesisAiContext(input: BuildThesisAiContextInput): ThesisAi
 
   const context: ThesisAiContext = {
     thesis: {
-      id: input.thesis.id,
-      headline: input.thesis.headline,
-      rationale: input.thesis.rationale,
-      direction: input.thesis.direction,
-      status: input.thesis.status,
-      createdAt: iso(input.thesis.createdAt),
+      id: thesis.id,
+      headline: thesis.headline,
+      rationale: thesis.rationale,
+      direction: thesis.direction,
+      status: thesis.status,
+      createdAt: iso(thesis.createdAt),
     },
     creator: {
       walletAddress: input.creator.walletAddress.toLowerCase(),
@@ -176,17 +183,17 @@ export function buildThesisAiContext(input: BuildThesisAiContextInput): ThesisAi
     },
     market: {
       chainId: 8453,
-      underlyingAsset: input.thesis.underlyingAsset,
+      underlyingAsset: thesis.underlyingAsset,
       currentSpotPriceUsd: input.currentSpotPriceUsd ?? null,
-      expiryAt: iso(input.thesis.expiryAt),
+      expiryAt: iso(thesis.expiryAt),
       dataAsOf: iso(input.dataAsOf),
     },
     structure: {
-      productType: input.thesis.productType,
-      isCall: input.thesis.isCall,
-      isLong: input.thesis.isLong,
-      strikesUsd: input.thesis.strikes.map((strike) => decimalFromBaseUnits(strike, input.thesis.strikeDecimals)),
-      collateralSymbol: input.thesis.collateralSymbol,
+      productType: thesis.productType,
+      isCall: thesis.isCall,
+      isLong: thesis.isLong,
+      strikesUsd: thesis.strikes.map((strike) => decimalFromBaseUnits(strike, thesis.strikeDecimals)),
+      collateralSymbol: thesis.collateralSymbol,
       contracts: decimalFromBaseUnits(position.contracts, position.contractDecimals),
     },
     economics: {
@@ -210,9 +217,10 @@ export function buildThesisAiContext(input: BuildThesisAiContextInput): ThesisAi
   return result.data;
 }
 
-export type ThesisAiContextAvailability = { available: true; context: ThesisAiContext } | { available: false; reason: "no_creator_position" | "not_published" | "invalid_position"; thesisId: string; status: ThesisStatus };
+export type ThesisAiContextAvailability = { available: true; context: ThesisAiContext } | { available: false; reason: "no_structure" | "no_creator_position" | "not_published" | "invalid_position"; thesisId: string; status: ThesisStatus };
 export function buildThesisAiContextOrUnavailable(input: BuildThesisAiContextInput): ThesisAiContextAvailability {
-  const unavailable = (reason: "no_creator_position" | "not_published" | "invalid_position"): ThesisAiContextAvailability => ({ available: false, reason, thesisId: input.thesis.id, status: input.thesis.status });
+  const unavailable = (reason: "no_structure" | "no_creator_position" | "not_published" | "invalid_position"): ThesisAiContextAvailability => ({ available: false, reason, thesisId: input.thesis.id, status: input.thesis.status });
+  if (!hasStructure(input.thesis)) return unavailable("no_structure");
   if (input.thesis.status === "draft" || input.thesis.status === "cancelled") return unavailable("not_published");
   if (input.creatorPosition === null) return unavailable("no_creator_position");
   try { return { available: true, context: buildThesisAiContext(input) }; }

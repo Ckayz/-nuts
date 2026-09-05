@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildThesisAiContext, buildThesisAiContextOrUnavailable, ThesisAiContextError, thesisAiContextSchema, type ThesisAiContext } from "../src/ai-context";
 import { thesisAiContextExamples } from "../src/fixtures/thesis-ai-context.example";
+import { textOnlyThesis, taggedUnbackedThesis } from "../src/fixtures/thesis-post.example";
 import type { Position, Thesis, User } from "../src/schema";
 import { canonicalFillEvent } from "./fixtures/fill-event";
 
@@ -23,6 +24,7 @@ function rowsFromExample(example: ThesisAiContext): { thesis: Thesis; creator: U
     rationale: example.thesis.rationale,
     direction: example.thesis.direction,
     status: example.thesis.status,
+    taggedAsset: example.market.underlyingAsset,
     underlyingAsset: example.market.underlyingAsset,
     expiryAt: new Date(example.market.expiryAt),
     productType: example.structure.productType,
@@ -107,6 +109,27 @@ function rowsFromExample(example: ThesisAiContext): { thesis: Thesis; creator: U
 }
 
 describe("ThesisAiContext", () => {
+  for (const thesis of [textOnlyThesis, taggedUnbackedThesis]) {
+    for (const status of ["open", "draft", "cancelled", "pending"] as const) test(
+      `post ${thesis.id} ${status} has no structure before other availability checks`, () => {
+        const rows = rowsFromExample(thesisAiContextExamples[0]);
+        const input = { thesis: { ...thesis, status }, creator: rows.creator, creatorPosition: null, dataAsOf: new Date() };
+        expect(buildThesisAiContextOrUnavailable(input)).toEqual({ available: false, reason: "no_structure", thesisId: thesis.id, status });
+        let caught: unknown;
+        try { buildThesisAiContext(input); } catch (error) { caught = error; }
+        expect(caught).toBeInstanceOf(ThesisAiContextError);
+        expect(caught).toMatchObject({ code: "NO_STRUCTURE" });
+      });
+  }
+  test("structured open post without backing retains no_creator_position", () => {
+    const rows = rowsFromExample(thesisAiContextExamples[0]);
+    const input = { thesis: { ...rows.thesis, creatorPositionId: null }, creator: rows.creator, creatorPosition: null, dataAsOf: new Date() };
+    expect(buildThesisAiContextOrUnavailable(input)).toMatchObject({ available: false, reason: "no_creator_position" });
+    let caught: unknown;
+    try { buildThesisAiContext(input); } catch (error) { caught = error; }
+    expect(caught).toMatchObject({ code: "NO_CREATOR_POSITION" });
+  });
+
   test.each(Array.from(thesisAiContextExamples))("builder produces a valid fixture", (example) => {
     const rows = rowsFromExample(example);
     const built = buildThesisAiContext({

@@ -2,6 +2,7 @@ import { relations, sql } from "drizzle-orm";
 import { check, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { activity } from "./activity";
 import { comments } from "./comments";
+import { likes } from "./likes";
 import { follows } from "./follows";
 import { positions } from "./positions";
 import { theses } from "./theses";
@@ -29,6 +30,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   theses: many(theses),
   positions: many(positions),
   comments: many(comments),
+  likes: many(likes),
   following: many(follows, { relationName: "follower" }),
   followers: many(follows, { relationName: "following" }),
   activity: many(activity),

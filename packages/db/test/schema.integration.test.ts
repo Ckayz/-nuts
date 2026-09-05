@@ -103,8 +103,65 @@ if (!databaseUrl) {
   for (const table of ["positions", "auth_challenges"]) probe(`${table}_base_chain`, async (client) => {
     await rejects(client, `UPDATE public.${table} SET chain_id=1`, [], check(`${table}_base_chain`));
   });
-  probe("public thesis requires creator position", async (client) => {
-    await rejects(client, "UPDATE public.theses SET status='open' WHERE id=$1", [t1], check("theses_public_creator_position_required"));
+  probe("open unbacked structured thesis accepted", async (client) => {
+    await client.query("UPDATE public.theses SET status='open' WHERE id=$1", [t1]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    expect((await client.query("SELECT status,creator_position_id FROM public.theses WHERE id=$1", [t1])).rows).toEqual([{ status: "open", creator_position_id: null }]);
+  });
+  probe("text-only published insert accepted", async (client) => {
+    const result = await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,'h','open') RETURNING direction,strikes,creator_position_id", [u1]);
+    expect(result.rows).toEqual([{ direction: null, strikes: null, creator_position_id: null }]);
+  });
+  probe("market-only published insert accepted", async (client) => {
+    await client.query("INSERT INTO public.theses(creator_user_id,headline,status,tagged_asset) VALUES ($1,'h','open','ETH')", [u1]);
+  });
+  for (const column of ["direction", "underlying_asset", "expiry_at", "product_type", "is_call", "is_long", "strikes", "strike_decimals", "collateral_address", "collateral_symbol", "collateral_decimals"]) probe(
+    `partial structure rejects missing ${column}`, async (client) => {
+      await rejects(client, `UPDATE public.theses SET ${column}=NULL WHERE id=$1`, [t1], check("theses_structure_all_or_nothing"));
+    });
+  probe("partial structure rejects absent snapshot on insert", async (client) => {
+    await rejects(client, "INSERT INTO public.theses(creator_user_id,headline,status,direction,underlying_asset,expiry_at,product_type,is_call,is_long,strikes,strike_decimals,collateral_address,collateral_symbol,collateral_decimals,tagged_asset) SELECT creator_user_id,headline,status,direction,underlying_asset,expiry_at,product_type,is_call,is_long,strikes,strike_decimals,collateral_address,collateral_symbol,collateral_decimals,tagged_asset FROM public.theses WHERE id=$1", [t1], check("theses_structure_all_or_nothing"));
+  });
+  probe("direction alone is a partial structure", async (client) => {
+    await rejects(client, "INSERT INTO public.theses(creator_user_id,headline,status,direction) VALUES ($1,'h','open','bull')", [u1], check("theses_structure_all_or_nothing"));
+  });
+  probe("tagged asset lowercase rejected", async (client) => {
+    await rejects(client, "INSERT INTO public.theses(creator_user_id,headline,status,tagged_asset) VALUES ($1,'h','open','eth')", [u1], check("theses_tagged_asset_uppercase"));
+  });
+  for (const tag of ["BTC", null]) probe(`structure rejects mismatched tag ${tag}`, async (client) => {
+    await rejects(client, "UPDATE public.theses SET tagged_asset=$2 WHERE id=$1", [t1,tag], check("theses_tagged_asset_matches_structure"));
+  });
+  probe("backing without structure rejected", async (client) => {
+    await rejects(client, "INSERT INTO public.theses(creator_user_id,headline,status,creator_position_id) VALUES ($1,'h','open',$2)", [u1,p1], check("theses_backing_requires_structure"));
+  });
+  probe("unbacked public post does not fence creator wallet", async (client) => {
+    await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,'h','open')", [u1]);
+    await client.query("UPDATE public.theses SET status='open' WHERE id=$1", [t1]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query("UPDATE public.users SET wallet_address='0xaaa' WHERE id=$1", [u1]);
+  });
+  probe("unbacked sibling does not weaken linked public wallet fence", async (client) => {
+    await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,'h','open')", [u1]);
+    await publish(client);
+    await rejects(client, "UPDATE public.users SET wallet_address='0xaaa' WHERE id=$1", [u1], { code: "23514", message: "cannot change wallet of a public thesis creator" });
+  });
+  probe("likes unique per user and thesis", async (client) => {
+    await client.query("INSERT INTO public.likes(user_id,thesis_id) VALUES ($1,$2)", [u1,t1]);
+    await rejects(client, "INSERT INTO public.likes(user_id,thesis_id) VALUES ($1,$2)", [u1,t1], { code: "23505", constraint: "likes_user_id_thesis_id_pk" });
+  });
+  probe("likes allow different users and theses and default timestamp", async (client) => {
+    const result = await client.query("INSERT INTO public.likes(user_id,thesis_id) VALUES ($1,$3),($2,$3),($1,$4) RETURNING created_at IS NOT NULL AS dated", [u1,u2,t1,t2]);
+    expect(result.rows).toEqual([{ dated: true }, { dated: true }, { dated: true }]);
+  });
+  probe("like nonexistent thesis rejected", async (client) => {
+    await rejects(client, "INSERT INTO public.likes(user_id,thesis_id) VALUES ($1,$2)", [u1,crypto.randomUUID()], { code: "23503", constraint: "likes_thesis_id_theses_id_fk" });
+  });
+  probe("like nonexistent user rejected", async (client) => {
+    await rejects(client, "INSERT INTO public.likes(user_id,thesis_id) VALUES ($1,$2)", [crypto.randomUUID(),t1], { code: "23503", constraint: "likes_user_id_users_id_fk" });
+  });
+  probe("text-only post can be liked", async (client) => {
+    const post = await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,'h','open') RETURNING id", [u1]);
+    await client.query("INSERT INTO public.likes(user_id,thesis_id) VALUES ($1,$2)", [u2,post.rows[0].id]);
   });
 
   const relationships: [string, string, unknown[]][] = [

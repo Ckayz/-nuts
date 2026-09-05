@@ -3,17 +3,22 @@ import { Client } from "pg";
 import { seed } from "./fixtures/schema";
 
 const databaseUrl = process.env.DATABASE_URL;
-type Outcome = { committed: true } | { committed: false; code?: string };
+type Phase = "mutation" | "validation" | "commit";
+type Outcome = { committed: true } | { committed: false; code?: string; phase: Phase };
 
 async function finish(client: Client, sql: string, params: string[]): Promise<Outcome> {
+  let phase: Phase = "mutation";
   try {
+    phase = "mutation";
     await client.query(sql, params);
+    phase = "validation";
     await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    phase = "commit";
     await client.query("COMMIT");
     return { committed: true };
   } catch (error) {
     await Promise.allSettled([client.query("ROLLBACK")]);
-    return { committed: false, code: (error as { code?: string }).code };
+    return { committed: false, phase, code: (error as { code?: string }).code };
   }
 }
 
@@ -99,11 +104,11 @@ if (!databaseUrl) {
               results = [await pending, { committed: true }];
             }
             expect(results.filter((result) => result.committed)).toHaveLength(1);
-            expect(results.filter((result) => !result.committed)).toEqual([{ committed: false, code: isolation !== "READ COMMITTED" && first !== "mutation" ? "40001" : "23514" }]);
+            expect(results.filter((result) => !result.committed)).toEqual([{ committed: false, code: isolation !== "READ COMMITTED" && first !== "mutation" ? "40001" : "23514", phase: isolation !== "READ COMMITTED" && first !== "mutation" ? "mutation" : "validation" }]);
             const invalid = await a.query(`SELECT t.id FROM public.theses t
               LEFT JOIN public.positions p ON p.id=t.creator_position_id
               JOIN public.users u ON u.id=t.creator_user_id
-              WHERE t.id=$1 AND t.status IN ('open','expired','settled') AND
+              WHERE t.id=$1 AND t.creator_position_id IS NOT NULL AND t.status IN ('open','expired','settled') AND
                 (p.id IS NULL OR p.status NOT IN ('confirmed','indexed','expired','settled')
                  OR p.confirmed_at IS NULL OR p.wallet_address IS DISTINCT FROM u.wallet_address
                  OR p.thesis_id<>t.id OR p.user_id<>u.id OR p.role<>'creator' OR p.chain_id<>8453)`, [ids.t1]);

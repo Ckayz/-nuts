@@ -1,0 +1,1884 @@
+{
+  "id": "8600f9a7-3887-4577-9c2b-4d6eab467b43",
+  "prevId": "f7d881c0-f724-41bb-a619-a0f9bc004f06",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.activity": {
+      "name": "activity",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "thesis_id": {
+          "name": "thesis_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "position_id": {
+          "name": "position_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "activity_user_id_users_id_fk": {
+          "name": "activity_user_id_users_id_fk",
+          "tableFrom": "activity",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "activity_thesis_id_theses_id_fk": {
+          "name": "activity_thesis_id_theses_id_fk",
+          "tableFrom": "activity",
+          "tableTo": "theses",
+          "columnsFrom": [
+            "thesis_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "activity_position_id_positions_id_fk": {
+          "name": "activity_position_id_positions_id_fk",
+          "tableFrom": "activity",
+          "tableTo": "positions",
+          "columnsFrom": [
+            "position_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "activity_domain_reference_required": {
+          "name": "activity_domain_reference_required",
+          "value": "\"activity\".\"thesis_id\" is not null or \"activity\".\"position_id\" is not null"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.agent_conversations": {
+      "name": "agent_conversations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "wallet_address": {
+          "name": "wallet_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "thesis_id": {
+          "name": "thesis_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_conversations_wallet_idx": {
+          "name": "agent_conversations_wallet_idx",
+          "columns": [
+            {
+              "expression": "wallet_address",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_conversations_thesis_idx": {
+          "name": "agent_conversations_thesis_idx",
+          "columns": [
+            {
+              "expression": "thesis_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agent_messages": {
+      "name": "agent_messages",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parts": {
+          "name": "parts",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scope_allowed": {
+          "name": "scope_allowed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "scope_reason": {
+          "name": "scope_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_messages_conversation_idx": {
+          "name": "agent_messages_conversation_idx",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agent_messages_conversation_id_agent_conversations_id_fk": {
+          "name": "agent_messages_conversation_id_agent_conversations_id_fk",
+          "tableFrom": "agent_messages",
+          "tableTo": "agent_conversations",
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agent_proposals": {
+      "name": "agent_proposals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "wallet_address": {
+          "name": "wallet_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "source": {
+          "name": "source",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "preview": {
+          "name": "preview",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "max_loss_usd": {
+          "name": "max_loss_usd",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "collateral_usd": {
+          "name": "collateral_usd",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tx_to": {
+          "name": "tx_to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tx_data": {
+          "name": "tx_data",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_fetched_at": {
+          "name": "source_fetched_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_proposals_conversation_idx": {
+          "name": "agent_proposals_conversation_idx",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_proposals_wallet_idx": {
+          "name": "agent_proposals_wallet_idx",
+          "columns": [
+            {
+              "expression": "wallet_address",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agent_proposals_conversation_id_agent_conversations_id_fk": {
+          "name": "agent_proposals_conversation_id_agent_conversations_id_fk",
+          "tableFrom": "agent_proposals",
+          "tableTo": "agent_conversations",
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agent_receipts": {
+      "name": "agent_receipts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "proposal_id": {
+          "name": "proposal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chain_id": {
+          "name": "chain_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 8453
+        },
+        "tx_hash": {
+          "name": "tx_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "block_number": {
+          "name": "block_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "option_address": {
+          "name": "option_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contracts": {
+          "name": "contracts",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "raw": {
+          "name": "raw",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_receipts_tx_hash_key": {
+          "name": "agent_receipts_tx_hash_key",
+          "columns": [
+            {
+              "expression": "chain_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tx_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_receipts_proposal_idx": {
+          "name": "agent_receipts_proposal_idx",
+          "columns": [
+            {
+              "expression": "proposal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agent_receipts_proposal_id_agent_proposals_id_fk": {
+          "name": "agent_receipts_proposal_id_agent_proposals_id_fk",
+          "tableFrom": "agent_receipts",
+          "tableTo": "agent_proposals",
+          "columnsFrom": [
+            "proposal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agent_rfq_keys": {
+      "name": "agent_rfq_keys",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "wallet_address": {
+          "name": "wallet_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "public_key": {
+          "name": "public_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "encrypted_private_key": {
+          "name": "encrypted_private_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_rfq_keys_wallet_key": {
+          "name": "agent_rfq_keys_wallet_key",
+          "columns": [
+            {
+              "expression": "wallet_address",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agent_usage": {
+      "name": "agent_usage",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "subject_kind": {
+          "name": "subject_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day": {
+          "name": "day",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "turns": {
+          "name": "turns",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_usage_subject_day_key": {
+          "name": "agent_usage_subject_day_key",
+          "columns": [
+            {
+              "expression": "subject_kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "subject",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "day",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.auth_challenges": {
+      "name": "auth_challenges",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "wallet_address": {
+          "name": "wallet_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nonce": {
+          "name": "nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chain_id": {
+          "name": "chain_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_at": {
+          "name": "consumed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "auth_challenges_nonce_unique": {
+          "name": "auth_challenges_nonce_unique",
+          "columns": [
+            {
+              "expression": "nonce",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "auth_challenges_base_chain": {
+          "name": "auth_challenges_base_chain",
+          "value": "\"auth_challenges\".\"chain_id\" = 8453"
+        },
+        "auth_challenges_wallet_address_lowercase": {
+          "name": "auth_challenges_wallet_address_lowercase",
+          "value": "\"auth_challenges\".\"wallet_address\" = lower(\"auth_challenges\".\"wallet_address\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.comments": {
+      "name": "comments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "thesis_id": {
+          "name": "thesis_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "comments_thesis_id_theses_id_fk": {
+          "name": "comments_thesis_id_theses_id_fk",
+          "tableFrom": "comments",
+          "tableTo": "theses",
+          "columnsFrom": [
+            "thesis_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "comments_user_id_users_id_fk": {
+          "name": "comments_user_id_users_id_fk",
+          "tableFrom": "comments",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.follows": {
+      "name": "follows",
+      "schema": "",
+      "columns": {
+        "follower_user_id": {
+          "name": "follower_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "followed_user_id": {
+          "name": "followed_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "follows_follower_user_id_users_id_fk": {
+          "name": "follows_follower_user_id_users_id_fk",
+          "tableFrom": "follows",
+          "tableTo": "users",
+          "columnsFrom": [
+            "follower_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "follows_followed_user_id_users_id_fk": {
+          "name": "follows_followed_user_id_users_id_fk",
+          "tableFrom": "follows",
+          "tableTo": "users",
+          "columnsFrom": [
+            "followed_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "follows_follower_user_id_followed_user_id_pk": {
+          "name": "follows_follower_user_id_followed_user_id_pk",
+          "columns": [
+            "follower_user_id",
+            "followed_user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.positions": {
+      "name": "positions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "thesis_id": {
+          "name": "thesis_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "position_role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "side": {
+          "name": "side",
+          "type": "position_side",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "position_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chain_id": {
+          "name": "chain_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "wallet_address": {
+          "name": "wallet_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_hash": {
+          "name": "order_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order_snapshot": {
+          "name": "order_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fill_event": {
+          "name": "fill_event",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "indexer_position_id": {
+          "name": "indexer_position_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tx_hash": {
+          "name": "tx_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "option_address": {
+          "name": "option_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "referrer": {
+          "name": "referrer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "budget": {
+          "name": "budget",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "budget_decimals": {
+          "name": "budget_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contracts": {
+          "name": "contracts",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contract_decimals": {
+          "name": "contract_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "premium": {
+          "name": "premium",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "premium_decimals": {
+          "name": "premium_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fees": {
+          "name": "fees",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fee_decimals": {
+          "name": "fee_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collateral": {
+          "name": "collateral",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collateral_decimals": {
+          "name": "collateral_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "maximum_loss": {
+          "name": "maximum_loss",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maximum_loss_decimals": {
+          "name": "maximum_loss_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maximum_payout": {
+          "name": "maximum_payout",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maximum_payout_decimals": {
+          "name": "maximum_payout_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_even_prices": {
+          "name": "break_even_prices",
+          "type": "numeric[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "break_even_price_decimals": {
+          "name": "break_even_price_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estimated_pnl": {
+          "name": "estimated_pnl",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "estimated_pnl_decimals": {
+          "name": "estimated_pnl_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settlement_price": {
+          "name": "settlement_price",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settlement_price_decimals": {
+          "name": "settlement_price_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payout": {
+          "name": "payout",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payout_decimals": {
+          "name": "payout_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_pnl": {
+          "name": "final_pnl",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_pnl_decimals": {
+          "name": "final_pnl_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entry_premium_usd": {
+          "name": "entry_premium_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entry_fees_usd": {
+          "name": "entry_fees_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maximum_loss_usd": {
+          "name": "maximum_loss_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maximum_payout_usd": {
+          "name": "maximum_payout_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_even_prices_usd": {
+          "name": "break_even_prices_usd",
+          "type": "numeric[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estimated_pnl_usd": {
+          "name": "estimated_pnl_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_pnl_usd": {
+          "name": "final_pnl_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settlement_price_usd": {
+          "name": "settlement_price_usd",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "indexed_at": {
+          "name": "indexed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "positions_chain_id_tx_hash_unique": {
+          "name": "positions_chain_id_tx_hash_unique",
+          "columns": [
+            {
+              "expression": "chain_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tx_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "positions_thesis_id_theses_id_fk": {
+          "name": "positions_thesis_id_theses_id_fk",
+          "tableFrom": "positions",
+          "tableTo": "theses",
+          "columnsFrom": [
+            "thesis_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "positions_user_id_users_id_fk": {
+          "name": "positions_user_id_users_id_fk",
+          "tableFrom": "positions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "positions_base_chain": {
+          "name": "positions_base_chain",
+          "value": "\"positions\".\"chain_id\" = 8453"
+        },
+        "positions_confirmed_fill_event_required": {
+          "name": "positions_confirmed_fill_event_required",
+          "value": "\"positions\".\"status\" not in ('confirmed', 'indexed', 'expired', 'settled') or (\"positions\".\"fill_event\" is not null and coalesce(\"positions\".\"fill_event\"->>'version' = '1', false))"
+        },
+        "positions_budget_decimals_nonnegative": {
+          "name": "positions_budget_decimals_nonnegative",
+          "value": "\"positions\".\"budget_decimals\" >= 0"
+        },
+        "positions_contract_decimals_nonnegative": {
+          "name": "positions_contract_decimals_nonnegative",
+          "value": "\"positions\".\"contract_decimals\" >= 0"
+        },
+        "positions_premium_decimals_nonnegative": {
+          "name": "positions_premium_decimals_nonnegative",
+          "value": "\"positions\".\"premium_decimals\" >= 0"
+        },
+        "positions_fee_decimals_nonnegative": {
+          "name": "positions_fee_decimals_nonnegative",
+          "value": "\"positions\".\"fee_decimals\" >= 0"
+        },
+        "positions_collateral_decimals_nonnegative": {
+          "name": "positions_collateral_decimals_nonnegative",
+          "value": "\"positions\".\"collateral_decimals\" >= 0"
+        },
+        "positions_maximum_loss_decimals_nonnegative": {
+          "name": "positions_maximum_loss_decimals_nonnegative",
+          "value": "\"positions\".\"maximum_loss_decimals\" >= 0"
+        },
+        "positions_maximum_payout_decimals_nonnegative": {
+          "name": "positions_maximum_payout_decimals_nonnegative",
+          "value": "\"positions\".\"maximum_payout_decimals\" >= 0"
+        },
+        "positions_break_even_price_decimals_nonnegative": {
+          "name": "positions_break_even_price_decimals_nonnegative",
+          "value": "\"positions\".\"break_even_price_decimals\" >= 0"
+        },
+        "positions_estimated_pnl_decimals_nonnegative": {
+          "name": "positions_estimated_pnl_decimals_nonnegative",
+          "value": "\"positions\".\"estimated_pnl_decimals\" >= 0"
+        },
+        "positions_settlement_price_decimals_nonnegative": {
+          "name": "positions_settlement_price_decimals_nonnegative",
+          "value": "\"positions\".\"settlement_price_decimals\" >= 0"
+        },
+        "positions_payout_decimals_nonnegative": {
+          "name": "positions_payout_decimals_nonnegative",
+          "value": "\"positions\".\"payout_decimals\" >= 0"
+        },
+        "positions_final_pnl_decimals_nonnegative": {
+          "name": "positions_final_pnl_decimals_nonnegative",
+          "value": "\"positions\".\"final_pnl_decimals\" >= 0"
+        },
+        "positions_maximum_loss_decimals_required": {
+          "name": "positions_maximum_loss_decimals_required",
+          "value": "\"positions\".\"maximum_loss\" is null or \"positions\".\"maximum_loss_decimals\" is not null"
+        },
+        "positions_maximum_payout_decimals_required": {
+          "name": "positions_maximum_payout_decimals_required",
+          "value": "\"positions\".\"maximum_payout\" is null or \"positions\".\"maximum_payout_decimals\" is not null"
+        },
+        "positions_estimated_pnl_decimals_required": {
+          "name": "positions_estimated_pnl_decimals_required",
+          "value": "\"positions\".\"estimated_pnl\" is null or \"positions\".\"estimated_pnl_decimals\" is not null"
+        },
+        "positions_settlement_price_decimals_required": {
+          "name": "positions_settlement_price_decimals_required",
+          "value": "\"positions\".\"settlement_price\" is null or \"positions\".\"settlement_price_decimals\" is not null"
+        },
+        "positions_payout_decimals_required": {
+          "name": "positions_payout_decimals_required",
+          "value": "\"positions\".\"payout\" is null or \"positions\".\"payout_decimals\" is not null"
+        },
+        "positions_final_pnl_decimals_required": {
+          "name": "positions_final_pnl_decimals_required",
+          "value": "\"positions\".\"final_pnl\" is null or \"positions\".\"final_pnl_decimals\" is not null"
+        },
+        "positions_wallet_address_lowercase": {
+          "name": "positions_wallet_address_lowercase",
+          "value": "\"positions\".\"wallet_address\" = lower(\"positions\".\"wallet_address\")"
+        },
+        "positions_budget_integral_nonnegative": {
+          "name": "positions_budget_integral_nonnegative",
+          "value": "scale(\"positions\".\"budget\") = 0 and \"positions\".\"budget\" >= 0"
+        },
+        "positions_contracts_integral_nonnegative": {
+          "name": "positions_contracts_integral_nonnegative",
+          "value": "scale(\"positions\".\"contracts\") = 0 and \"positions\".\"contracts\" > 0"
+        },
+        "positions_premium_integral_nonnegative": {
+          "name": "positions_premium_integral_nonnegative",
+          "value": "scale(\"positions\".\"premium\") = 0 and \"positions\".\"premium\" >= 0"
+        },
+        "positions_fees_integral_nonnegative": {
+          "name": "positions_fees_integral_nonnegative",
+          "value": "scale(\"positions\".\"fees\") = 0 and \"positions\".\"fees\" >= 0"
+        },
+        "positions_collateral_integral_nonnegative": {
+          "name": "positions_collateral_integral_nonnegative",
+          "value": "scale(\"positions\".\"collateral\") = 0 and \"positions\".\"collateral\" >= 0"
+        },
+        "positions_maximum_loss_integral_nonnegative": {
+          "name": "positions_maximum_loss_integral_nonnegative",
+          "value": "\"positions\".\"maximum_loss\" is null or (scale(\"positions\".\"maximum_loss\") = 0 and \"positions\".\"maximum_loss\" >= 0)"
+        },
+        "positions_maximum_payout_integral_nonnegative": {
+          "name": "positions_maximum_payout_integral_nonnegative",
+          "value": "\"positions\".\"maximum_payout\" is null or (scale(\"positions\".\"maximum_payout\") = 0 and \"positions\".\"maximum_payout\" >= 0)"
+        },
+        "positions_settlement_price_integral_nonnegative": {
+          "name": "positions_settlement_price_integral_nonnegative",
+          "value": "\"positions\".\"settlement_price\" is null or (scale(\"positions\".\"settlement_price\") = 0 and \"positions\".\"settlement_price\" >= 0)"
+        },
+        "positions_payout_integral_nonnegative": {
+          "name": "positions_payout_integral_nonnegative",
+          "value": "\"positions\".\"payout\" is null or (scale(\"positions\".\"payout\") = 0 and \"positions\".\"payout\" >= 0)"
+        },
+        "positions_estimated_pnl_integral": {
+          "name": "positions_estimated_pnl_integral",
+          "value": "\"positions\".\"estimated_pnl\" is null or scale(\"positions\".\"estimated_pnl\") = 0"
+        },
+        "positions_final_pnl_integral": {
+          "name": "positions_final_pnl_integral",
+          "value": "\"positions\".\"final_pnl\" is null or scale(\"positions\".\"final_pnl\") = 0"
+        },
+        "positions_break_even_prices_integral_nonnegative": {
+          "name": "positions_break_even_prices_integral_nonnegative",
+          "value": "case when cardinality(\"positions\".\"break_even_prices\") = 0 then true when array_ndims(\"positions\".\"break_even_prices\") = 1 then array_position(\"positions\".\"break_even_prices\", NULL) is null and array_to_string(\"positions\".\"break_even_prices\", ',') ~ '^[0-9]+(,[0-9]+)*$' else false end"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.theses": {
+      "name": "theses",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "creator_user_id": {
+          "name": "creator_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "headline": {
+          "name": "headline",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rationale": {
+          "name": "rationale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "direction": {
+          "name": "direction",
+          "type": "thesis_direction",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "thesis_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tagged_asset": {
+          "name": "tagged_asset",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "underlying_asset": {
+          "name": "underlying_asset",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expiry_at": {
+          "name": "expiry_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "product_type": {
+          "name": "product_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_call": {
+          "name": "is_call",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_long": {
+          "name": "is_long",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "strikes": {
+          "name": "strikes",
+          "type": "numeric[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "strike_decimals": {
+          "name": "strike_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "collateral_address": {
+          "name": "collateral_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "collateral_symbol": {
+          "name": "collateral_symbol",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "collateral_decimals": {
+          "name": "collateral_decimals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "creator_order_snapshot": {
+          "name": "creator_order_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "creator_position_id": {
+          "name": "creator_position_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expired_at": {
+          "name": "expired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "theses_creator_position_unique": {
+          "name": "theses_creator_position_unique",
+          "columns": [
+            {
+              "expression": "creator_position_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"theses\".\"creator_position_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "theses_creator_user_id_users_id_fk": {
+          "name": "theses_creator_user_id_users_id_fk",
+          "tableFrom": "theses",
+          "tableTo": "users",
+          "columnsFrom": [
+            "creator_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "theses_creator_position_id_positions_id_fk": {
+          "name": "theses_creator_position_id_positions_id_fk",
+          "tableFrom": "theses",
+          "tableTo": "positions",
+          "columnsFrom": [
+            "creator_position_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "theses_structure_all_or_nothing": {
+          "name": "theses_structure_all_or_nothing",
+          "value": "(\"theses\".\"direction\" is null and \"theses\".\"underlying_asset\" is null and \"theses\".\"expiry_at\" is null and \"theses\".\"product_type\" is null and \"theses\".\"is_call\" is null and \"theses\".\"is_long\" is null and \"theses\".\"strikes\" is null and \"theses\".\"strike_decimals\" is null and \"theses\".\"collateral_address\" is null and \"theses\".\"collateral_symbol\" is null and \"theses\".\"collateral_decimals\" is null and \"theses\".\"creator_order_snapshot\" is null) or (\"theses\".\"direction\" is not null and \"theses\".\"underlying_asset\" is not null and \"theses\".\"expiry_at\" is not null and \"theses\".\"product_type\" is not null and \"theses\".\"is_call\" is not null and \"theses\".\"is_long\" is not null and \"theses\".\"strikes\" is not null and \"theses\".\"strike_decimals\" is not null and \"theses\".\"collateral_address\" is not null and \"theses\".\"collateral_symbol\" is not null and \"theses\".\"collateral_decimals\" is not null and \"theses\".\"creator_order_snapshot\" is not null)"
+        },
+        "theses_tagged_asset_uppercase": {
+          "name": "theses_tagged_asset_uppercase",
+          "value": "\"theses\".\"tagged_asset\" = upper(\"theses\".\"tagged_asset\")"
+        },
+        "theses_tagged_asset_matches_structure": {
+          "name": "theses_tagged_asset_matches_structure",
+          "value": "\"theses\".\"underlying_asset\" is null or (\"theses\".\"tagged_asset\" is not null and \"theses\".\"tagged_asset\" = \"theses\".\"underlying_asset\")"
+        },
+        "theses_strike_decimals_nonnegative": {
+          "name": "theses_strike_decimals_nonnegative",
+          "value": "\"theses\".\"strike_decimals\" >= 0"
+        },
+        "theses_collateral_decimals_nonnegative": {
+          "name": "theses_collateral_decimals_nonnegative",
+          "value": "\"theses\".\"collateral_decimals\" >= 0"
+        },
+        "theses_backing_requires_structure": {
+          "name": "theses_backing_requires_structure",
+          "value": "\"theses\".\"creator_position_id\" is null or \"theses\".\"underlying_asset\" is not null"
+        },
+        "theses_strikes_integral_nonnegative": {
+          "name": "theses_strikes_integral_nonnegative",
+          "value": "\"theses\".\"strikes\" is null or case when array_ndims(\"theses\".\"strikes\") = 1 then array_position(\"theses\".\"strikes\", NULL) is null and cardinality(\"theses\".\"strikes\") > 0 and array_to_string(\"theses\".\"strikes\", ',') ~ '^[0-9]+(,[0-9]+)*$' else false end"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "wallet_address": {
+          "name": "wallet_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bio": {
+          "name": "bio",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "avatar_url": {
+          "name": "avatar_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "users_wallet_address_unique": {
+          "name": "users_wallet_address_unique",
+          "columns": [
+            {
+              "expression": "wallet_address",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "users_wallet_address_lowercase": {
+          "name": "users_wallet_address_lowercase",
+          "value": "\"users\".\"wallet_address\" = lower(\"users\".\"wallet_address\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.likes": {
+      "name": "likes",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "thesis_id": {
+          "name": "thesis_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "likes_user_id_users_id_fk": {
+          "name": "likes_user_id_users_id_fk",
+          "tableFrom": "likes",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "likes_thesis_id_theses_id_fk": {
+          "name": "likes_thesis_id_theses_id_fk",
+          "tableFrom": "likes",
+          "tableTo": "theses",
+          "columnsFrom": [
+            "thesis_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "likes_user_id_thesis_id_pk": {
+          "name": "likes_user_id_thesis_id_pk",
+          "columns": [
+            "user_id",
+            "thesis_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.position_role": {
+      "name": "position_role",
+      "schema": "public",
+      "values": [
+        "creator",
+        "participant"
+      ]
+    },
+    "public.position_side": {
+      "name": "position_side",
+      "schema": "public",
+      "values": [
+        "back",
+        "counter"
+      ]
+    },
+    "public.position_status": {
+      "name": "position_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "confirmed",
+        "indexed",
+        "expired",
+        "settled",
+        "failed"
+      ]
+    },
+    "public.thesis_direction": {
+      "name": "thesis_direction",
+      "schema": "public",
+      "values": [
+        "bull",
+        "bear"
+      ]
+    },
+    "public.thesis_status": {
+      "name": "thesis_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "pending",
+        "open",
+        "expired",
+        "settled",
+        "cancelled"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

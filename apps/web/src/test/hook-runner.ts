@@ -40,7 +40,7 @@ const INTERNALS: { H: unknown } = INTERNALS_SLOT;
 type Deps = readonly unknown[] | undefined;
 
 interface Slot {
-	kind: "state" | "ref" | "memo" | "effect" | "transition";
+	kind: "state" | "ref" | "memo" | "effect" | "transition" | "optimistic";
 	value?: unknown;
 	deps?: Deps;
 	cleanup?: (() => void) | void;
@@ -117,6 +117,33 @@ function useEffect(fn: () => void | (() => void), deps: Deps): void {
 		s.value = true;
 		inst.pendingEffects.push(s, fn as unknown as Slot);
 	}
+}
+
+/**
+ * `useOptimistic`, as much of it as a synchronous runner can honestly model.
+ *
+ * React resets the optimistic value when the transition that set it finishes;
+ * this harness has no transition scope, so it resets whenever the passthrough
+ * is not `Object.is`-equal to the one the value was set against. A component
+ * that passes a fresh object literal on every render (the social controls do)
+ * therefore shows the passthrough again on the next render. Do not write a test
+ * that asserts on WHEN the optimistic value disappears: this exists so that
+ * components calling the hook can be mounted at all.
+ */
+function useOptimistic<S>(passthrough: S, reducer?: (state: S, action: unknown) => S): [S, (action: unknown) => void] {
+	const inst = current;
+	if (inst === null) throw new Error("useOptimistic outside a render");
+	const s = slot("optimistic");
+	const held = s.value as { base: S; value: S } | undefined;
+	if (held === undefined || !Object.is(held.base, passthrough)) {
+		s.value = { base: passthrough, value: passthrough };
+	}
+	const state = s.value as { base: S; value: S };
+	const add = (action: unknown) => {
+		state.value = reducer === undefined ? (action as S) : reducer(state.value, action);
+		inst.dirty = true;
+	};
+	return [state.value, add];
 }
 
 function useTransition(): [boolean, (fn: () => void | Promise<void>) => void] {
@@ -208,6 +235,7 @@ const DISPATCHER: Record<string, unknown> = new Proxy(
 		useEffect,
 		useLayoutEffect: useEffect,
 		useInsertionEffect: useEffect,
+		useOptimistic,
 		useTransition,
 		useDebugValue: () => {},
 		useId: () => ":probe:",

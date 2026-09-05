@@ -1,6 +1,7 @@
 "use client";
 import { useId, useState, useTransition } from "react";
 import { Avatar } from "@/components/primitives";
+import { useConnectedIdentity } from "@/components/auth/connected-identity";
 import { addComment } from "@/lib/social/actions";
 
 export function CommentForm({ thesisId, signedIn, databaseMode, onMockComment, onPending, initials, viewerSeed }: {
@@ -9,7 +10,11 @@ export function CommentForm({ thesisId, signedIn, databaseMode, onMockComment, o
 	const hintId = useId();
 	const [body, setBody] = useState("");
 	const [pending, startTransition] = useTransition();
-	const disabled = databaseMode && !signedIn;
+	// B-R2: a wallet connected as somebody else while the server session still
+	// says otherwise is the signed-out state — the comment would be posted as
+	// the account the person left. Same disabled state, same sentence.
+	const identity = useConnectedIdentity();
+	const disabled = databaseMode && (!signedIn || identity.mismatched);
 	// TODO-OWNER: minimal comment form copy and maximum content length.
 	return <><form className="comment-form" onSubmit={event => {
 		event.preventDefault();
@@ -18,7 +23,7 @@ export function CommentForm({ thesisId, signedIn, databaseMode, onMockComment, o
 		startTransition(async () => {
 			onPending(body.trim());
 			try {
-				const result = await addComment(thesisId, body);
+				const result = await addComment(thesisId, body, identity.address ?? undefined);
 				if (!("error" in result)) setBody("");
 			} catch { /* Preserve the draft for a deliberate retry. */ }
 		});

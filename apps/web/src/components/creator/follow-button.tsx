@@ -2,6 +2,7 @@
 "use client";
 
 import { useId, useOptimistic, useState, useTransition } from "react";
+import { useConnectedIdentity } from "@/components/auth/connected-identity";
 import { toggleFollow } from "@/lib/social/actions";
 
 /**
@@ -18,6 +19,10 @@ import { toggleFollow } from "@/lib/social/actions";
  * disabled button does not expose and a screen reader does not announce. It is
  * now also an `aria-describedby` sentence, the mechanism the comment box uses
  * (`components/thesis/comment-form.tsx`), with the same words.
+ *
+ * B-R2 (lane B pass 2): the same disabled state also covers a wallet connected
+ * as somebody else while the server session still says otherwise, and the call
+ * carries the connected wallet so the server refuses it too.
  */
 export function FollowButton({
 	creatorId,
@@ -35,8 +40,12 @@ export function FollowButton({
 	const [local, setLocal] = useState(following);
 	const [pending, startTransition] = useTransition();
 	const [state, optimistic] = useOptimistic(databaseMode ? following : local);
-	const disabled = pending || (databaseMode && (!signedIn || creatorId === undefined));
-	const needsSignIn = databaseMode && !signedIn;
+	// B-R2: an unresolved identity (wallet B, server session still A because the
+	// mismatch sign-out failed) is treated exactly as signed out — the follow
+	// would otherwise land as the account the person left.
+	const identity = useConnectedIdentity();
+	const disabled = pending || (databaseMode && (!signedIn || identity.mismatched || creatorId === undefined));
+	const needsSignIn = databaseMode && (!signedIn || identity.mismatched);
 	return (
 		<>
 		{needsSignIn ? <span id={hintId} className="a11y-hidden">Sign in using the wallet control</span> : null}
@@ -56,7 +65,7 @@ export function FollowButton({
 				startTransition(async () => {
 					optimistic(!state);
 					try {
-						await toggleFollow(creatorId!, !state);
+						await toggleFollow(creatorId!, !state, identity.address ?? undefined);
 					} catch {
 						/* Roll back to server props. */
 					}

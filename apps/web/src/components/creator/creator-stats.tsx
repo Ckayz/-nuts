@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useId, useOptimistic, useState, useTransition } from "react";
+import { useConnectedIdentity } from "@/components/auth/connected-identity";
 import { toggleFollow } from "@/lib/social/actions";
 import { Avatar } from "@/components/primitives";
 import { countLabel, pnlClass, signedUsd } from "@/lib/format";
@@ -11,19 +12,21 @@ export function CreatorStats({ creator, following = false, signedIn = false, dat
 	const [local, setLocal] = useState({ following, followers: creator.followerCount });
 	const [pending, startTransition] = useTransition();
 	const [state, optimistic] = useOptimistic(databaseMode ? { following, followers: creator.followerCount } : local);
-	const disabled = pending || self || (databaseMode && (!signedIn || !creator.id));
+	// B-R2: an unresolved identity is the signed-out state for this control too.
+	const identity = useConnectedIdentity();
+	const disabled = pending || self || (databaseMode && (!signedIn || identity.mismatched || !creator.id));
 
  // TODO-OWNER: Like/Follow sign-in hint copy.
  // m8: `title` alone is not exposed on a disabled button and is not announced,
  // so the same sentence is also an `aria-describedby` target — the mechanism
  // `components/thesis/comment-form.tsx` already uses. No new words.
- const needsSignIn = databaseMode && !signedIn;
+ const needsSignIn = databaseMode && (!signedIn || identity.mismatched);
  const follow = self ? null : <>{needsSignIn ? <span id={hintId} className="a11y-hidden">Sign in using the wallet control</span> : null}<button type="button" className={profile ? "btn acc" : "btn out"} aria-pressed={state.following} disabled={disabled} aria-describedby={needsSignIn ? hintId : undefined} title={needsSignIn ? "Sign in using the wallet control" : undefined}
 					onClick={() => {
 						if (disabled) return;
 						const next = { following: !state.following, followers: state.followers === undefined ? undefined : state.followers + (state.following ? -1 : 1) };
 						if (!databaseMode) { setLocal(next); return; }
-						startTransition(async () => { optimistic(next); try { await toggleFollow(creator.id!, next.following); } catch { /* rollback */ } });
+						startTransition(async () => { optimistic(next); try { await toggleFollow(creator.id!, next.following, identity.address ?? undefined); } catch { /* rollback */ } });
 					}}>{state.following ? "Following" : "Follow"}</button></>;
  const stats = <>
   {creator.verifiedPnl30dUsd !== undefined ? <span className="tile"><i>Verified P&amp;L 30d</i><b className={`num ${pnlClass(creator.verifiedPnl30dUsd) === "bear" ? "loss" : pnlClass(creator.verifiedPnl30dUsd) === "bull" ? "gain" : "mut"}`}>{signedUsd(creator.verifiedPnl30dUsd)}</b></span> : null}

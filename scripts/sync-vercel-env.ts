@@ -13,15 +13,19 @@
  *     are ever sent. Everything else is skipped, by NAME only.
  *  2. LOCAL VALUES — any value that would be pushed matching the local pattern
  *     refuses the whole run (exit 1) before a single `vercel` call.
- *  3. EMPTY IN PRODUCTION — an empty value targeting `production` refuses the
+ *  3. DESTINATION OVERRIDES — a value that parses as a URL and carries one of
+ *     the shared `DESTINATION_OVERRIDE_PARAMETERS` query parameters refuses the
+ *     whole run, whatever its authority says.
+ *  4. EMPTY IN PRODUCTION — an empty value targeting `production` refuses the
  *     whole run.
- *  4. `--yes` — `vercel env add --force` OVERWRITES. Without an explicit `--yes`
+ *  5. `--yes` — `vercel env add --force` OVERWRITES. Without an explicit `--yes`
  *     the script prints the key names it would change and exits 1.
  *
  * `--dry-run` prints the plan (key names and value LENGTHS) and never calls
- * Vercel. Refusals 1-3 run BEFORE it, so a local or empty value refuses even a
- * dry run — measured 2026-09-06 against the owner's own `apps/web/.env`. No secret value is ever written to stdout or stderr by this script;
- * values reach `vercel` only through the child's stdin.
+ * Vercel. Refusals 1-4 run BEFORE it, so a local, redirected or empty value
+ * refuses even a dry run — measured 2026-09-06 against the owner's own
+ * `apps/web/.env`. No secret value is ever written to stdout or stderr by this
+ * script; values reach `vercel` only through the child's stdin.
  *
  * Usage:
  *   bun run env:preview                     # plan only; refuses without --yes
@@ -32,6 +36,11 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { validatedEnvKeys } from "@nuts/env/schema-keys";
 import dotenv from "dotenv";
+// ONE list, shared with both bun-test preloads, `scripts/verify.ts` and
+// `packages/db/drizzle.config.ts`. Imported by relative path because the root
+// workspace does not depend on `@nuts/db`; `test-fence.ts` has no imports of its
+// own for exactly that reason. See `packages/db/src/test-fence.ts`.
+import { DESTINATION_OVERRIDE_PARAMETERS } from "../packages/db/src/test-fence";
 
 const DEFAULT_ENVIRONMENT = "preview";
 const VALID_ENVIRONMENTS = new Set(["development", "preview", "production"]);
@@ -204,6 +213,46 @@ function isLocalValue(value: string): boolean {
 	// `file:` URLs carry no host, and non-URL values still need the old reach.
 	return LOCAL_VALUE_PATTERN.test(value);
 }
+
+/**
+ * A3-1 (one-shot review pass 3). `isLocalValue` judges the URL's AUTHORITY
+ * hostname, but `pg` reads a handful of query parameters that REPLACE that
+ * destination, so a value whose authority is a perfectly deployable host can
+ * still point production at the machine that ran this script. Measured
+ * 2026-09-06 before this change: `production --dry-run` with
+ * `postgresql://u:p@db.example.invalid:5432/x?host=%3A%3A1` exited 0 and planned
+ * the sync, and the installed driver reported that value's effective host as
+ * `::1` (`new pg.Client({connectionString}).connectionParameters`); `?host=`
+ * with the integer spelling `2130706433` behaved the same way.
+ *
+ * Returns the offending parameter name AS WRITTEN (never its value — no env
+ * value reaches stdout or stderr), or null. Judged for EVERY value that parses
+ * as a URL rather than for a list of key names: the fence fails closed, and no
+ * deployable value of any key in `validatedEnvKeys()` needs one of these
+ * parameters. Values that are not URLs (API keys, model ids) cannot carry a
+ * query at all and are unaffected.
+ *
+ * `URLSearchParams` keys are already percent-decoded, so `?%68ost=` is caught,
+ * and the comparison is lower-cased like the shared fence's — `?HOST=` is
+ * refused even though the installed `pg` happens to ignore that spelling today.
+ * Measured the same day: a query written after a `#` (`…/x#?host=::1`) is a
+ * fragment to BOTH parsers — `pg` keeps the authority host — so the two agree on
+ * every fixture probed, and this check sees what the driver would apply.
+ */
+function destinationOverrideParameter(value: string): string | null {
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return null; // Not a URL: it carries no query parameters to obey.
+	}
+	for (const name of url.searchParams.keys()) {
+		if ((DESTINATION_OVERRIDE_PARAMETERS as readonly string[]).includes(name.toLowerCase())) {
+			return name;
+		}
+	}
+	return null;
+}
 /** TODO-OWNER: exit code for a refused run. 1 chosen so a pipeline stops. */
 const REFUSAL_EXIT_CODE = 1;
 
@@ -287,6 +336,17 @@ const localKeys = [...push.entries()]
 if (localKeys.length > 0) {
 	refusals.push(
 		`local-only value(s) — a loopback host (localhost, 127.0.0.0/8, ::1, 0.0.0.0) or file: — in ${localKeys.join(", ")}. A deployed environment cannot reach those.`,
+	);
+}
+const overriddenKeys = [...push.entries()]
+	.map(([key, value]) => [key, destinationOverrideParameter(value)] as const)
+	.filter((entry): entry is readonly [string, string] => entry[1] !== null)
+	.sort(([left], [right]) => left.localeCompare(right));
+if (overriddenKeys.length > 0) {
+	refusals.push(
+		`destination-override query parameter(s) — ${overriddenKeys
+			.map(([key, name]) => `${key} carries "${name}"`)
+			.join(", ")}. \`pg\` obeys ${DESTINATION_OVERRIDE_PARAMETERS.join(", ")} over the host, port and database written in the URL, so the value's real destination is not the one it shows.`,
 	);
 }
 if (environment === "production") {

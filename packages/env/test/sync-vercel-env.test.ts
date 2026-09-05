@@ -162,6 +162,81 @@ for (const [label, url] of [
 	});
 }
 
+/**
+ * A3-1 (one-shot review pass 3). The loopback fence above judges the URL's
+ * AUTHORITY hostname, but `pg` obeys query parameters that REPLACE the
+ * destination. The reviewer's fixture — a deployable authority plus
+ * `?host=%3A%3A1` — exited 0 and planned the sync before this fold, while the
+ * installed driver reported its effective host as `::1`. Every parameter in the
+ * shared `DESTINATION_OVERRIDE_PARAMETERS` list must refuse, whatever the
+ * authority says.
+ */
+for (const [label, query] of [
+	["reviewer fixture, encoded ipv6", "host=%3A%3A1"],
+	["integer loopback host", "host=2130706433"],
+	["percent-encoded parameter name", "%68ost=%3A%3A1"],
+	["uppercase parameter name", "HOST=%3A%3A1"],
+	["hostaddr", "hostaddr=%3A%3A1"],
+	["port", "port=54322"],
+	["dbname", "dbname=other"],
+	["database", "database=other"],
+	["options", "options=-c%20search_path%3Dother"],
+	["connectionstring", "connectionstring=postgresql%3A%2F%2Fu%40db.other.invalid%2Fy"],
+	["service", "service=local"],
+	["servicefile", "servicefile=%2Ftmp%2Fpgservice.conf"],
+] as const) {
+	test(`refuses a DATABASE_URL carrying ${label}`, () => {
+		const file = envFile(
+			`override-${label.replace(/[^a-z0-9]+/gi, "-")}.env`,
+			`DATABASE_URL=postgresql://postgres:${SECRETS.remotePassword}@aws-0.pooler.example.invalid:6543/postgres?${query}\nSESSION_SECRET=${SECRETS.sessionSecret}\n`,
+		);
+		const { code, output } = run(["production", file, "--dry-run"]);
+		expect(code).toBe(1);
+		expect(output).toContain("destination-override query parameter(s)");
+		expect(output).toContain("DATABASE_URL");
+		expect(output).not.toContain("Dry run");
+		expect(output).not.toContain("Syncing");
+	});
+}
+
+/** The fence is judged per VALUE, not per key name: any URL-valued key is covered. */
+test("refuses a non-database URL value carrying a destination-override parameter", () => {
+	const file = envFile(
+		"override-rpc.env",
+		[
+			`DATABASE_URL=postgresql://postgres:${SECRETS.remotePassword}@aws-0.pooler.example.invalid:6543/postgres`,
+			"BASE_RPC_URL=https://base-mainnet.example.invalid/v1?service=local",
+			`SESSION_SECRET=${SECRETS.sessionSecret}`,
+		].join("\n"),
+	);
+	const { code, output } = run(["production", file, "--dry-run"]);
+	expect(code).toBe(1);
+	expect(output).toContain("destination-override query parameter(s)");
+	expect(output).toContain("BASE_RPC_URL");
+	expect(output).not.toContain("Dry run");
+});
+
+/**
+ * The other direction: the fence must not refuse deployable values. A query the
+ * driver does not obey stays allowed, and a non-URL value that merely CONTAINS
+ * one of the parameter names is not a URL at all, so it carries no query.
+ */
+test("accepts a remote URL whose query holds no destination-override parameter", () => {
+	const file = envFile(
+		"override-clean.env",
+		[
+			`DATABASE_URL=postgresql://postgres:${SECRETS.remotePassword}@aws-0.pooler.example.invalid:6543/postgres?sslmode=require&application_name=thesis`,
+			`SESSION_SECRET=${SECRETS.sessionSecret}`,
+			`OPENROUTER_API_KEY=${SECRETS.openrouter}-host=db.example.invalid`,
+		].join("\n"),
+	);
+	const { code, output } = run(["production", file, "--dry-run"]);
+	expect(code).toBe(0);
+	expect(output).toContain("Dry run");
+	expect(output).not.toContain("destination-override");
+	expect(output).not.toContain("local-only value(s)");
+});
+
 test("skips keys outside the validated schema, naming them without reading their values", () => {
 	const { code, output } = run(["production", remoteFile, "--dry-run"]);
 	expect(code).toBe(0);

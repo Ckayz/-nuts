@@ -6,9 +6,16 @@ import type { OrderWithSignature } from "@thetanuts-finance/thetanuts-client";
 mock.module("server-only", () => ({}));
 process.env.DATABASE_URL ??= "postgresql://localhost/offline";
 process.env.OPENROUTER_API_KEY ??= "offline-test";
-const { toTradeable, sizeFill, readClient, getOrderSnapshot, usdRisk, rawOrderApi, decimalString, searchOrders } = await import("./orders");
+const { toTradeable, sizeFill, readClient, getOrderSnapshot, usdRisk, rawOrderApi, decimalString, searchOrders,
+ isSdkIncompatible, CONTRACT_UNITS_UNVERIFIED, buyContractSizeDecimals } = await import("./orders");
 const { instrumentKey } = await import("./instrument");
 const { env } = await import("@nuts/env/server");
+type SdkIncompatible = import("./types").SdkIncompatible;
+/** Narrow away the adapter-failure arm; a test that hits it should fail loudly, not silently skip. */
+const ok = <T extends object>(value: T | SdkIncompatible): T => {
+ if (isSdkIncompatible(value)) throw new Error(`unexpected sdk_incompatible: ${value.detail}`);
+ return value;
+};
 const client = createReadClient({ rpcUrl: "http://127.0.0.1:1", referrer: env.THESIS_REFERRER });
 const A = (digit: string) => `0x${digit.repeat(40)}`;
 function fixture(isLong = true, collateral = "0x4e65fe4dba92790696d040ac24aa414708f5c0ab"): OrderWithSignature {
@@ -73,8 +80,8 @@ test("snapshot uses SDK methods, keeps all collateral and sides, caches and dedu
  const orders = spyOn(rawOrderApi, "request").mockResolvedValue({ orders: [rawFixture(fixture()), rawFixture(fixture(false)), rawFixture(fixture(true, A("7")))] });
  const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 2000, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
  try {
-  const [a, b] = await Promise.all([getOrderSnapshot(), getOrderSnapshot()]);
-  expect(a).toBe(b); expect(a.orders).toHaveLength(3); expect(a.marketData).toEqual({ ETH: 2000 });
+  const [a, b] = (await Promise.all([getOrderSnapshot(), getOrderSnapshot()])).map(ok);
+  expect(a).toBe(b); expect(a!.orders).toHaveLength(3); expect(a!.marketData).toEqual({ ETH: 2000 });
   expect(await getOrderSnapshot()).toBe(a); expect(orders).toHaveBeenCalledTimes(1); expect(data).toHaveBeenCalledTimes(1);
   await getOrderSnapshot(true); expect(orders).toHaveBeenCalledTimes(2);
  } finally { orders.mockRestore(); data.mockRestore(); }
@@ -118,15 +125,33 @@ test("decoded buy has human contracts and explicitly denominated money", () => {
  expect(result.raw.numContracts).toBe("389926");
 });
 
-test("buy put units follow package decimals for 8 and 18 decimal tokens", () => {
+test("buy contract units are proven only for 6-decimal collateral; 8 and 18 are refused", () => {
+ expect(buyContractSizeDecimals(6)).toBe(6);
+ expect([buyContractSizeDecimals(8), buyContractSizeDecimals(18), buyContractSizeDecimals(null)]).toEqual([null, null, null]);
  for (const token of Object.values(client.chainConfig.tokens).filter(t => [8, 18].includes(t.decimals))) {
-  const row = fixture(true, token.address);
-  const result = sizeFill(view(row), "1", client);
+  const order = view(fixture(true, token.address));
+  // The order view must not publish a per-contract price it cannot justify.
+  expect(order.pricePerContractUsd).toBeNull();
+  expect(order.contractSizeDecimals).toBeNull();
+  const result = sizeFill(order, "1", client);
+  expect(result).toMatchObject({ found: true, executable: false, verification: "unverified", reason: CONTRACT_UNITS_UNVERIFIED });
+  // Base units stay available; nothing scaled to human units is emitted.
+  expect(result).not.toHaveProperty("contracts");
+  expect(result).not.toHaveProperty("premium");
+  if (!result.executable) {
+   expect(result.raw?.contractSizeDecimals).toBeNull();
+   expect(BigInt(result.raw!.numContracts)).toBeGreaterThan(0n);
+  }
+ }
+ for (const token of Object.values(client.chainConfig.tokens).filter(t => t.decimals === 6)) {
+  const order = view(fixture(true, token.address));
+  const result = sizeFill(order, "1", client);
   expect(result.executable).toBe(true);
   if (!result.executable) throw Error(result.reason);
-  expect(result.contractSizeDecimals).toBe(token.decimals);
-  expect(result.contracts).toBe(decimalString(BigInt(result.raw.numContracts), 10n ** BigInt(token.decimals)));
-  expect(result.premium.decimals).toBe(token.decimals);
+  expect(result.contractSizeDecimals).toBe(6);
+  expect(order.pricePerContractUsd).toBe(decimalString(order.sdkOrder.order.price, 100_000_000n));
+  expect(result.contracts).toBe(decimalString(BigInt(result.raw.numContracts), 10n ** 6n));
+  expect(result.premium.decimals).toBe(6);
  }
  expect(decimalString(1000000000000000001n, 10n ** 18n)).toBe("1.000000000000000001");
 });
@@ -141,15 +166,15 @@ test("cached signature and option deadlines refresh at equality and exclude expi
  const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: [rawFixture(signature), rawFixture(option)] } });
  const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
  try {
-  expect((await getOrderSnapshot(true)).orders).toHaveLength(2);
+  expect(ok(await getOrderSnapshot(true)).orders).toHaveLength(2);
   clock.mockReturnValue(epoch + 1000);
-  expect((await searchOrders()).orders).toHaveLength(2);
+  expect(ok(await searchOrders()).orders).toHaveLength(2);
   expect(request).toHaveBeenCalledTimes(1);
   clock.mockReturnValue(epoch + 2000);
-  expect((await searchOrders()).orders).toHaveLength(0);
+  expect(ok(await searchOrders()).orders).toHaveLength(0);
   expect(request).toHaveBeenCalledTimes(2);
   clock.mockReturnValue(epoch + 3000);
-  const result = await searchOrders();
+  const result = ok(await searchOrders());
   console.log("EXPIRED_CACHE", JSON.stringify({ returned: result.orders.length }));
   expect(result.orders).toHaveLength(0);
  } finally { clock.mockRestore(); request.mockRestore(); data.mockRestore(); }
@@ -163,7 +188,7 @@ test("malformed rows are isolated through SDK normalization and counted", async 
  ] } });
  const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
  try {
-  const result = await getOrderSnapshot(true);
+  const result = ok(await getOrderSnapshot(true));
   console.log("MALFORMED_ROWS", JSON.stringify({ retained: result.orders.length, droppedEntries: result.droppedEntries }));
   expect(result.orders).toHaveLength(1);
   expect(result.droppedEntries).toBe(3);
@@ -180,10 +205,179 @@ test("tool schema excludes binary and exposes signature deadlines", async () => 
  const request = spyOn(rawOrderApi, "request").mockResolvedValue({ orders: [rawFixture(row)] });
  const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
  try {
-  await getOrderSnapshot(true);
+  ok(await getOrderSnapshot(true));
   const result = await searchOptionBookOrders.execute!({ limit: 6 }, { toolCallId: "test", messages: [], context: {} });
   if (!result || !("orders" in result)) throw Error("Missing orders");
   expect(result.orders[0]?.orderExpiresAt).toBe(new Date(row.rawApiData!.orderExpiryTimestamp * 1000).toISOString());
   expect(result.orders[0]?.secondsUntilOrderExpiry).toBeGreaterThan(0);
  } finally { request.mockRestore(); data.mockRestore(); }
+});
+
+const ABASWETH = "0xD4a0e0b9149BCee3C920d2E00b5dE09138fd8bb7";
+/** The reviewer's CALL_UNITS fixture: single-strike call on 18-decimal aBasWETH, where the
+ * SDK's capacity cap sizes contracts in 10**6 while the collateral is 10**18. */
+function callRow18() {
+ const row = fixture(true, ABASWETH);
+ row.rawApiData!.isCall = true;
+ row.order.optionType = 0;
+ row.order.price = 1000000000000000000n;
+ row.availableAmount = 22000000000000000000n;
+ row.rawApiData!.maxCollateralUsable = "22000000000000000000";
+ return row;
+}
+
+test("string isLong is dropped before the SDK coerces it into a BUY", async () => {
+ // SDK dist/index.js:3387 does isLong: Boolean(rawOrder["isLong"]), so "false" would become true.
+ const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: [
+  { ...rawFixture(fixture(false)), order: { ...rawFixture(fixture(false)).order, isLong: "false" } },
+ ] } });
+ const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
+ try {
+  const result = ok(await getOrderSnapshot(true));
+  console.log("STRING_FALSE", JSON.stringify({ retained: result.orders.length, dropped: result.droppedEntries, side: result.orders[0]?.side }));
+  expect(result.orders).toHaveLength(0);
+  expect(result.droppedEntries).toBe(1);
+  // And at the agent surface: the row can never be previewed as an executable BUY.
+  const { searchOptionBookOrders, previewOptionBookTrade } = await import("../agent/tools");
+  const search = await searchOptionBookOrders.execute!({ limit: 6 }, { toolCallId: "test", messages: [], context: {} });
+  if (!search || !("orders" in search)) throw Error("Missing orders");
+  expect(search.orders).toHaveLength(0);
+  expect(search.droppedEntries).toBe(1);
+  const preview = await previewOptionBookTrade.execute!({ instrumentKey: "ETH|buy|x|P|1|1|y", budget: "1" }, { toolCallId: "test", messages: [], context: {} });
+  console.log("MALFORMED_SIDE_TOOL", JSON.stringify(preview));
+  expect(preview).toMatchObject({ found: false });
+ } finally { request.mockRestore(); data.mockRestore(); }
+});
+
+test("real boolean sides survive validation and keep their taker side", async () => {
+ const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: [rawFixture(fixture(true)), rawFixture(fixture(false))] } });
+ const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
+ try {
+  const result = ok(await getOrderSnapshot(true));
+  expect(result.droppedEntries).toBe(0);
+  expect(result.orders.map(o => o.side)).toEqual(["buy", "sell"]);
+ } finally { request.mockRestore(); data.mockRestore(); }
+});
+
+test("every load-bearing raw field is validated, never coerced", async () => {
+ const base = rawFixture(fixture());
+ const mutations: Array<[string, unknown]> = [
+  ["isLong", "true"], ["isLong", 1], ["isLong", null], ["isLong", undefined],
+  ["isCall", "false"], ["isCall", 0],
+  ["price", "1.5"], ["price", "-1"], ["price", null], ["price", "abc"],
+  ["strikes", []], ["strikes", ["x"]], ["strikes", "220000000000"], ["strikes", null],
+  ["orderExpiryTimestamp", "later"], ["orderExpiryTimestamp", null],
+  ["expiry", "soon"], ["expiry", null],
+  ["maxCollateralUsable", "22.5"], ["maxCollateralUsable", null],
+  ["collateral", "0xnothex"], ["collateral", "0x123"], ["collateral", null],
+  ["implementation", "PHYSICAL_PUT"], ["implementation", null],
+ ];
+ const rows = mutations.map(([field, value]) => ({ ...base, order: { ...base.order, [field]: value } }));
+ const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: [...rows, base] } });
+ const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
+ try {
+  const result = ok(await getOrderSnapshot(true));
+  console.log("FIELD_VALIDATION", JSON.stringify({ mutations: rows.length, retained: result.orders.length, dropped: result.droppedEntries }));
+  expect(result.droppedEntries).toBe(rows.length);
+  expect(result.orders).toHaveLength(1);
+ } finally { request.mockRestore(); data.mockRestore(); }
+});
+
+test("single-strike call on 18-decimal collateral is refused, with no human price or contracts", async () => {
+ const row = callRow18();
+ const order = view(row);
+ expect(order.pricePerContractUsd).toBeNull();
+ expect(order.contractSizeDecimals).toBeNull();
+ const result = sizeFill(order, "0.01", client);
+ console.log("CALL_UNITS", JSON.stringify({
+  executable: result.executable,
+  reason: result.executable ? null : result.reason,
+  viewPricePerContract: order.pricePerContractUsd,
+  raw: result.executable ? result.raw : result.raw,
+ }));
+ expect(result).toMatchObject({ found: true, executable: false, verification: "unverified", reason: CONTRACT_UNITS_UNVERIFIED });
+ expect(result).not.toHaveProperty("contracts");
+ expect(result).not.toHaveProperty("premium");
+ expect(result).not.toHaveProperty("maxLoss");
+ if (!result.executable) {
+  // Base units only: the quote ran, its unit is simply unknown.
+  expect(result.raw).toMatchObject({ numContracts: "1000000", premium: "10000000000000000", contractSizeDecimals: null, collateralDecimals: 18 });
+ }
+ // And the agent tool must not print the 1e8-scaled number as a per-contract price.
+ const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: [rawFixture(row)] } });
+ const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
+ const { searchOptionBookOrders } = await import("../agent/tools");
+ try {
+  await getOrderSnapshot(true);
+  const tool = await searchOptionBookOrders.execute!({ limit: 6 }, { toolCallId: "test", messages: [], context: {} });
+  if (!tool || !("orders" in tool)) throw Error("Missing orders");
+  console.log("CALL_UNITS_TOOL", JSON.stringify(tool.orders[0]?.premiumPerContract));
+  expect(tool.orders[0]?.premiumPerContract.amount).toBeNull();
+  expect(tool.orders[0]?.premiumPerContract.unavailable).toBe(CONTRACT_UNITS_UNVERIFIED);
+ } finally { request.mockRestore(); data.mockRestore(); }
+});
+
+test("a missing SDK normalizer is an adapter failure, never an empty book", async () => {
+ const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: [rawFixture(fixture())] } });
+ const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
+ const original = rawOrderApi.normalizeOdetteOrder;
+ const { searchOptionBookOrders, getMarketData, previewOptionBookTrade } = await import("../agent/tools");
+ try {
+  (rawOrderApi as { normalizeOdetteOrder?: unknown }).normalizeOdetteOrder = undefined;
+  const snapshot = await getOrderSnapshot(true);
+  const search = await searchOptionBookOrders.execute!({ limit: 6 }, { toolCallId: "test", messages: [], context: {} });
+  const market = await getMarketData.execute!({}, { toolCallId: "test", messages: [], context: {} });
+  const preview = await previewOptionBookTrade.execute!({ instrumentKey: "none", budget: "1" }, { toolCallId: "test", messages: [], context: {} });
+  console.log("MISSING_NORMALIZER", JSON.stringify({ snapshot, search, market, preview }));
+  expect(isSdkIncompatible(snapshot)).toBe(true);
+  for (const result of [snapshot, search, market, preview]) {
+   expect(result).toMatchObject({ error: "sdk_incompatible" });
+   expect((result as SdkIncompatible).detail).toContain("normalizeOdetteOrder");
+   expect(JSON.stringify(result)).not.toContain("Nothing on the book");
+  }
+  // The feed is never touched when the boundary is broken.
+  expect(request).not.toHaveBeenCalled();
+ } finally { (rawOrderApi as { normalizeOdetteOrder?: unknown }).normalizeOdetteOrder = original; request.mockRestore(); data.mockRestore(); }
+});
+
+test("a missing SDK request method is reported the same way", async () => {
+ const original = rawOrderApi.request;
+ try {
+  (rawOrderApi as { request?: unknown }).request = undefined;
+  const snapshot = await getOrderSnapshot(true);
+  expect(snapshot).toMatchObject({ error: "sdk_incompatible" });
+  expect((snapshot as SdkIncompatible).detail).toContain("request");
+ } finally { (rawOrderApi as { request?: unknown }).request = original; }
+});
+
+test("the search tool exposes droppedEntries so a partial book is visible", async () => {
+ const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: [
+  rawFixture(fixture()), null, { order: { ...rawFixture(fixture()).order, isLong: "false" } },
+ ] } });
+ const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
+ const { searchOptionBookOrders } = await import("../agent/tools");
+ try {
+  await getOrderSnapshot(true);
+  const result = await searchOptionBookOrders.execute!({ limit: 6 }, { toolCallId: "test", messages: [], context: {} });
+  if (!result || !("orders" in result)) throw Error("Missing orders");
+  console.log("DROPPED_ENTRIES", JSON.stringify({ returned: result.returned, droppedEntries: result.droppedEntries }));
+  expect(result.droppedEntries).toBe(2);
+  expect(result.returned).toBe(1);
+ } finally { request.mockRestore(); data.mockRestore(); }
+});
+
+test("the sell view withholds a per-contract price for the family the package refuses", () => {
+ // Single-strike calls are the one family whose two SDK decimals views can disagree;
+ // quoteSellFill throws STRUCTURE_UNSUPPORTED for them, so no unit is supplied.
+ const call = fixture(false);
+ call.rawApiData!.isCall = true;
+ call.order.optionType = 0;
+ const callView = view(call);
+ expect(callView.side).toBe("sell");
+ expect(callView.contractSizeDecimals).toBeNull();
+ expect(callView.pricePerContractUsd).toBeNull();
+ // A sell PUT on the same collateral keeps its price: the package supplies that unit.
+ const put = view(fixture(false));
+ expect(put.contractSizeDecimals).toBe(6);
+ expect(put.pricePerContractUsd).toBe(decimalString(put.sdkOrder.order.price, 100_000_000n));
 });

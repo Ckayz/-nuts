@@ -25,8 +25,20 @@ export interface TradeableOrder {
 	expiryAt: string;
 	/** When this order's signature stops being valid, ISO 8601. Roughly 59s out. */
 	orderExpiresAt: string;
-	/** Legacy name: signed premium per contract in collateral token, not USD. */
-	pricePerContractUsd: string;
+	/**
+	 * Legacy name: signed premium per contract in collateral token, not USD.
+	 *
+	 * `null` when the SDK's contract-size unit for this order is not proven, because
+	 * the maker price is 1e8-scaled PER CONTRACT-SIZE UNIT: `price / 1e8` is a
+	 * token-per-contract amount only when that unit and the collateral unit have the
+	 * same decimals. Never present a scaled number whose unit is unknown.
+	 */
+	pricePerContractUsd: string | null;
+	/**
+	 * Decimals of the SDK's contract-size unit for this order, or `null` when it is
+	 * unproven (see `buyContractSizeDecimals` in orders.ts).
+	 */
+	contractSizeDecimals: number | null;
 	/** Legacy name: collateral token amount, not USD; null if decimals are unknown. */
 	makerBudgetUsd: string | null;
 }
@@ -46,4 +58,15 @@ export interface OrderSnapshot {
 	 * is a signal the upstream shape changed, not a reason to fail the request.
 	 */
 	droppedEntries: number;
+}
+
+/**
+ * The SDK's per-row normalizer is a private, version-specific compatibility boundary
+ * (see `rawOrderApi` in orders.ts). When it is absent or not callable the feed cannot
+ * be read at all. That is an adapter failure, NOT an empty book, and it is surfaced
+ * verbatim rather than reported as "nothing matches".
+ */
+export interface SdkIncompatible {
+	readonly error: "sdk_incompatible";
+	readonly detail: string;
 }

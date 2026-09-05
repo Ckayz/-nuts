@@ -6,8 +6,10 @@ import { getThesisContext as loadThesisContext } from "@/lib/thesis-context";
 
 import { instrumentKey, findByInstrumentKey } from "@/lib/thetanuts/instrument";
 import {
+	CONTRACT_UNITS_UNVERIFIED,
 	getAvailableAssets,
 	getOrderSnapshot,
+	isSdkIncompatible,
 	searchOrders,
 	sizeFill,
 	usdRisk,
@@ -47,7 +49,16 @@ function describe(order: TradeableOrder) {
 		expiryAt: order.expiryAt,
         orderExpiresAt: order.orderExpiresAt,
         secondsUntilOrderExpiry: Math.max(0, Math.floor((Date.parse(order.orderExpiresAt) - Date.now()) / 1000)),
-		premiumPerContract: { amount: order.pricePerContractUsd, token: order.collateralToken.symbol, decimals: order.collateralToken.decimals, unit: "token per contract" },
+		// null whenever the SDK's contract-size unit for this order is unproven: the maker
+		// price is scaled per contract-size unit, so it is not a token-per-contract amount.
+		premiumPerContract: {
+			amount: order.pricePerContractUsd,
+			token: order.collateralToken.symbol,
+			decimals: order.collateralToken.decimals,
+			unit: "token per contract",
+			contractSizeDecimals: order.contractSizeDecimals,
+			unavailable: order.pricePerContractUsd === null ? CONTRACT_UNITS_UNVERIFIED : undefined,
+		},
 		makerCollateralBudget: { amount: order.makerBudgetUsd, token: order.collateralToken.symbol, decimals: order.collateralToken.decimals },
 	};
 }
@@ -86,12 +97,16 @@ export const searchOptionBookOrders = tool({
 			? new Date(Date.now() + maxDaysToExpiry * 86_400_000)
 			: undefined;
 
-		const { orders, fetchedAt, totalMatched } = await searchOrders({
+		const result = await searchOrders({
 			asset, side,
 			isCall: direction === undefined ? undefined : direction === "call",
 			expiryBefore,
 			limit: 200,
 		});
+		// A broken SDK boundary is returned verbatim: it is not an empty book, and must
+		// never be reported as "nothing matches".
+		if (isSdkIncompatible(result)) return result;
+		const { orders, fetchedAt, totalMatched, droppedEntries } = result;
 
 		const filtered = kind ? orders.filter((o) => o.kind === kind) : orders;
 
@@ -99,6 +114,9 @@ export const searchOptionBookOrders = tool({
 			asOf: fetchedAt.toISOString(),
 			totalMatched: kind ? filtered.length : totalMatched,
 			returned: Math.min(filtered.length, limit),
+			// Feed rows dropped for failing validation. Non-zero means this view of the
+			// book is partial; say so rather than implying it is complete.
+			droppedEntries,
 			orders: filtered.slice(0, limit).map(describe),
 			note:
 				filtered.length === 0
@@ -115,6 +133,8 @@ export const getMarketData = tool({
 	inputSchema: z.object({}),
 	execute: async () => {
 		const [assets, snapshot] = await Promise.all([getAvailableAssets(), getOrderSnapshot()]);
+		if (isSdkIncompatible(snapshot)) return snapshot;
+		if (isSdkIncompatible(assets)) return assets;
 		return {
 			asOf: snapshot.fetchedAt.toISOString(),
 			chain: "Base mainnet",
@@ -145,6 +165,7 @@ export const previewOptionBookTrade = tool({
 	execute: async ({ instrumentKey: key, budget }) => {
 		// Fresh snapshot: a preview built from a stale price misleads the user.
 		const snapshot = await getOrderSnapshot();
+		if (isSdkIncompatible(snapshot)) return snapshot;
 		const order = findByInstrumentKey(snapshot.orders, key);
 
 		if (!order) {

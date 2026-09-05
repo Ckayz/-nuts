@@ -23,8 +23,16 @@ export const CREATOR_PAGE_SIZE = 50;
 export const FILLED_POSITION_STATUSES = ["confirmed", "indexed", "expired", "settled"] as const;
 
 /**
- * Thesis statuses a page may render. `lib/display.ts` has a presentation for
- * exactly these two (`page-data.renderableStatus` enforces the same rule), and
- * a `draft` or `cancelled` headline must never leave the database.
+ * Thesis statuses a page may render — the ONE public-status list.
+ *
+ * B3: there used to be two. This one was `["open", "settled"]` while
+ * `lib/social/guards.ts` `SOCIAL_PUBLIC_STATUSES` was
+ * `["open", "expired", "settled"]`, so the rankings admitted an `expired` post
+ * that `display.thesisWithOrigin` then THREW on — one expired row crashed the
+ * whole feed. `expired` is public (the option's expiry has passed, the post is
+ * still a post) and now has a presentation, so it is listed here and
+ * `SOCIAL_PUBLIC_STATUSES` re-exports this constant rather than restating it.
+ *
+ * A `draft` or `cancelled` headline must still never leave the database.
  */
-export const PUBLIC_THESIS_STATUSES = ["open", "settled"] as const;
+export const PUBLIC_THESIS_STATUSES = ["open", "expired", "settled"] as const;

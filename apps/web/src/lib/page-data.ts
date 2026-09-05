@@ -23,6 +23,7 @@ import * as display from "./display";
 import * as mock from "./view-data";
 import * as mockSource from "@/mock/data";
 import { attachLinkedPositions, enrichWithTradeLinks } from "./thesis/enrich";
+import { PUBLIC_THESIS_STATUSES } from "./data/constants";
 import { usingDatabase } from "./data/source";
 import { rankTheses } from "./social/ranking";
 
@@ -253,7 +254,9 @@ export async function railTheses(limit = 5): Promise<View.Thesis[]> {
  * as missing so the route returns 404.
  */
 function renderableStatus(status: string): boolean {
-	return status === "open" || status === "settled";
+	// B3: the ONE public-status list, so the thread page and the rankings cannot
+	// disagree about which posts exist.
+	return PUBLIC_THESIS_STATUSES.some((value) => value === status);
 }
 
 export async function thesisDetailData(slug: string): Promise<View.ThesisDetail | undefined> {

@@ -17,7 +17,7 @@ import "server-only";
 import { activity as activityRows } from "@nuts/db/schema/index";
 import { SOCIAL_PUBLIC_STATUSES } from "../social/guards";
 import { rankCreators, rankTheses } from "../social/ranking";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db as defaultDb } from "@nuts/db";
 import { comments, follows, likes, positions, theses, users } from "@nuts/db/schema/index";
@@ -38,6 +38,7 @@ import {
 	mapParticipant,
 	mapPosition,
 	mapThesis,
+	publicThesisOrNull,
 	type ThesisAggregates,
 } from "./map";
 import type { PositionInstrument, PositionQuantities } from "@/lib/position/types";
@@ -71,9 +72,15 @@ function count(value: unknown): number {
 /**
  * `entry_premium_usd` values fit to be added up: present, not `NaN` (a `numeric`
  * column can legally hold it) and not negative (a negative premium spend has no
- * meaning and would give the split bar a negative width). A NULL premium is not
- * "bad" — it is a fill the indexer has not priced yet — so it is neither summed
- * nor counted as unusable.
+ * meaning and would give the split bar a negative width).
+ *
+ * B5. A NULL premium USED to be neither summed NOR counted as unusable, which
+ * made it invisible: a side holding [known, null] reported `fills = 2` and the
+ * KNOWN row's amount, so a partial total was printed as if it were the whole
+ * pool. "The indexer has not priced this fill yet" is precisely a reason the
+ * total cannot be stated, so a null now marks the side unavailable like any
+ * other unusable value — `count(*) filter (where not (USABLE_PREMIUM))` counts
+ * nulls, because `not (x is not null and ...)` is TRUE when x is null.
  */
 const USABLE_PREMIUM = sql`${positions.entryPremiumUsd} is not null and ${positions.entryPremiumUsd} <> 'NaN'::numeric and ${positions.entryPremiumUsd} >= 0`;
 
@@ -104,7 +111,7 @@ async function aggregatesByThesis(
 			side: positions.side,
 			fills: sql<string>`count(*)`,
 			amountUsd: sql<string>`coalesce(sum(${positions.entryPremiumUsd}) filter (where ${USABLE_PREMIUM}), 0)::text`,
-			unusable: sql<string>`count(*) filter (where ${positions.entryPremiumUsd} is not null and not (${USABLE_PREMIUM}))`,
+			unusable: sql<string>`count(*) filter (where not (${USABLE_PREMIUM}))`,
 		})
 		.from(positions)
 		.where(
@@ -225,13 +232,22 @@ export async function getThread(
 	if (!UUID.test(identity) && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(identity)) return null;
 	const dataAsOf = new Date();
 
-	const head = await database
-		.select({ thesis: theses, creator: users, creatorPosition: positions })
-		.from(theses)
-		.innerJoin(users, eq(users.id, theses.creatorUserId))
-		.leftJoin(positions, eq(positions.id, theses.creatorPositionId))
-		.where(UUID.test(identity) ? eq(theses.id, identity) : eq(theses.slug, identity))
-		.limit(1);
+	// B-m1. SLUG FIRST, then id. A slug is user-derived text and can be
+	// UUID-SHAPED (a headline of hex-looking words produces one), and this used
+	// to send every UUID-shaped identity straight to the `id` column — so that
+	// post's own URL resolved to nothing. The id lookup is kept as the fallback
+	// so `/t/<uuid>` still works for a post whose slug is unknown.
+	const byIdentity = async (where: SQL) =>
+		database
+			.select({ thesis: theses, creator: users, creatorPosition: positions })
+			.from(theses)
+			.innerJoin(users, eq(users.id, theses.creatorUserId))
+			.leftJoin(positions, eq(positions.id, theses.creatorPositionId))
+			.where(where)
+			.limit(1);
+
+	let head = await byIdentity(eq(theses.slug, identity));
+	if (head[0] === undefined && UUID.test(identity)) head = await byIdentity(eq(theses.id, identity));
 	const row = head[0];
 	if (row === undefined) return null;
 	const thesisId = row.thesis.id;
@@ -302,7 +318,9 @@ export async function getPortfolio(
 		.orderBy(desc(positions.createdAt))
 		// TODO-OWNER: PORTFOLIO_PAGE_SIZE is a placeholder page size.
 		.limit(options.limit ?? PORTFOLIO_PAGE_SIZE);
-	return rows.map((row) => mapPosition({ position: row.position, thesis: row.thesis }));
+	// B6: a `draft` or `cancelled` post's headline never leaves the database,
+	// even on the owner's own portfolio row.
+	return rows.map((row) => mapPosition({ position: row.position, thesis: publicThesisOrNull(row.thesis) }));
 }
 
 export interface CreatorProfile {
@@ -440,9 +458,14 @@ export async function listActivity(userId: string, options: ReadOptions & { thes
 /** TODO-OWNER: provisional formula/window specified in social/ranking.ts. */
 export async function leaderboard(options: ReadOptions & { window: "1W"; now?: Date }): Promise<Domain.Creator[]> {
 	const database = options.database ?? defaultDb;
+	// B4. The join to `theses` used to be an INNER join, so every STANDALONE
+	// position (migration 0007: a fill that belongs to no post, which is the
+	// default a market-page trade produces) was silently excluded from the P&L
+	// the leaderboard ranks on. Same rule as `reads.ts:373`: a standalone
+	// position, or a position on a post that is public.
 	const rows = await database.select({ user: users, position: positions }).from(positions)
-		.innerJoin(users, eq(users.id, positions.userId)).innerJoin(theses, eq(theses.id, positions.thesisId))
-		.where(inArray(theses.status, [...SOCIAL_PUBLIC_STATUSES]));
+		.innerJoin(users, eq(users.id, positions.userId)).leftJoin(theses, eq(theses.id, positions.thesisId))
+		.where(or(isNull(positions.thesisId), inArray(theses.status, [...PUBLIC_THESIS_STATUSES])));
 	const ranked = rankCreators(rows.map(row => row.position), options.now ?? new Date(), options.window);
 	const byId = new Map(rows.map(row => [row.user.id, row.user]));
 	return Promise.all(ranked.map(async row => {

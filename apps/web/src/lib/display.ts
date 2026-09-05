@@ -143,10 +143,17 @@ function backing(value: Domain.Thesis, settled: boolean): View.Backing {
  * that cannot be PROVEN same-origin stays plain text.
  */
 export function thesisWithOrigin(value: Domain.Thesis, siteOrigin: string | undefined): View.Thesis {
-    // TODO-OWNER: the mockup specifies no presentation for other PRD lifecycle states.
-    if (value.thesis.status !== "open" && value.thesis.status !== "settled")
+    // B3. `expired` is PUBLIC (the rankings admit it) and used to throw here, so
+    // one expired post crashed the whole feed. It renders with the settlement-
+    // pending presentation the PRD already words (§8.5.3), reusing
+    // POSITION_STATUS_DISPLAY.expired so the vocabulary lives in one place.
+    // TODO-OWNER: the mockup specifies no presentation for other PRD lifecycle
+    // states, so `draft` and `cancelled` still throw — they must never reach a
+    // page, and PUBLIC_THESIS_STATUSES keeps them out.
+    if (value.thesis.status !== "open" && value.thesis.status !== "settled" && value.thesis.status !== "expired")
         throw new Error(`No mockup presentation for ${value.thesis.status}`);
     const settled = value.thesis.status === "settled";
+    const expired = value.thesis.status === "expired";
     // The LIVE / ENDING / SETTLED chip is counted off the expiry, so a post that
     // names no market carries no chip at all rather than an invented one.
     let status: View.ThesisStatus | null = null;
@@ -154,6 +161,11 @@ export function thesisWithOrigin(value: Domain.Thesis, siteOrigin: string | unde
     if (settled) {
         status = "settled";
         statusLabel = `SETTLED · ${value.backing?.mock.settledWinner?.toUpperCase() ?? "—"} WON`;
+    } else if (expired) {
+        // B3: the option's expiry has passed but Thetanuts has published no
+        // settlement, so the post says exactly that and asserts no winner.
+        status = POSITION_STATUS_DISPLAY.expired.tone;
+        statusLabel = POSITION_STATUS_DISPLAY.expired.label.toUpperCase();
     } else if (value.market !== null && value.market.expiryAt !== null) {
         status = value.endingSoon ? "ending" : "live";
         const hours = Math.max(0, Math.floor((Date.parse(value.market.expiryAt) - Date.parse(value.dataAsOf)) / 3600000));

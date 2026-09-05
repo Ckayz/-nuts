@@ -1,3 +1,4 @@
+import { quoteSellFill, type QuoteSellFillParams, type SellQuoteClient, type SellFillQuote } from "./quote";
 import { OPTION_BOOK_ABI, type OrderWithSignature, type ThetanutsClient } from "@thetanuts-finance/thetanuts-client";
 import { decodeFunctionData, type Address, type Hex } from "viem";
 import { ThetanutsLogicError } from "./errors";
@@ -16,7 +17,7 @@ export async function buildFillTransactions({ client, order, budget, referrer, a
   const timestamp = BigInt(now ?? Math.floor(Date.now() / 1_000));
   const raw = order.rawApiData;
   if (!raw) throw new ThetanutsLogicError("INVALID_ORDER", "Order is missing rawApiData");
-  if (takerSide(order) === "sell") throw new ThetanutsLogicError("TAKER_SELL_UNVERIFIED", "Use quoteSellFill for taker sells; that API is blocked pending SDK sizing reconciliation (README)");
+  if (takerSide(order) === "sell") throw new ThetanutsLogicError("TAKER_SELL_UNVERIFIED", "Use the collateral-funded sell API for taker sells");
   if (order.order.expiry <= timestamp || BigInt(raw.orderExpiryTimestamp) <= timestamp) throw new ThetanutsLogicError("ORDER_EXPIRED", "Option or signed order has expired");
   const preview = client.optionBook.previewFillOrder(order, budget, referrer);
   if (preview.numContracts <= 0n) throw new ThetanutsLogicError("ZERO_CONTRACTS", "Premium produces zero contracts");
@@ -36,4 +37,46 @@ export async function buildFillTransactions({ client, order, budget, referrer, a
   const allowance = await client.erc20.getAllowance(collateralToken, account, fill.to);
   const approve = allowance < premium ? tx(client.erc20.encodeApprove(collateralToken, fill.to, premium)) : undefined;
   return { ...(approve ? { approve } : {}), fill, expected: { budget, numContracts: preview.numContracts, premium, collateralToken, spender: fill.to } };
+}
+
+export interface BuildSellFillTransactionsParams extends Omit<QuoteSellFillParams, "client"> {
+  readonly client: SellQuoteClient & FillClient;
+  readonly account: Address;
+}
+export interface SellFillTransactions {
+  readonly approve?: Tx;
+  readonly fill: Tx;
+  readonly expected: Pick<SellFillQuote, "numContracts" | "collateralRequired" | "premiumGross" | "feeEstimate" | "premiumNet" | "collateralToken">;
+}
+
+/** Exact collateral approval; call collateral and on-chain rounding remain UNVERIFIED.
+ * Rejects contract counts not representable by the SDK's integer premium input.
+ * Chain validation remains the caller's responsibility via assertBaseChain.
+ */
+export async function buildSellFillTransactions(params: BuildSellFillTransactionsParams): Promise<SellFillTransactions> {
+  const { client, order, referrer, account } = params;
+  const quote = quoteSellFill(params);
+  let amount = (quote.numContracts * quote.pricePerContract + 99_999_999n) / 100_000_000n;
+  let fill: Tx | undefined;
+  for (let step = 0; step < 3; step++, amount++) {
+    const candidate = tx(client.optionBook.encodeFillOrder(order, amount, referrer));
+    let contracts: bigint;
+    try {
+      const decoded = decodeFunctionData({ abi: OPTION_BOOK_ABI, data: candidate.data });
+      const encoded = decoded.args?.[0];
+      if (decoded.functionName !== "fillOrder" || typeof encoded !== "object" || encoded === null || !("numContracts" in encoded) || typeof encoded.numContracts !== "bigint") throw new Error("Invalid fill calldata");
+      contracts = encoded.numContracts;
+    } catch {
+      throw new ThetanutsLogicError("ENCODE_MISMATCH", "Could not decode sell fill calldata");
+    }
+    if (contracts === quote.numContracts) { fill = candidate; break; }
+    if (contracts > quote.numContracts) break;
+  }
+  if (!fill) throw new ThetanutsLogicError("ENCODE_MISMATCH", "SDK premium input cannot encode the quoted contract count");
+  const collateralToken = quote.collateralToken as Address;
+  // encodeFillOrder resolves and validates the canonical OptionBook target itself.
+  const allowance = await client.erc20.getAllowance(collateralToken, account, fill.to);
+  const approve = allowance < quote.collateralRequired ? tx(client.erc20.encodeApprove(collateralToken, fill.to, quote.collateralRequired)) : undefined;
+  const { numContracts, collateralRequired, premiumGross, feeEstimate, premiumNet } = quote;
+  return { ...(approve ? { approve } : {}), fill, expected: { numContracts, collateralRequired, premiumGross, feeEstimate, premiumNet, collateralToken } };
 }

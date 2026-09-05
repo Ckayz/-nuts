@@ -1,4 +1,8 @@
 export type ThetanutsLogicErrorCode =
+  | "INVALID_SIDE"
+  | "CALL_COLLATERAL_UNVERIFIED"
+  | "ZERO_COLLATERAL"
+  | "ENCODE_MISMATCH"
   | "WRONG_CHAIN"
   | "INVALID_ORDER"
   | "ORDER_EXPIRED"

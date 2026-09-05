@@ -14,7 +14,7 @@ Framework-neutral Thetanuts OptionBook logic for Base mainnet.
 ## UNVERIFIED
 
 - Contract-size decimals vary ambiguously across the SDK material; every risk call requires a verified `contractSizeDecimals`.
-- Sell-side call collateral, non-USDC contract units, and on-chain collateral/fee/budget rounding remain UNVERIFIED. Sell APIs are blocked as explained below.
+- Sell-side call collateral, non-USDC contract units, and on-chain collateral/fee/budget rounding remain UNVERIFIED. Call sells require explicit opt-in. The notional fee branch remains UNVERIFIED.
 - Budget-cap premium rounding must be verified on-chain; quotes deliberately recompute the floored premium.
 - The SDK's browser bundle retains `FileStorageProvider` dynamic `fs/promises` imports; the target Next.js client-boundary build is UNVERIFIED.
 - ERC-20 approval quirks, minimum/cancellation preflight, and settlement operations remain outside this pure package's guarantees.
@@ -50,58 +50,36 @@ notional or establish fee policy. `maxLoss` returns net loss in USD8: strike
 exposure for short puts or width exposure for short spreads, minus received
 premium. With zero premium it returns the full gross exposure.
 
-### Round 5 stopped items: sell quote and fill
+### Sell quote and fill
 
-`quoteSellFill`, `buildSellFillTransactions`, and the proposed
-`allowUnverifiedCallCollateral` opt-in are **not implemented**. The writer stopped
-B and dependent C under the brief's explicit SDK-contradiction instruction.
-Tests of those APIs, the opt-in gate, and the full fee estimate are therefore
-also outstanding. No sell path is enabled.
+`quoteSellFill({ client, order, collateralBudget, referrer?, now?, allowUnverifiedCallCollateral? })`
+returns contracts, collateral required, gross premium, fee estimate, estimated net
+premium, and cap metadata. Buy orders throw `INVALID_SIDE`; call orders require
+`allowUnverifiedCallCollateral: true`. Budgets are collateral-token base units.
 
-Installed SDK 0.3.0 `dist/index.js`, `calculateMaxContracts`:
+`buildSellFillTransactions({ client, order, collateralBudget, account, referrer?, now?, allowUnverifiedCallCollateral? })`
+returns optional exact collateral approval, fill calldata, and expected amounts.
+It approves the target validated by the SDK encoder. It starts with ceiling-rounded
+premium and verifies the decoded contract count, rejecting unrepresentable counts
+with `ENCODE_MISMATCH` before reading allowance. No signed order fields are changed.
 
-```js
-// 1649: availableAmount, not a side-dependent premium budget
-const maxCollateral = orderWithSig.availableAmount;
-// 1656–1659: no isLong branch
-if (!isCall && strikes.length === 1) {
-  const strike = strikes[0];
-  return maxCollateral * 100000000n / strike;
-}
-// 1717 and 1867: both preview and encoder use this cap
-const maxContracts = this.calculateMaxContracts(orderWithSig);
-```
+SDK 0.3.0 `usdcAmount` is premium-denominated on **both sides**: encoding divides
+amount × 1e8 by price. Its public `calculateMaxContracts` instead caps against
+`availableAmount` as collateral, independent of side. Sell budgets invert that
+same sizing: strike for puts/linear calls, absolute spread width for two strikes,
+outer strike range for three or more, price fallback for no strikes. Single-strike
+inverse calls use `contracts × 10^(collateralDecimals - 6)` collateral, following
+the SDK collateral-token lookup (unknown tokens default to 18 decimals).
 
-Offline test output for strike `220000000000`, price `212682750`, and
-hypothetical remaining amount `22000000` (not a claimed historical order field):
+`feeEstimate = premiumGross × 1250 / 10000` matches all supplied decoded fills;
+the notional branch is unverified. The local Referrer Fees export states the
+minimum formula without defining notional; the OptionBook ABI exposes accrued
+fees and referrer splits, but no fill-fee calculator. `premiumNet` is an estimate,
+not a guaranteed credit or an application fee policy.
 
-```text
-SDK sell PUT: preview cap=10000; requested premium-based cap=10344045; encoded contracts=10000
-SDK four-strike cap with 43333000 available=21666; supplied fill contracts=43333
-```
-
-The requested `maxCollateralUsable × 1e8 / price` cap does **not** match preview.
-`encodeFillOrder` calculates amount × 1e8 / price (1870), then applies the same
-cap (1874–1875); increasing its amount cannot overcome it. No signed fields or
-available amounts were rewritten to evade this. Below the cap, a ceiling-rounded
-premium is only a candidate amount: integer amounts can skip contract counts
-when price < 1e8, so exact decoded equality would still be required.
-
-Other discrepancies from the source:
-
-- Preview uses the outer strike range for three or more strikes (1682–1691),
-  whereas the supplied four-strike collateral corresponds to width 1000.
-- The separate implementation-specific `calculateCollateralRequired` helper
-  (16957–17001) uses one underlying unit for INVERSE_CALL, strike for LINEAR_CALL,
-  `1 - low/high` for inverse spreads, twice the first wing for RANGER, and the
-  larger wing for iron condors. RANGER's formula reproduces the supplied
-  four-strike collateral but does not identify the historical implementation.
-- Thus generic “call = one underlying unit” does not cover every implementation.
-  OptionBook inverse-call collateral, non-USDC units, and on-chain rounding
-  remain UNVERIFIED. These preview/implementation differences require resolution
-  before implementing the requested sell APIs.
-
-The new tests exercise real SDK pure preview/encoding with local fixtures,
-decode the sell-put cap, reproduce the supplied transfer arithmetic, and verify
-short net risk. No test calls an RPC or the order feed. These are evidence tests,
-not validation of a sell API implementation.
+These formulas deliberately mirror SDK sizing. They do not establish actual
+implementation-specific collateral: the supplied four-strike fill corresponds
+to width 1000, while SDK sizing uses its outer range 2000. The SDK's separate
+implementation-specific collateral helper also differs for inverse spreads,
+RANGER and iron condors. Call collateral, non-six-decimal contract units and
+on-chain rounding remain UNVERIFIED. No network or real fill was performed.

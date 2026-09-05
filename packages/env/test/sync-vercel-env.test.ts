@@ -102,6 +102,27 @@ for (const [label, url] of [
 	["ipv6 unspecified", "postgresql://u:p@[::]:5432/postgres"],
 	["127.0.0.0/8 beyond .1", "postgresql://u:p@127.0.0.2:5432/postgres"],
 	["uppercase host", "postgresql://u:p@LOCALHOST:5432/postgres"],
+	/**
+	 * A2-2 (one-shot review pass 2). Every spelling below is 127.0.0.1 or
+	 * 0.0.0.0 to the OS resolver (`inet_aton`: 1-4 parts, decimal/octal/hex, the
+	 * last absorbing the remaining octets) and every one of them exited 0 and
+	 * planned the sync before the fold — measured 2026-09-06 against the real
+	 * script. `new URL("http://127.1").hostname` normalises to `127.0.0.1`, but
+	 * `postgresql:` is not a special scheme, so the parser never does that here.
+	 *
+	 * `[::ffff:127.0.0.1]` is deliberately NOT in this list: the dotted tail
+	 * makes the old substring pattern fire, so it would pass without any of the
+	 * new parsing. `[::ffff:7f00:1]` is the same address written the way that
+	 * pattern cannot see.
+	 */
+	["abbreviated ipv4", "postgresql://u:p@127.1:5432/postgres"],
+	["three-part ipv4", "postgresql://u:p@127.0.1:5432/postgres"],
+	["octal ipv4", "postgresql://u:p@0177.1:5432/postgres"],
+	["integer ipv4", "postgresql://u:p@2130706433:5432/postgres"],
+	["hexadecimal ipv4", "postgresql://u:p@0x7f000001:5432/postgres"],
+	["integer unspecified", "postgresql://u:p@0:5432/postgres"],
+	["hex ipv4-mapped ipv6", "postgresql://u:p@[::ffff:7f00:1]:5432/postgres"],
+	["ipv4-compatible ipv6", "postgresql://u:p@[::7f00:1]:5432/postgres"],
 ] as const) {
 	test(`refuses a ${label} value for production`, () => {
 		const file = envFile(`loopback-${label.replace(/[^a-z0-9]+/gi, "-")}.env`, `DATABASE_URL=${url}\nSESSION_SECRET=${SECRETS.sessionSecret}\n`);
@@ -120,6 +141,26 @@ test("a deployable remote host is still accepted (the fence is not refusing ever
 	expect(output).toContain("Dry run");
 	expect(output).not.toContain("local-only value(s)");
 });
+
+/**
+ * The other direction of A2-2: the numeric parsing must not swallow reachable
+ * hosts. `3232235777` is 192.168.1.1 and `8.8.8.8` is a public address — neither
+ * is loopback, so neither is this fence's business.
+ */
+for (const [label, url] of [
+	["dotted public ipv4", "postgresql://u:p@8.8.8.8:5432/postgres"],
+	["integer non-loopback ipv4", "postgresql://u:p@3232235777:5432/postgres"],
+	["global ipv6", "postgresql://u:p@[2001:db8::1]:5432/postgres"],
+	["ordinary hostname", "postgresql://u:p@db.example.invalid:5432/postgres"],
+] as const) {
+	test(`accepts a ${label} value for production`, () => {
+		const file = envFile(`remote-${label.replace(/[^a-z0-9]+/gi, "-")}.env`, `DATABASE_URL=${url}\nSESSION_SECRET=${SECRETS.sessionSecret}\n`);
+		const { code, output } = run(["production", file, "--dry-run"]);
+		expect(code).toBe(0);
+		expect(output).toContain("Dry run");
+		expect(output).not.toContain("local-only value(s)");
+	});
+}
 
 test("skips keys outside the validated schema, naming them without reading their values", () => {
 	const { code, output } = run(["production", remoteFile, "--dry-run"]);

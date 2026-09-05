@@ -99,7 +99,14 @@ if (!offline) {
   }
   let host: string;
   try {
-    host = new URL(databaseUrl).hostname;
+    const url = new URL(databaseUrl);
+    // Identical destination-override check to both test preloads.
+    for (const parameter of ["host", "hostaddr", "connectionString", "service", "servicefile"]) {
+      if (url.searchParams.has(parameter) && process.env.TEST_DATABASE_OK !== "1") {
+        fail(`Refusing DATABASE_URL query parameter "${parameter}": it can override the destination host. Set TEST_DATABASE_OK=1 to override deliberately.`);
+      }
+    }
+    host = url.hostname;
   } catch {
     fail("DATABASE_URL is not a parseable URL, so verify cannot prove it is local. Set TEST_DATABASE_OK=1 to override.");
   }

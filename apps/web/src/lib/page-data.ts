@@ -182,7 +182,7 @@ export async function discoverData(): Promise<DiscoverData> {
 		};
 	}
 	await connection();
-	const { getPortfolio, leaderboard, trending, endingSoon, settled, getFollowState, listPositionsByIds } =
+	const { getPortfolio, leaderboard, trending, endingSoon, settled, listPositionsByIds } =
 		await import("./data/reads");
 	const { following, top } = await import("./social/feeds");
 	const signedIn = await viewer();
@@ -212,15 +212,13 @@ export async function discoverData(): Promise<DiscoverData> {
 	const withLinks = (rows: readonly Domain.Thesis[]) => rows.map((row) => enriched.get(row.id) ?? row);
 	const positions = signedIn === null ? [] : await getPortfolio(signedIn.walletAddress);
 	// TODO-OWNER: provisional social/ranking.ts formulas; UI notes retained.
-	const ranked = await leaderboard({ window: "1W" });
+	const ranked = await leaderboard({ ...options, window: "1W" });
 	return {
 		signedIn: signedIn !== null, databaseMode: true,
-		leaderboard: await Promise.all(
-			ranked.map(async (row) => ({
-				creator: display.creator(row),
-				following: (await getFollowState(signedIn?.userId ?? null, row.id)).following,
-			})),
-		),
+		leaderboard: ranked.map((row) => ({
+			creator: display.creator(row),
+			following: row.followingByViewer,
+		})),
 		following: await toPosts(withLinks(followingRows)),
 		top: await toPosts(withLinks(topRows)),
 		ranked: {

@@ -23,6 +23,7 @@ import {
 	signOut,
 	verifySignInSignature,
 } from "@/lib/auth/actions";
+import { config } from "@/lib/wagmi";
 import { readableError } from "@/lib/messages";
 
 type Phase = "loading" | "idle" | "signing" | "error";
@@ -56,7 +57,7 @@ export function isWalletRejection(error: unknown): boolean {
  * F23. The chip's network line was the FIXTURE string ("Base", from
  * `mock/data.ts` through `view-data.ts`), so it read "Base" whatever chain the
  * wallet was actually on — including none. It is now the connected wallet's own
- * chain, and nothing at all when no wallet is connected.
+ * chain, falling back to the configured chain when disconnected.
  *
  * The name comes from wagmi's own chain object; an unrecognised chain is named
  * by its id rather than by an invented label.
@@ -66,7 +67,7 @@ function networkLabel(chain: { name?: string } | undefined, chainId: number | un
 	return chain?.name ?? `Chain ${chainId}`;
 }
 
-export function WalletBar({ network }: { network: string }) {
+export function WalletBar() {
 	const { address, isConnected, chain, chainId } = useAccount();
 	const { connect, connectors, isPending: connectPending } = useConnect();
 	const { disconnect } = useDisconnect();
@@ -144,7 +145,7 @@ export function WalletBar({ network }: { network: string }) {
 		(!isConnected || !address || address.toLowerCase() === session.walletAddress.toLowerCase());
 
 	if (session !== null && sessionMatchesAccount) {
-  return <details className="wallet-menu"><summary className="wallet"><Avatar seed={session.walletAddress.toLowerCase()} initials={session.truncatedAddress.slice(2, 4).toUpperCase()} size={26} /><span className="dot" aria-hidden="true" /><span className="num">{session.truncatedAddress}</span></summary><div className="card pad"><span className="mut">{networkLabel(chain, chainId) ?? network}</span>{/* TODO-OWNER: profile and reconnect menu labels. */}<Link className="btn sec" href={`/u/${session.walletAddress.toLowerCase()}`}>Profile</Link>{!isConnected ? connectors.map(c => <button type="button" key={c.uid} className="btn sec" disabled={connectPending} onClick={() => connect({ connector: c })}>Connect {c.name}</button>) : null}<button type="button" className="btn sec" onClick={runSignOut}>Sign out</button></div></details>;
+  return <details className="wallet-menu"><summary className="wallet"><Avatar seed={session.walletAddress.toLowerCase()} initials={session.truncatedAddress.slice(2, 4).toUpperCase()} size={26} /><span className="dot" aria-hidden="true" /><span className="num">{session.truncatedAddress}</span></summary><div className="card pad"><span className="mut">{networkLabel(chain, chainId) ?? config.chains[0].name}</span>{/* TODO-OWNER: profile and reconnect menu labels. */}<Link className="btn sec" href={`/u/${session.walletAddress.toLowerCase()}`}>Profile</Link>{!isConnected ? connectors.map(c => <button type="button" key={c.uid} className="btn sec" disabled={connectPending} onClick={() => connect({ connector: c })}>Connect {c.name}</button>) : null}<button type="button" className="btn sec" onClick={runSignOut}>Sign out</button></div></details>;
  }
  if (!isConnected || !address) {
   return <details className="wallet-menu"><summary className="btn out">Sign in</summary><div className="card pad stack">{connectors.map(c => <button type="button" key={c.uid} className="btn sec" disabled={connectPending} onClick={() => connect({ connector: c })}>{c.name}</button>)}{connectors.length === 0 ? <span className="mut">no connector</span> : null}</div></details>;

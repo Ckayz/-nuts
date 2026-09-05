@@ -16,8 +16,9 @@ import "server-only";
  */
 import { activity as activityRows } from "@nuts/db/schema/index";
 import { SOCIAL_PUBLIC_STATUSES } from "../social/guards";
-import { rankCreators, rankTheses } from "../social/ranking";
-import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { sumDecimals } from "./decimal";
+import { rankTheses } from "../social/ranking";
+import { and, desc, eq, gte, lte, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db as defaultDb } from "@nuts/db";
 import { comments, follows, likes, positions, theses, users } from "@nuts/db/schema/index";
@@ -25,6 +26,8 @@ import type { Position as PositionRow, Thesis as ThesisRow, User as UserRow } fr
 import type * as Domain from "@/types";
 import {
 	CREATOR_PAGE_SIZE,
+	RANKED_THESIS_LIMIT,
+	LEADERBOARD_LIMIT,
 	FEED_PAGE_SIZE,
 	FILLED_POSITION_STATUSES,
 	PORTFOLIO_PAGE_SIZE,
@@ -425,6 +428,24 @@ export async function getFollowState(viewerUserId: string | null, userId: string
 	return { following: match.length > 0, followers: count(counts?.followers), followingCount: count(counts?.followingCount) };
 }
 
+/** One query for the entire creator set, including counts and viewer state. */
+export async function getFollowStates(viewerUserId: string | null, userIds: readonly string[], options: ReadOptions = {}) {
+	const wanted = [...new Set(userIds.filter(id => UUID.test(id)).map(id => id.toLowerCase()))];
+	const result = new Map<string, { following: boolean; followers: number; followingCount: number }>();
+	if (wanted.length === 0) return result;
+	for (const id of wanted) result.set(id, { following: false, followers: 0, followingCount: 0 });
+	const database = options.database ?? defaultDb;
+	const viewer = viewerId({ viewerUserId });
+	const rows = await database.select({
+		id: users.id,
+		followers: sql<string>`(select count(*) from ${follows} where ${follows.followedUserId} = ${users.id})`,
+		followingCount: sql<string>`(select count(*) from ${follows} where ${follows.followerUserId} = ${users.id})`,
+		following: viewer === null ? sql<boolean>`false` : sql<boolean>`exists(select 1 from ${follows} where ${follows.followedUserId} = ${users.id} and ${follows.followerUserId} = ${viewer})`,
+	}).from(users).where(inArray(users.id, wanted));
+	for (const row of rows) result.set(row.id, { following: row.following, followers: count(row.followers), followingCount: count(row.followingCount) });
+	return result;
+}
+
 /** Public activity only; a draft headline or failed fill must not leak here. */
 export async function listActivity(userId: string, options: ReadOptions & { thesisId?: string } = {}): Promise<Domain.ActivityItem[]> {
 	if (!UUID.test(userId) || (options.thesisId !== undefined && !UUID.test(options.thesisId))) return [];
@@ -455,30 +476,48 @@ export async function listActivity(userId: string, options: ReadOptions & { thes
 		}));
 }
 
-/** TODO-OWNER: provisional formula/window specified in social/ranking.ts. */
-export async function leaderboard(options: ReadOptions & { window: "1W"; now?: Date }): Promise<Domain.Creator[]> {
+/** Same 1W eligibility and exact decimal sum as social/ranking.ts, before LIMIT. */
+export async function leaderboard(options: ReadOptions & { window: "1W"; now?: Date; limit?: number }): Promise<(Domain.Creator & { followingByViewer: boolean })[]> {
 	const database = options.database ?? defaultDb;
-	// B4. The join to `theses` used to be an INNER join, so every STANDALONE
-	// position (migration 0007: a fill that belongs to no post, which is the
-	// default a market-page trade produces) was silently excluded from the P&L
-	// the leaderboard ranks on. Same rule as `reads.ts:373`: a standalone
-	// position, or a position on a post that is public.
-	const rows = await database.select({ user: users, position: positions }).from(positions)
+	const now = options.now ?? new Date();
+	// TODO-OWNER: existing 1W window copied from social/ranking.ts:12.
+	const since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+	const component = sql`case when ${positions.status} = 'settled' then ${positions.finalPnlUsd} else ${positions.estimatedPnlUsd} end`;
+	// usdDecimalOrNull rejects NULL and non-decimal numeric values. Any such
+	// component makes the entire creator total unavailable, sorted last.
+	const pnl = sql<string | null>`case when bool_and(coalesce((${component})::text ~ '^-?[0-9]+(\\.[0-9]+)?$', false)) then sum(${component}) else null end`;
+	const rows = await database.select({ user: users, pnl: sql<string | null>`(${pnl})::text` }).from(positions)
 		.innerJoin(users, eq(users.id, positions.userId)).leftJoin(theses, eq(theses.id, positions.thesisId))
-		.where(or(isNull(positions.thesisId), inArray(theses.status, [...PUBLIC_THESIS_STATUSES])));
-	const ranked = rankCreators(rows.map(row => row.position), options.now ?? new Date(), options.window);
-	const byId = new Map(rows.map(row => [row.user.id, row.user]));
-	return Promise.all(ranked.map(async row => {
-		const state = await getFollowState(options.viewerUserId ?? null, row.userId, options);
-		return { ...mapCreator(byId.get(row.userId)!, { thesesCount: null, followers: state.followers, following: state.followingCount }), netPnlUsd: row.pnl };
-	}));
+		.where(and(
+			or(isNull(positions.thesisId), inArray(theses.status, [...PUBLIC_THESIS_STATUSES])),
+			inArray(positions.status, [...FILLED_POSITION_STATUSES]),
+			gte(positions.confirmedAt, since), lte(positions.confirmedAt, now),
+		))
+		.groupBy(users.id)
+		.orderBy(sql`${pnl} desc nulls last`, users.id)
+		.limit(options.limit ?? LEADERBOARD_LIMIT);
+	const states = await getFollowStates(options.viewerUserId ?? null, rows.map(row => row.user.id), options);
+	return rows.map(row => {
+		const state = states.get(row.user.id)!;
+		return { ...mapCreator(row.user, { thesesCount: null, followers: state.followers, following: state.followingCount }), netPnlUsd: row.pnl === null ? null : sumDecimals([row.pnl]), followingByViewer: state.following };
+	});
 }
 
-async function rankedTheses(kind: "trending" | "ending" | "settled", options: ReadOptions): Promise<Domain.Thesis[]> {
+async function rankedTheses(kind: "trending" | "ending" | "settled", options: ReadOptions & { limit?: number }): Promise<Domain.Thesis[]> {
 	const database = options.database ?? defaultDb;
+	// Rank the full eligible population in SQL before bounding the result.
+	// Same engagement sum and tie-break as rankTheses; no join multiplication.
+	const engagement = sql`(select count(*) from ${likes} where ${likes.thesisId} = ${theses.id})
+		+ (select count(*) from ${comments} where ${comments.thesisId} = ${theses.id})
+		+ (select count(*) from ${positions} where ${positions.thesisId} = ${theses.id} and ${inArray(positions.status, [...FILLED_POSITION_STATUSES])})`;
+	const eligible = kind === "ending" ? and(eq(theses.status, "open"), sql`${theses.expiryAt} is not null`)
+		: kind === "settled" ? eq(theses.status, "settled") : inArray(theses.status, [...SOCIAL_PUBLIC_STATUSES]);
+	const ordering = kind === "trending" ? desc(engagement) : kind === "ending" ? theses.expiryAt : sql`${theses.settledAt} desc nulls last`;
 	const rows = await database.select({ thesis: theses, creator: users, creatorPosition: positions }).from(theses)
 		.innerJoin(users, eq(users.id, theses.creatorUserId)).leftJoin(positions, eq(positions.id, theses.creatorPositionId))
-		.where(inArray(theses.status, [...SOCIAL_PUBLIC_STATUSES]));
+		.where(eligible)
+		.orderBy(ordering, theses.id)
+		.limit(options.limit ?? RANKED_THESIS_LIMIT);
 	const aggregates = await aggregatesByThesis(database, rows.map(row => row.thesis.id), viewerId(options));
 	const ranked = rankTheses(rows.map(row => {
 		const totals = aggregates.get(row.thesis.id) ?? { ...emptyAggregates };
@@ -487,9 +526,9 @@ async function rankedTheses(kind: "trending" | "ending" | "settled", options: Re
 	}), kind);
 	return ranked.map(row => mapThesis({ ...row, aggregates: aggregates.get(row.id) ?? { ...emptyAggregates }, dataAsOf: new Date() }));
 }
-export async function trending(options: ReadOptions = {}) { return rankedTheses("trending", options); }
-export async function endingSoon(options: ReadOptions = {}) { return rankedTheses("ending", options); }
-export async function settled(options: ReadOptions = {}) { return rankedTheses("settled", options); }
+export async function trending(options: ReadOptions & { limit?: number } = {}) { return rankedTheses("trending", options); }
+export async function endingSoon(options: ReadOptions & { limit?: number } = {}) { return rankedTheses("ending", options); }
+export async function settled(options: ReadOptions & { limit?: number } = {}) { return rankedTheses("settled", options); }
 
 /**
  * One position and its owner, for `/p/[id]` and for the trade cards a post's

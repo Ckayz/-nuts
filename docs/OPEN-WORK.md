@@ -118,3 +118,11 @@ The owner (2026-09-05 18:3x): "some work here my team continue better. list them
 ## 7. Owner decisions still open
 
 Referrer wallet whitelist by Thetanuts + gas on `0xd5E6…47dd`; the tiny real fill; verified badge for a post linking a standalone trade (schema cannot link it); Bull/Bear naming on a post-less position; `tiny-fill.ts` fee check strict vs upper bound; mobile ticket hidden ≤1180 px by the mockup; accented-letter slugs; session revocation; pagination; handle-change policy; the mockup-vs-rules contradictions (D-m8); every `TODO-OWNER` (presets `$50/$100/$500/$1,000` vs the mockup's `$10/…`, rankings, limits, copy, card width, percent basis, default structure, rail limit 5).
+
+## 8. Avatars (owner 2026-09-05 19:0x: "find an api that can generate random avatar for users — non malicious"; "can store the image locally … no need waste effort doing network calls to store in supabase")
+
+Decision recorded, implementation AFTER the fold lands (it touches `components/primitives.tsx` `Avatar`, which Writer B is editing):
+- **DiceBear**, generated locally from a seed — no upload, no storage, no third-party call at runtime. Packages (registry, measured): `@dicebear/core` 10.7.0 (MIT), `@dicebear/collection` 9.4.2 (MIT). Seed = the lowercase wallet address, so one address always draws the same avatar; a user-set picture (`users.avatar_url`, unused today) would override it later if the owner wants uploads.
+- Style is the OWNER's pick (`TODO-OWNER`); candidates that fit the calm look, all listed "free for personal and commercial use" (CC0) on their docs pages: `identicon` (geometric), `shapes` (soft abstract), `thumbs` (small faces). The implementer re-checks `style.meta.license` from the collection package before shipping.
+- Safety measured on the public API output for a wallet seed (same renderer as the library): SVGs of 1.1–1.6 KB with no `<script>`, `<foreignObject>`, `<image>` or external `href`. Render as an inline `<svg>` or a `data:` URI from `createAvatar(style, { seed }).toString()`; never fetch from `api.dicebear.com` in production (privacy: no wallet addresses leave our servers; CSP: no new hosts).
+- Keep the monogram fallback (`creatorInitials`) for the OG images, which cannot run the library's DOM-free path without checking; the implementer measures that.

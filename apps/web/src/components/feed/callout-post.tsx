@@ -12,7 +12,7 @@ import type { Thesis } from "@/lib/display-types";
  *   tagged     — plus the market chip and, when named, the structure chip;
  *   backed     — plus the verified badge and the creator's live position card.
  */
-export function CalloutPost({ thesis }: { thesis: Thesis }) {
+export function CalloutPost({ thesis, signedIn = false, databaseMode = false }: { thesis: Thesis; signedIn?: boolean; databaseMode?: boolean }) {
 	return (
 		<article
 			className={thesis.backing?.settled ? "post settled" : "post"}
@@ -43,7 +43,7 @@ export function CalloutPost({ thesis }: { thesis: Thesis }) {
 					/>
 				) : null}
 				<div className="acts">
-					<LikeButton likes={thesis.likes} liked={thesis.likedByViewer} />
+					<LikeButton thesisId={thesis.id} signedIn={signedIn} databaseMode={databaseMode} likes={thesis.likes} liked={thesis.likedByViewer} />
 					<Link
 						href={`/t/${thesis.slug}`}
 						aria-label={`Comments, ${thesis.commentCount}`}

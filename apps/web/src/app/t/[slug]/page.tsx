@@ -13,7 +13,7 @@ import { SharePanel } from "@/components/thesis/share-panel";
 import { SpotChart } from "@/components/thesis/spot-chart";
 import { ThesisTabs } from "@/components/thesis/thesis-tabs";
 import { signedUsd, usd } from "@/lib/format";
-import { thesisDetailData } from "@/lib/page-data";
+import { thesisDetailData, socialPageState } from "@/lib/page-data";
 
 /**
  * The post thread. Owner 2026-09-05: a thesis is a post, so this page shows the
@@ -57,11 +57,12 @@ export default async function ThesisPage({
 	if (!detail) notFound();
 	const t = detail.thesis;
 	const backing = t.backing;
+	const social = await socialPageState(t.creator.id);
 
 	return (
 		<div className="work">
 			<aside className="col l">
-				<CreatorStats creator={t.creator} />
+				<CreatorStats creator={t.creator} {...social} />
 				{detail.activity.length > 0 ? (
 					<ActivityList items={detail.activity} count={detail.activityCount} />
 				) : null}
@@ -134,7 +135,7 @@ export default async function ThesisPage({
 						</div>
 						<TagRow tag={t.tag} backed={backing !== null} />
 						<div className="acts" style={{ marginTop: "12px" }}>
-							<LikeButton likes={t.likes} liked={t.likedByViewer} />
+							<LikeButton thesisId={t.id} {...social} likes={t.likes} liked={t.likedByViewer} />
 							<span className="cnt">
 								<CommentIcon />
 								{t.commentCount}
@@ -261,7 +262,7 @@ export default async function ThesisPage({
 						participantCount={detail.participantCount}
 						commentCount={t.commentCount}
 						participants={<ParticipantsTable rows={detail.participants} />}
-						comments={<CommentsList comments={detail.comments} />}
+						comments={<CommentsList comments={detail.comments} thesisId={t.id} {...social} />}
 					/>
 				) : (
 					<div className="sec">
@@ -271,7 +272,7 @@ export default async function ThesisPage({
 								{t.commentCount}
 							</span>
 						</div>
-						<CommentsList comments={detail.comments} />
+						<CommentsList comments={detail.comments} thesisId={t.id} {...social} />
 					</div>
 				)}
 			</main>

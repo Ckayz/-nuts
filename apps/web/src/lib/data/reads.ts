@@ -14,6 +14,9 @@ import "server-only";
  *
  * Page sizes are TODO-OWNER placeholders in `./constants`.
  */
+import { activity as activityRows } from "@nuts/db/schema/index";
+import { SOCIAL_PUBLIC_STATUSES } from "../social/guards";
+import { rankCreators, rankTheses } from "../social/ranking";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db as defaultDb } from "@nuts/db";
 import { comments, follows, likes, positions, theses, users } from "@nuts/db/schema/index";
@@ -202,11 +205,7 @@ export interface Thread {
 	thesis: Domain.Thesis;
 	participants: Domain.Participant[];
 	comments: Domain.Comment[];
-	/**
-	 * Always empty in this round. The `activity` table holds only `event_type`
-	 * plus foreign keys, and nothing writes to it yet; `ActivityItem` needs a
-	 * rendered verb and a dollar amount that no column supplies. FOLLOW-UP.
-	 */
+	/** Public events on this thread; social rows carry no transaction link. */
 	activity: Domain.ActivityItem[];
 	participantCount: number;
 	activityCount: number;
@@ -257,6 +256,8 @@ export async function getThread(
 		.limit(THREAD_COMMENT_PAGE_SIZE);
 
 	const aggregates = await aggregatesByThesis(database, [thesisId], viewerId(options));
+	const events = await listActivity(row.creator.id, { ...options, thesisId });
+	const creatorFollow = await getFollowState(viewerId(options), row.creator.id, options);
 
 	return {
 		thesis: mapThesis({
@@ -264,15 +265,16 @@ export async function getThread(
 			creator: row.creator,
 			creatorPosition: row.creatorPosition,
 			aggregates: aggregates.get(thesisId) ?? { ...emptyAggregates },
+			creatorCounts: { thesesCount: null, followers: creatorFollow.followers, following: creatorFollow.followingCount },
 			dataAsOf,
 		}),
 		participants: positionRows.map((entry) =>
 			mapParticipant({ position: entry.position, thesis: row.thesis, user: entry.user }),
 		),
 		comments: commentRows.map((entry) => mapComment({ comment: entry.comment, user: entry.user })),
-		activity: [],
+		activity: events,
 		participantCount: positionRows.length,
-		activityCount: 0,
+		activityCount: events.length,
 	};
 }
 
@@ -332,9 +334,11 @@ export async function getCreator(
 		.from(follows)
 		.where(eq(follows.followedUserId, user.id));
 
+	const followState = await getFollowState(viewerId(options), user.id, options);
 	const creator = mapCreator(user, {
 		thesesCount: count(thesesCount?.total),
 		followers: count(followerCount?.total),
+		following: followState.followingCount,
 	});
 
 	const dataAsOf = new Date();
@@ -391,3 +395,68 @@ export async function getCreator(
 		),
 	};
 }
+
+/** Counts are independent, so joins cannot multiply relationships. */
+export async function getFollowState(viewerUserId: string | null, userId: string, options: ReadOptions = {}) {
+	if (!UUID.test(userId)) return { following: false, followers: 0, followingCount: 0 };
+	const database = options.database ?? defaultDb;
+	const [counts] = await database.select({
+		followers: sql<string>`count(*) filter (where ${follows.followedUserId} = ${userId})`,
+		followingCount: sql<string>`count(*) filter (where ${follows.followerUserId} = ${userId})`,
+	}).from(follows);
+	const match = viewerUserId && UUID.test(viewerUserId) ? await database.select().from(follows).where(and(eq(follows.followerUserId, viewerUserId), eq(follows.followedUserId, userId))).limit(1) : [];
+	return { following: match.length > 0, followers: count(counts?.followers), followingCount: count(counts?.followingCount) };
+}
+
+/** Public activity only; a draft headline or failed fill must not leak here. */
+export async function listActivity(userId: string, options: ReadOptions & { thesisId?: string } = {}): Promise<Domain.ActivityItem[]> {
+	if (!UUID.test(userId) || (options.thesisId !== undefined && !UUID.test(options.thesisId))) return [];
+	const database = options.database ?? defaultDb;
+	const rows = await database.select({ event: activityRows, user: users, thesis: theses, position: positions })
+		.from(activityRows).innerJoin(users, eq(users.id, activityRows.userId))
+		.leftJoin(positions, eq(positions.id, activityRows.positionId))
+		.innerJoin(theses, eq(theses.id, sql`coalesce(${activityRows.thesisId}, ${positions.thesisId})`))
+		.where(and(options.thesisId ? eq(theses.id, options.thesisId) : eq(activityRows.userId, userId), inArray(theses.status, [...SOCIAL_PUBLIC_STATUSES])))
+		.orderBy(desc(activityRows.createdAt), activityRows.id);
+	return rows.filter(row => row.event.eventType !== "position_confirmed" || (row.position !== null && FILLED_POSITION_STATUSES.some(s => s === row.position!.status) && row.position.confirmedAt !== null))
+		.filter(row => ["like", "comment", "thesis_published", "position_confirmed"].includes(row.event.eventType))
+		.map(row => ({
+			id: row.event.id, createdAt: row.event.createdAt.toISOString(), socialDetail: row.thesis.headline,
+			creator: mapCreator(row.user), action: row.event.eventType === "thesis_published" ? "launched" : row.event.eventType === "position_confirmed" ? "joined" : row.event.eventType,
+			// Legacy required money field is not displayed: socialDetail selects
+			// the event presentation with no fabricated amount or contracts.
+			side: row.position?.side ?? null, amountUsd: "0", contracts: null, soldStructure: null,
+			transactionHash: row.position?.txHash ?? null, mockTransactionFragment: null,
+		}));
+}
+
+/** TODO-OWNER: provisional formula/window specified in social/ranking.ts. */
+export async function leaderboard(options: ReadOptions & { window: "1W"; now?: Date }): Promise<Domain.Creator[]> {
+	const database = options.database ?? defaultDb;
+	const rows = await database.select({ user: users, position: positions }).from(positions)
+		.innerJoin(users, eq(users.id, positions.userId)).innerJoin(theses, eq(theses.id, positions.thesisId))
+		.where(inArray(theses.status, [...SOCIAL_PUBLIC_STATUSES]));
+	const ranked = rankCreators(rows.map(row => row.position), options.now ?? new Date(), options.window);
+	const byId = new Map(rows.map(row => [row.user.id, row.user]));
+	return Promise.all(ranked.map(async row => {
+		const state = await getFollowState(options.viewerUserId ?? null, row.userId, options);
+		return { ...mapCreator(byId.get(row.userId)!, { thesesCount: null, followers: state.followers, following: state.followingCount }), netPnlUsd: row.pnl };
+	}));
+}
+
+async function rankedTheses(kind: "trending" | "ending" | "settled", options: ReadOptions): Promise<Domain.Thesis[]> {
+	const database = options.database ?? defaultDb;
+	const rows = await database.select({ thesis: theses, creator: users, creatorPosition: positions }).from(theses)
+		.innerJoin(users, eq(users.id, theses.creatorUserId)).leftJoin(positions, eq(positions.id, theses.creatorPositionId))
+		.where(inArray(theses.status, [...SOCIAL_PUBLIC_STATUSES]));
+	const aggregates = await aggregatesByThesis(database, rows.map(row => row.thesis.id), viewerId(options));
+	const ranked = rankTheses(rows.map(row => {
+		const totals = aggregates.get(row.thesis.id) ?? { ...emptyAggregates };
+		return { ...row, id: row.thesis.id, status: row.thesis.status, expiryAt: row.thesis.expiryAt, settledAt: row.thesis.settledAt,
+			likes: totals.likeCount, comments: totals.commentCount, participants: totals.backCount + totals.counterCount };
+	}), kind);
+	return ranked.map(row => mapThesis({ ...row, aggregates: aggregates.get(row.id) ?? { ...emptyAggregates }, dataAsOf: new Date() }));
+}
+export async function trending(options: ReadOptions = {}) { return rankedTheses("trending", options); }
+export async function endingSoon(options: ReadOptions = {}) { return rankedTheses("ending", options); }
+export async function settled(options: ReadOptions = {}) { return rankedTheses("settled", options); }

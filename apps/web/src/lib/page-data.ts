@@ -16,6 +16,7 @@
  * naming a revalidation interval, which would be an owner's number, and it is
  * scoped to the database branch so the mock build keeps its static output.
  */
+import type * as Domain from "@/types";
 import { connection } from "next/server";
 import type * as View from "./display-types";
 import * as display from "./display";
@@ -32,6 +33,10 @@ function isOpen(position: View.Position): boolean {
 }
 
 export interface DiscoverData {
+	signedIn: boolean;
+	databaseMode: boolean;
+	ending: View.TrendingItem[];
+	settled: View.TrendingItem[];
 	leaderboard: View.Creator[];
 	theses: View.Thesis[];
 	trending: View.TrendingItem[];
@@ -39,6 +44,10 @@ export interface DiscoverData {
 }
 
 export interface CreatorPageData {
+	signedIn: boolean;
+	databaseMode: boolean;
+	following: boolean;
+	self: boolean;
 	creator: View.Creator;
 	callouts: View.Thesis[];
 	positions: View.Participant[];
@@ -62,6 +71,7 @@ async function viewer(): Promise<{ userId: string; walletAddress: string } | nul
 export async function discoverData(): Promise<DiscoverData> {
 	if (!usingDatabase()) {
 		return {
+			signedIn: false, databaseMode: false, ending: [], settled: [],
 			leaderboard: mock.leaderboard,
 			theses: mock.theses,
 			trending: mock.trending,
@@ -69,21 +79,21 @@ export async function discoverData(): Promise<DiscoverData> {
 		};
 	}
 	await connection();
-	const { listFeed, getPortfolio } = await import("./data/reads");
+	const { listFeed, getPortfolio, leaderboard, trending, endingSoon, settled } = await import("./data/reads");
 	const signedIn = await viewer();
 	const theses = await listFeed({ viewerUserId: signedIn?.userId ?? null });
 	const positions = signedIn === null ? [] : await getPortfolio(signedIn.walletAddress);
 	return {
-		// TODO-OWNER: the leaderboard formula and window, and the trending and
-		// ending-soon rules, are undecided (PRD 19). Both rails stay empty in
-		// database mode rather than ranking by a rule nobody approved. The pages
-		// already render their TODO-OWNER notes underneath.
-		leaderboard: [],
+		signedIn: signedIn !== null, databaseMode: true,
+		// TODO-OWNER: provisional social/ranking.ts formulas; UI notes retained.
+		leaderboard: (await leaderboard({ window: "1W" })).map(display.creator),
+		ending: (await endingSoon()).map(railItem),
+		settled: (await settled()).map(railItem),
 		theses: theses.map(display.thesis),
 		// `getPortfolio` already applies the single fill-status rule, so nothing
 		// is filtered by status a second time here.
 		yourPositions: positions.map(display.position).filter(isOpen),
-		trending: [],
+		trending: (await trending()).map(railItem),
 	};
 }
 
@@ -131,6 +141,7 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		const creator = mock.creatorByHandle(handle);
 		if (!creator) return undefined;
 		return {
+			signedIn: false, databaseMode: false, following: false, self: false,
 			creator,
 			callouts: mock.thesesByCreator(handle),
 			positions: mock.participantsByCreator(handle),
@@ -138,19 +149,19 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		};
 	}
 	await connection();
-	const { getCreator } = await import("./data/reads");
+	const { getCreator, listActivity, getFollowState } = await import("./data/reads");
 	const signedIn = await viewer();
 	const profile = await getCreator(handle, { viewerUserId: signedIn?.userId ?? null });
 	if (profile === null) return undefined;
 	return {
+		signedIn: signedIn !== null, databaseMode: true, self: signedIn?.userId === profile.creator.id,
+		following: (await getFollowState(signedIn?.userId ?? null, profile.creator.id)).following,
 		creator: display.creator(profile.creator),
 		callouts: profile.theses
 			.filter((thesis) => renderableStatus(thesis.thesis.status))
 			.map(display.thesis),
 		positions: profile.positions.map(display.participant),
-		// FOLLOW-UP: the `activity` table has no writer yet and holds no rendered
-		// verb or amount; see `data/reads.ts`.
-		activity: [],
+		activity: (await listActivity(profile.creator.id)).map(display.activity),
 	};
 }
 
@@ -187,3 +198,19 @@ export async function portfolioData(): Promise<PortfolioData> {
  * force-dynamic set). Enumerating params against a database that may not be
  * reachable at build time was never wanted either.
  */
+
+/** A rail can show a text post without inventing a market, expiry or P&L. */
+function railItem(value: Domain.Thesis): View.TrendingItem {
+	const expiry = value.market?.expiryAt;
+	return { slug: value.slug, asset: value.market?.underlyingAsset ?? "", headline: value.thesis.headline,
+		creatorHandle: value.creator.handle, timeLabel: expiry ? `${Math.max(0, Math.ceil((Date.parse(expiry) - Date.parse(value.dataAsOf)) / 86400000))}d` : "",
+		pnlUsd: display.amount(value.thesis.status === "settled" ? value.backing?.economics.finalPnlUsd ?? null : value.backing?.economics.estimatedPnlUsd ?? null), bullPct: value.backing?.bull.pct ?? 0 };
+}
+export async function socialPageState(creatorId?: string) {
+	if (!usingDatabase()) return { databaseMode: false, signedIn: false, following: false, self: false, mockCreator: mock.currentUser };
+	const session = await viewer();
+	const { getFollowState, getCreator } = await import("./data/reads");
+	const profile = session ? await getCreator(session.walletAddress) : null;
+	return { databaseMode: true, signedIn: session !== null, self: session?.userId === creatorId,
+		following: creatorId ? (await getFollowState(session?.userId ?? null, creatorId )).following : false, mockCreator: profile ? display.creator(profile.creator) : undefined };
+}

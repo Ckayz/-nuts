@@ -1,27 +1,25 @@
 "use client";
-
-import { useState } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { HeartIcon } from "@/components/icons";
+import { toggleLike } from "@/lib/social/actions";
 
-/**
- * Like control. Owner 2026-09-05: "allowing users to like that particular
- * thesis also". Nothing is persisted yet — there is no wallet session and no
- * write path — so the count moves optimistically from the fixture value and
- * resets on reload.
- */
-export function LikeButton({ likes, liked }: { likes: number; liked: boolean }) {
-	const [on, setOn] = useState(liked);
-	const count = likes + (on === liked ? 0 : on ? 1 : -1);
-	return (
-		<button
-			type="button"
-			className={on ? "liked" : undefined}
-			aria-pressed={on}
-			aria-label={`Like, ${count}`}
-			onClick={() => setOn(!on)}
-		>
-			<HeartIcon filled={on} />
-			{count}
-		</button>
-	);
+export function LikeButton({ thesisId, likes, liked, signedIn = false, databaseMode = false }: {
+	thesisId: string; likes: number; liked: boolean; signedIn?: boolean; databaseMode?: boolean;
+}) {
+	const [local, setLocal] = useState({ liked, likes });
+	const [pending, startTransition] = useTransition();
+	const [state, optimistic] = useOptimistic(databaseMode ? { liked, likes } : local);
+	const disabled = pending || (databaseMode && !signedIn);
+	return <button type="button" className={state.liked ? "liked" : undefined}
+		aria-pressed={state.liked} aria-label={`Like, ${state.likes}`} disabled={disabled}
+		title={databaseMode && !signedIn ? "Sign in using the wallet control" : undefined}
+		onClick={() => {
+			if (disabled) return;
+			const next = { liked: !state.liked, likes: state.likes + (state.liked ? -1 : 1) };
+			if (!databaseMode) { setLocal(next); return; }
+			startTransition(async () => {
+				optimistic(next);
+				try { await toggleLike(thesisId, next.liked); } catch { /* Roll back to server props. */ }
+			});
+		}}><HeartIcon filled={state.liked} />{state.likes}</button>;
 }

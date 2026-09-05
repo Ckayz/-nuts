@@ -20,7 +20,7 @@ export function ActivityList({
 				{items.map((a) => (
 					<div
 						className="row activity-row"
-						key={a.tx.label}
+						key={a.id ?? a.tx.label}
 					>
 						<Avatar initials={a.creator.initials} size="s" />
 						<span className="who">
@@ -37,9 +37,9 @@ export function ActivityList({
 							</span>
 							<span className="h">{a.detail}</span>
 						</span>
-						<a className="tx" href={a.tx.href}>
+						{!a.offchain ? <a className="tx" href={a.tx.href}>
 							{a.tx.label}
-						</a>
+						</a> : null}
 					</div>
 				))}
 			</div>

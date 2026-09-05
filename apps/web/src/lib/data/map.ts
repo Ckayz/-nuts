@@ -64,6 +64,7 @@ export const emptyAggregates: ThesisAggregates = {
 
 /** Counts a user has on their profile; null where the formula is the owner's. */
 export interface CreatorCounts {
+	following?: number;
 	thesesCount: number | null;
 	followers: number | null;
 }
@@ -87,6 +88,7 @@ export function mapCreator(row: UserRow, counts: CreatorCounts = { thesesCount: 
 		winRatePct: null,
 		thesesCount: counts.thesesCount,
 		followers: counts.followers,
+	following: counts.following,
 		netPnlUsd: null,
 		verifiedPnl30dUsd: null,
 		biggestLossUsd: null,

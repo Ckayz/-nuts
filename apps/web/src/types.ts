@@ -69,6 +69,7 @@ export type Creator = ThesisAiContext["creator"] & {
     winRatePct: number | null;
     thesesCount: number | null;
     followers: number | null;
+    following?: number;
     netPnlUsd: string | null;
     verifiedPnl30dUsd: string | null;
     biggestLossUsd: string | null;
@@ -184,6 +185,9 @@ export interface Comment {
     body: string;
 }
 export interface ActivityItem {
+    id?: string;
+    createdAt?: string;
+    socialDetail?: string;
     creator: Creator;
     action: string;
     side: PositionSide | null;

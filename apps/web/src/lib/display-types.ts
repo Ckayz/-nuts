@@ -15,6 +15,8 @@ export interface TxRef {
     href: string;
 }
 export interface Creator {
+    id?: string;
+    followerCount?: number;
     handle: string;
     displayName: string;
     /** Two-letter monogram used by the `.av` avatar. */
@@ -138,6 +140,8 @@ export interface Position {
     settled: boolean;
 }
 export interface ActivityItem {
+    id?: string;
+    offchain?: boolean;
     creator: Creator;
     /** Verb as rendered, e.g. "joined", "took", "launched". */
     action: string;

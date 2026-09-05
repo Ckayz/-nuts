@@ -11,12 +11,23 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 import type { AgentErrorClass } from "./errors";
-import { PROBE_CACHE_MS, type ProbeCaller, agentHealth, resetProbeCache } from "./health";
+import {
+	PROBE_CACHE_MS,
+	PROBE_TOKEN_HEADER,
+	PROBE_TOKEN_MIN_LENGTH,
+	type ProbeCaller,
+	agentHealth,
+	resetProbeCache,
+} from "./health";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 const AGENT = { variable: "AGENT_MODEL", id: "anthropic/claude-haiku-4.5" } as const;
 const GATE = { variable: "AGENT_GATE_MODEL", id: "anthropic/claude-haiku-4.5" } as const;
+/** A fixture operator token, 32 characters. Never a real value. */
+const OPERATOR_TOKEN = "operator-fixture-token-0123456789";
+/** Every probing case in this file is an AUTHORISED one unless it says otherwise. */
+const AUTHORISED = { configured: OPERATOR_TOKEN, presented: OPERATOR_TOKEN } as const;
 
 /** Counts calls so "did not call the provider" is a measured fact, not a hope. */
 function counting(behaviour: (role: "agent" | "gate") => void = () => {}): {
@@ -51,6 +62,7 @@ describe("the plain GET costs nothing", () => {
 			checkedAt: "2026-09-06T00:00:00.000Z",
 			probed: false,
 			cached: false,
+			probeRefused: false,
 			config: { ok: true, problem: null },
 			models: {
 				agent: { id: AGENT.id, probed: false, ok: null, errorClass: null },
@@ -66,6 +78,7 @@ describe("the plain GET costs nothing", () => {
 			agent: { variable: "AGENT_MODEL", id: "minimax/minimax-m3:free" },
 			gate: GATE,
 			probe: true,
+			probeToken: AUTHORISED,
 			probeCaller: caller,
 		});
 		expect(calls).toEqual([]);
@@ -90,6 +103,7 @@ describe("?probe=1 runs one call per model and classifies the failure", () => {
 			agent: AGENT,
 			gate: GATE,
 			probe: true,
+			probeToken: AUTHORISED,
 			probeCaller: caller,
 		});
 		expect(calls.sort()).toEqual([`agent:${AGENT.id}`, `gate:${GATE.id}`]);
@@ -112,6 +126,7 @@ describe("?probe=1 runs one call per model and classifies the failure", () => {
 			agent: AGENT,
 			gate: GATE,
 			probe: true,
+			probeToken: AUTHORISED,
 			probeCaller: caller,
 		});
 		expect(status).toBe(503);
@@ -140,6 +155,7 @@ describe("?probe=1 runs one call per model and classifies the failure", () => {
 				agent: AGENT,
 				gate: GATE,
 				probe: true,
+			probeToken: AUTHORISED,
 				probeCaller: caller,
 			});
 			expect({ fields, cls: body.models.agent.errorClass }).toEqual({ fields, cls: expected });
@@ -151,7 +167,7 @@ describe("the probe cannot be used to burn quota", () => {
 	test("a second probe inside the window is served from the cache", async () => {
 		const first = counting();
 		const start = new Date("2026-09-06T00:00:00.000Z");
-		await agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeCaller: first.caller, now: start });
+		await agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeToken: AUTHORISED, probeCaller: first.caller, now: start });
 		expect(first.calls.length).toBe(2);
 
 		const second = counting();
@@ -160,6 +176,7 @@ describe("the probe cannot be used to burn quota", () => {
 			agent: AGENT,
 			gate: GATE,
 			probe: true,
+			probeToken: AUTHORISED,
 			probeCaller: second.caller,
 			now: new Date(start.getTime() + PROBE_CACHE_MS - 1),
 		});
@@ -177,6 +194,7 @@ describe("the probe cannot be used to burn quota", () => {
 				agent: AGENT,
 				gate: GATE,
 				probe: true,
+			probeToken: AUTHORISED,
 				probeCaller: caller,
 				now: new Date(start.getTime() + i * 1000),
 			});
@@ -203,8 +221,8 @@ describe("the probe cannot be used to burn quota", () => {
 		};
 		const now = new Date("2026-09-06T00:00:00.000Z");
 		const both = Promise.all([
-			agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeCaller: caller, now }),
-			agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeCaller: caller, now }),
+			agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeToken: AUTHORISED, probeCaller: caller, now }),
+			agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeToken: AUTHORISED, probeCaller: caller, now }),
 		]);
 		// Both requests are now inside the window with nothing finished.
 		await Promise.resolve();
@@ -226,12 +244,13 @@ describe("the probe cannot be used to burn quota", () => {
 	test("after the window it probes again", async () => {
 		const { caller, calls } = counting();
 		const start = new Date("2026-09-06T00:00:00.000Z");
-		await agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeCaller: caller, now: start });
+		await agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeToken: AUTHORISED, probeCaller: caller, now: start });
 		await agentHealth({
 			usingGateway: false,
 			agent: AGENT,
 			gate: GATE,
 			probe: true,
+			probeToken: AUTHORISED,
 			probeCaller: caller,
 			now: new Date(start.getTime() + PROBE_CACHE_MS),
 		});
@@ -243,12 +262,13 @@ describe("the probe cannot be used to burn quota", () => {
 			throw Object.assign(new Error("x"), { name: "AI_APICallError", statusCode: 402 });
 		});
 		const start = new Date("2026-09-06T00:00:00.000Z");
-		await agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeCaller: caller, now: start });
+		await agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeToken: AUTHORISED, probeCaller: caller, now: start });
 		const again = await agentHealth({
 			usingGateway: false,
 			agent: AGENT,
 			gate: GATE,
 			probe: true,
+			probeToken: AUTHORISED,
 			probeCaller: caller,
 			now: new Date(start.getTime() + 1),
 		});
@@ -257,6 +277,146 @@ describe("the probe cannot be used to burn quota", () => {
 			cached: true,
 			cls: "no_credit",
 		});
+	});
+});
+
+/**
+ * C-P2-2 (lane C pass 2, MAJOR). `?probe=1` was reachable by anyone and its
+ * only spending control was a 60-second PROCESS-LOCAL cache, so a new instance
+ * (or a fleet of them) meant new calls. Reviewer measurement on the unfixed
+ * module:
+ *
+ *   {"unauthenticatedWindows":3,"injectedModelCalls":6}
+ *   {"afterNewInstance":8}
+ *
+ * Owner ruling 2026-09-06 03:4x: "don't spam it and finish his credits."
+ */
+describe("C-P2-2: only an authorised operator can spend model credit", () => {
+	test("no token configured — three windows of ?probe=1 make ZERO calls and 403", async () => {
+		const { caller, calls } = counting();
+		const start = new Date("2026-09-06T00:00:00.000Z");
+		const statuses: number[] = [];
+		const probed: boolean[] = [];
+		for (let i = 0; i < 3; i++) {
+			resetProbeCache();
+			const answer = await agentHealth({
+				usingGateway: false,
+				agent: AGENT,
+				gate: GATE,
+				probe: true,
+				probeCaller: caller,
+				probeToken: { configured: undefined, presented: "anything-at-all-16" },
+				now: new Date(start.getTime() + i * PROBE_CACHE_MS),
+			});
+			statuses.push(answer.status);
+			probed.push(answer.body.probed);
+		}
+		expect({ unauthenticatedWindows: 3, injectedModelCalls: calls.length, statuses, probed }).toEqual({
+			unauthenticatedWindows: 3,
+			injectedModelCalls: 0,
+			statuses: [403, 403, 403],
+			probed: [false, false, false],
+		});
+	});
+
+	test("a WRONG token makes zero calls and 403", async () => {
+		const { caller, calls } = counting();
+		const { status, body } = await agentHealth({
+			usingGateway: false,
+			agent: AGENT,
+			gate: GATE,
+			probe: true,
+			probeCaller: caller,
+			probeToken: { configured: OPERATOR_TOKEN, presented: `${OPERATOR_TOKEN}x` },
+		});
+		expect({ status, calls: calls.length, probed: body.probed, refused: body.probeRefused }).toEqual({
+			status: 403,
+			calls: 0,
+			probed: false,
+			refused: true,
+		});
+	});
+
+	test("a MISSING header makes zero calls and 403", async () => {
+		const { caller, calls } = counting();
+		const { status } = await agentHealth({
+			usingGateway: false,
+			agent: AGENT,
+			gate: GATE,
+			probe: true,
+			probeCaller: caller,
+			probeToken: { configured: OPERATOR_TOKEN, presented: null },
+		});
+		expect({ status, calls: calls.length }).toEqual({ status: 403, calls: 0 });
+	});
+
+	test("a token SHORTER than the minimum is treated as not configured", async () => {
+		const short = "0123456789abcde"; // 15
+		expect(short.length).toBe(PROBE_TOKEN_MIN_LENGTH - 1);
+		const { caller, calls } = counting();
+		const { status } = await agentHealth({
+			usingGateway: false,
+			agent: AGENT,
+			gate: GATE,
+			probe: true,
+			probeCaller: caller,
+			probeToken: { configured: short, presented: short },
+		});
+		expect({ status, calls: calls.length }).toEqual({ status: 403, calls: 0 });
+	});
+
+	test("the RIGHT token runs exactly one round", async () => {
+		const { caller, calls } = counting();
+		const { status, body } = await agentHealth({
+			usingGateway: false,
+			agent: AGENT,
+			gate: GATE,
+			probe: true,
+			probeCaller: caller,
+			probeToken: { configured: OPERATOR_TOKEN, presented: OPERATOR_TOKEN },
+		});
+		expect({ status, calls: calls.length, probed: body.probed, refused: body.probeRefused }).toEqual({
+			status: 200,
+			calls: 2,
+			probed: true,
+			refused: false,
+		});
+	});
+
+	test("the plain GET stays public and config-only", async () => {
+		const { caller, calls } = counting();
+		const { status, body } = await agentHealth({
+			usingGateway: false,
+			agent: AGENT,
+			gate: GATE,
+			probe: false,
+			probeCaller: caller,
+			probeToken: { configured: undefined, presented: null },
+		});
+		expect({ status, calls: calls.length, probed: body.probed, refused: body.probeRefused }).toEqual({
+			status: 200,
+			calls: 0,
+			probed: false,
+			refused: false,
+		});
+	});
+
+	test("a refused probe answers the SAME body as the plain GET, so it is no oracle", async () => {
+		const { caller } = counting();
+		const now = new Date("2026-09-06T00:00:00.000Z");
+		const plain = await agentHealth({
+			usingGateway: false, agent: AGENT, gate: GATE, probe: false, probeCaller: caller, now,
+		});
+		const notConfigured = await agentHealth({
+			usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeCaller: caller,
+			probeToken: { configured: undefined, presented: "x" }, now,
+		});
+		const wrongToken = await agentHealth({
+			usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeCaller: caller,
+			probeToken: { configured: OPERATOR_TOKEN, presented: "wrong-but-long-enough" }, now,
+		});
+		expect(notConfigured.body).toEqual(wrongToken.body);
+		expect({ ...notConfigured.body, probeRefused: false }).toEqual(plain.body);
 	});
 });
 
@@ -283,5 +443,65 @@ describe("the route wires the module the way this file tested it", () => {
 
 	test("the probe asks for the smallest answer a model can give", () => {
 		expect(route).toContain("maxOutputTokens: 5");
+	});
+
+	/** C-P2-2: the route hands the module BOTH halves of the authorisation. */
+	test("the route passes the configured token and the presented header", () => {
+		expect(route).toContain("configured: env.AGENT_HEALTH_PROBE_TOKEN");
+		expect(route).toContain("presented: request.headers.get(PROBE_TOKEN_HEADER)");
+	});
+});
+
+/**
+ * C-P2-2, driven through the REAL `GET` handler rather than its source text.
+ *
+ * No model can be reached from here: `route.ts` imports `@/lib/agent/model`
+ * INSIDE `probeCaller`, so a refused probe never even loads the provider. The
+ * `fetch` trap below makes that a measured fact rather than an argument — any
+ * outbound request during these cases fails the test.
+ */
+describe("C-P2-2: the real endpoint refuses an unauthorised probe", () => {
+	const url = "https://example.invalid/api/agent/health";
+	const WRONG = "not-the-configured-operator-token";
+
+	async function call(target: string, headers: Record<string, string> = {}) {
+		const { GET } = await import("../../app/api/agent/health/route");
+		const realFetch = globalThis.fetch;
+		const attempts: string[] = [];
+		globalThis.fetch = (async (input: unknown) => {
+			attempts.push(String(input));
+			throw new Error("no network in this test");
+		}) as unknown as typeof fetch;
+		try {
+			const response = await GET(new Request(target, { headers }));
+			return { response, body: (await response.json()) as { probed: boolean; probeRefused: boolean }, attempts };
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+	}
+
+	test("?probe=1 with no usable token is a 403 and makes no request at all", async () => {
+		const { response, body, attempts } = await call(`${url}?probe=1`, { [PROBE_TOKEN_HEADER]: WRONG });
+		expect({ status: response.status, probed: body.probed, refused: body.probeRefused, attempts }).toEqual({
+			status: 403,
+			probed: false,
+			refused: true,
+			attempts: [],
+		});
+	});
+
+	test("?probe=1 with NO header at all is a 403", async () => {
+		const { response, body } = await call(`${url}?probe=1`);
+		expect({ status: response.status, refused: body.probeRefused }).toEqual({ status: 403, refused: true });
+	});
+
+	test("the plain GET is still public, free and 200", async () => {
+		const { response, body, attempts } = await call(url);
+		expect({ status: response.status, probed: body.probed, refused: body.probeRefused, attempts }).toEqual({
+			status: 200,
+			probed: false,
+			refused: false,
+			attempts: [],
+		});
 	});
 });

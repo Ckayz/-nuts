@@ -31,7 +31,7 @@ export default async function CreatorPage({
 	return (
 		<div className="work profile">
 			<aside className="col l">
-				<CreatorStats creator={creator} />
+				<CreatorStats creator={creator} signedIn={data.signedIn} databaseMode={data.databaseMode} following={data.following} self={data.self} />
 				<ActivityList items={activity} count={activity.length} />
 			</aside>
 
@@ -41,7 +41,7 @@ export default async function CreatorPage({
 				</div>
 				<div className="feed">
 					{callouts.map((t) => (
-						<CalloutPost key={t.slug} thesis={t} />
+						<CalloutPost key={t.slug} thesis={t} signedIn={data.signedIn} databaseMode={data.databaseMode} />
 					))}
 				</div>
 				<ParticipantsTable rows={positions} />

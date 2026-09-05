@@ -1,13 +1,27 @@
+"use client";
+import { useOptimistic, useState, useTransition } from "react";
+import { toggleFollow } from "@/lib/social/actions";
 import { Avatar } from "@/components/primitives";
 import { pnlClass, signedUsd } from "@/lib/format";
 import type { Creator } from "@/lib/display-types";
 
-export function CreatorStats({ creator }: { creator: Creator }) {
+export function CreatorStats({ creator, following = false, signedIn = false, databaseMode = false, self = false }: { creator: Creator; following?: boolean; signedIn?: boolean; databaseMode?: boolean; self?: boolean }) {
+	const [local, setLocal] = useState({ following, followers: creator.followerCount });
+	const [pending, startTransition] = useTransition();
+	const [state, optimistic] = useOptimistic(databaseMode ? { following, followers: creator.followerCount } : local);
+	const disabled = pending || self || (databaseMode && (!signedIn || !creator.id));
 	return (
 		<div className="sec">
 			<div className="sec-h">
 				<span className="lbl">Creator</span>
-				<button type="button" className="btn sm">
+				<button type="button" className="btn sm" aria-pressed={state.following} disabled={disabled}
+					title={databaseMode && !signedIn ? "Sign in using the wallet control" : undefined}
+					onClick={() => {
+						if (disabled) return;
+						const next = { following: !state.following, followers: state.followers === undefined ? undefined : state.followers + (state.following ? -1 : 1) };
+						if (!databaseMode) { setLocal(next); return; }
+						startTransition(async () => { optimistic(next); try { await toggleFollow(creator.id!, next.following); } catch { /* rollback */ } });
+					}}>
 					Follow
 				</button>
 			</div>
@@ -50,7 +64,7 @@ export function CreatorStats({ creator }: { creator: Creator }) {
 				{creator.followers !== undefined ? (
 					<>
 						<dt>Followers</dt>
-						<dd>{creator.followers}</dd>
+						<dd>{state.followers === undefined ? creator.followers : new Intl.NumberFormat("en-US").format(state.followers)}</dd>
 					</>
 				) : null}
 				{creator.biggestLossUsd !== undefined ? (

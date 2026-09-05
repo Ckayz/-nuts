@@ -58,7 +58,7 @@ function strikesLabel(strikesUsd: string[], isCall: boolean) { return `${strikes
 /** Market slugs are derived from the asset: the book, not a hardcoded list. */
 export function marketSlug(asset: string) { return asset.toLowerCase(); }
 export function creator(value: Domain.Creator): View.Creator {
-    return { handle: value.handle, displayName: value.displayName ?? "—", initials: value.initials,
+    return { id: value.id, followerCount: value.followers ?? undefined, handle: value.handle, displayName: value.displayName ?? "—", initials: value.initials,
         walletAddress: value.walletAddress ? fragment(value.walletAddress) : value.mockWalletFragment ?? undefined,
         sinceLabel: value.sinceLabel ?? undefined, winRatePct: value.winRatePct ?? undefined, thesesCount: value.thesesCount ?? undefined,
         followers: value.followers === null ? undefined : new Intl.NumberFormat("en-US").format(value.followers),
@@ -128,6 +128,7 @@ export function participant(value: Domain.Participant): View.Participant {
     return { ...position(value), creator: creator(value.creator), says: value.says, isCreator: value.role === "creator" };
 }
 export function activity(value: Domain.ActivityItem): View.ActivityItem {
+    if (value.socialDetail !== undefined) return { id: value.id, creator: creator(value.creator), action: value.action, detail: value.socialDetail, offchain: value.transactionHash === null, tx: tx(value.transactionHash, null) ?? { label: "", href: "" } };
     return { creator: creator(value.creator), action: value.action, side: value.side === null ? undefined : value.side === "back" ? "bull" : "bear", detail: `${amount(value.amountUsd).usd} · ${value.contracts !== null ? `${value.contracts} ct` : value.soldStructure}`, tx: tx(value.transactionHash, value.mockTransactionFragment) ?? { label: "—", href: "#" } };
 }
 export function ticket(value: Domain.Ticket): View.Ticket {

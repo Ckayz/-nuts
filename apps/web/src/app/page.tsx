@@ -6,7 +6,7 @@ import { Pill, TodoOwner } from "@/components/primitives";
 import { discoverData } from "@/lib/page-data";
 
 export default async function DiscoverPage() {
-	const { leaderboard, theses, trending, yourPositions } = await discoverData();
+	const { leaderboard, theses, trending, yourPositions, signedIn, databaseMode } = await discoverData();
 	return (
 		<div className="work">
 			<aside className="col l">
@@ -44,7 +44,7 @@ export default async function DiscoverPage() {
 				<NewCalloutsBar />
 				<div className="feed">
 					{theses.map((t) => (
-						<CalloutPost key={t.slug} thesis={t} />
+						<CalloutPost key={t.slug} thesis={t} signedIn={signedIn} databaseMode={databaseMode} />
 					))}
 				</div>
 			</main>

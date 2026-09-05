@@ -48,6 +48,60 @@ describe("D-C2: the agent's copy is tagged", () => {
 	});
 
 	/**
+	 * D-N3 (lane D confirming pass). D-C2 tagged the approval and execution
+	 * components and stopped there, so three sentences in the chat itself stayed
+	 * untagged. The reviewer measured `OWNER_TAGS {"renderedMarkers":0,
+	 * "sourceTagLines":[27,46,356]}` — markers existed in the file, none of them
+	 * covering these. A marker elsewhere in a file is not approval.
+	 */
+	test("agent-chat.tsx holds its three loose sentences in one tagged block", async () => {
+		const source = await read("./agent-chat.tsx");
+		expect(source).toContain("const COPY = {");
+		// The reviewer's three sentences, each now a COPY entry.
+		for (const phrase of [
+			"Live Thetanuts liquidity on Base. It prepares trades; your wallet approves them.",
+			"Ask about options, markets, or what a small budget could buy.",
+			"Something went wrong. Try sending that again.",
+		]) {
+			expect(source).toContain(phrase);
+			// and reached through COPY, not printed as a bare literal in the JSX.
+			expect(source).not.toContain(`>\n\t\t\t\t\t\t${phrase}`);
+		}
+		// Every entry documented, same rule as trade-execution.tsx below.
+		const block = source.slice(source.indexOf("const COPY = {"), source.indexOf("} as const;"));
+		const entries = [...block.matchAll(/^\t(\w+):/gm)];
+		expect(entries.length).toBe(3);
+		let previousEnd = block.indexOf("{") + 1;
+		const undocumented: string[] = [];
+		for (const entry of entries) {
+			const at = entry.index ?? 0;
+			if (!block.slice(previousEnd, at).includes("TODO-OWNER")) undocumented.push(entry[1] ?? "?");
+			previousEnd = at + entry[0].length;
+		}
+		expect(undocumented).toEqual([]);
+		// And each of the three prints a rendered marker beside it.
+		expect(source.match(/COPY\.\w+\} <TodoOwner \/>/g)?.length ?? 0).toBe(3);
+	});
+
+	/**
+	 * D-n6. Colour in this app is for money only, and shadcn's `destructive` is
+	 * a chromatic red (`--destructive: oklch(0.58 0.22 27)` in
+	 * `packages/ui/src/styles/globals.css`). No agent surface may reach for it.
+	 */
+	test("no agent component paints an error red", async () => {
+		for (const name of ["./agent-chat.tsx", "./trade-execution.tsx", "./trade-approval.tsx", "./tool-activity.tsx", "./agent-launcher.tsx", "./agent-markdown.tsx"]) {
+			expect(await read(name), name).not.toContain("text-destructive");
+		}
+		// The neutral replacement exists and is the ticket's own idiom.
+		const css = await Bun.file(new URL("../../styles/agent.css", import.meta.url)).text();
+		expect(css).toContain(".agent-msg{");
+		expect(css).toContain("color:var(--muted)");
+		// D-n6: ordinary market links are body text, not the accent.
+		expect(css).toContain(".agent-md-link{color:var(--text);text-decoration:underline");
+		expect(css).not.toContain("agent-md-link{color:var(--accent");
+	});
+
+	/**
 	 * EVERY top-level entry carries its OWN `TODO-OWNER` comment, so the gap
 	 * between one entry and the next must contain one. A looser "somewhere
 	 * above" rule let a new entry inherit its neighbour's tag — measured, so the

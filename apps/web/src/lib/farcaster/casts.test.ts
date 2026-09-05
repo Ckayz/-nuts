@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import type { FarcasterRailState } from "./casts";
 
 // `@nuts/env/server` validates at import time, so the two required keys are
 // supplied before the module under test pulls it in. Same idiom as
@@ -9,6 +11,8 @@ process.env.OPENROUTER_API_KEY ??= "offline-test";
 const {
 	FARCASTER_REVALIDATE_SECONDS,
 	FARCASTER_TEXT_LIMIT,
+	FARCASTER_TIMEOUT_MS,
+	FARCASTER_ASSET_COUNT,
 	farcasterCastUrl,
 	loadFarcasterRail,
 	parseCast,
@@ -285,11 +289,131 @@ test("a body that is not JSON is UNAVAILABLE, never an empty rail", async () => 
 	expect(state.status).toBe("unavailable");
 });
 
-test("the revalidate window stays well inside the documented 600 RPM ceiling", () => {
+/**
+ * B-C2 (lane B confirming pass). The read had no deadline at all, and
+ * `app/page.tsx` awaits it in the same `Promise.all` as the feed's own reads,
+ * so a stalled Neynar connection held the whole page open. Measured before the
+ * fix, both of these were STILL PENDING after 1,500 ms:
+ *
+ *   fetchImpl returns a never-resolving promise      -> "still pending"
+ *   OK headers, then a never-resolving json()        -> "still pending"
+ *
+ * `timeoutMs` is injected here only to keep the suite fast; production uses
+ * `FARCASTER_TIMEOUT_MS`. Each test guards itself with a far longer timer, so a
+ * regression fails loudly instead of hanging the run.
+ */
+async function withGuard(promise: Promise<FarcasterRailState>, guardMs: number): Promise<FarcasterRailState> {
+	return Promise.race([
+		promise,
+		new Promise<FarcasterRailState>((resolve) =>
+			setTimeout(() => resolve({ status: "unavailable", detail: "TEST GUARD: still pending" }), guardMs),
+		),
+	]);
+}
+
+test("B-C2: a request that never answers becomes UNAVAILABLE, it does not hang the page", async () => {
+	const state = await withGuard(
+		loadFarcasterRail("k", {
+			queries: ["q"],
+			timeoutMs: 25,
+			fetchImpl: (() => new Promise(() => {})) as unknown as typeof fetch,
+		}),
+		2_000,
+	);
+	expect(state.status).toBe("unavailable");
+	if (state.status !== "unavailable") throw new Error(state.status);
+	expect(state.detail).toBe("Neynar did not answer within 25 ms.");
+});
+
+test("B-C2: headers that arrive with a body that never does is the same stall, and is bounded too", async () => {
+	const state = await withGuard(
+		loadFarcasterRail("k", {
+			queries: ["q"],
+			timeoutMs: 25,
+			fetchImpl: (async () => ({
+				ok: true,
+				status: 200,
+				json: () => new Promise(() => {}),
+			})) as unknown as typeof fetch,
+		}),
+		2_000,
+	);
+	expect(state.status).toBe("unavailable");
+	if (state.status !== "unavailable") throw new Error(state.status);
+	expect(state.detail).toBe("Neynar did not answer within 25 ms.");
+});
+
+test("B-C2: the deadline is carried on the request as well as raced against it", async () => {
+	let seen: RequestInit | null = null;
+	await loadFarcasterRail("k", {
+		queries: ["q"],
+		timeoutMs: 500,
+		fetchImpl: (async (_input: URL, init: RequestInit) => {
+			seen = init;
+			return new Response(JSON.stringify({ casts: [] }), { status: 200 });
+		}) as unknown as typeof fetch,
+	});
+	const init = seen as unknown as { signal?: AbortSignal };
+	expect(init.signal).toBeInstanceOf(AbortSignal);
+	expect(init.signal?.aborted).toBe(false);
+});
+
+test("B-C2: one stalled query does not sink the queries that answered", async () => {
+	const state = await withGuard(
+		loadFarcasterRail("k", {
+			queries: ["stalls", "answers"],
+			timeoutMs: 25,
+			now: new Date("2026-09-06T02:00:00.000Z"),
+			fetchImpl: (async (input: URL) =>
+				input.searchParams.get("q") === "stalls"
+					? await new Promise<Response>(() => {})
+					: new Response(
+							JSON.stringify({
+								casts: [cast({ text: "$BTC implied volatility is 23% here.", timestamp: "2026-09-05T02:00:00.000Z" })],
+							}),
+							{ status: 200 },
+						)) as unknown as typeof fetch,
+		}),
+		2_000,
+	);
+	expect(state.status).toBe("ready");
+	if (state.status !== "ready") throw new Error(state.status);
+	expect(state.casts).toHaveLength(1);
+});
+
+test("B-C2: the production default is a real, finite deadline", () => {
+	expect(Number.isFinite(FARCASTER_TIMEOUT_MS)).toBe(true);
+	expect(FARCASTER_TIMEOUT_MS).toBeGreaterThan(0);
+	// And the read uses it when no test override is supplied.
+	expect(readFileSync(new URL("./casts.ts", import.meta.url), "utf8")).toContain(
+		"const timeoutMs = options.timeoutMs ?? FARCASTER_TIMEOUT_MS;",
+	);
+});
+
+test("B-C4: the request budget is computed against cast search's 120 RPM, not 600", () => {
 	// docs.neynar.com/reference/what-are-the-rate-limits-on-neynar-apis.md:
-	// Free plan is 600 RPM per API endpoint for "All others".
-	expect(60 / FARCASTER_REVALIDATE_SECONDS).toBeLessThan(600);
+	// Free plan is 600 RPM per endpoint for "All others", and `cast/search` — the
+	// endpoint this module calls — is the ONE exception at 120 RPM. The comment
+	// this test replaced cited the 600 figure for the wrong endpoint.
+	const requestsPerRailRead = FARCASTER_ASSET_COUNT * 2; // two terms per asset
+	const perMinute = (requestsPerRailRead * 60) / FARCASTER_REVALIDATE_SECONDS;
 	expect(FARCASTER_REVALIDATE_SECONDS).toBeGreaterThan(0);
+	expect(perMinute).toBeCloseTo(0.8, 10);
+	expect(perMinute).toBeLessThan(120);
+});
+
+test("B-C4: the module documents the endpoint it actually calls, and nothing dead", async () => {
+	const source = readFileSync(new URL("./casts.ts", import.meta.url), "utf8");
+	// The header used to document the channel feed while the code called search.
+	expect(source).toContain("GET https://api.neynar.com/v2/farcaster/cast/search");
+	// The dead channel constants are gone (grep before: definition only).
+	expect(source).not.toContain('export const FARCASTER_CHANNEL_IDS');
+	expect(source).not.toContain("NEYNAR_CHANNEL_FEED_URL");
+	// B-C3: the two eligibility rules that decide which casts vanish are tagged.
+	const dedupe = source.slice(0, source.indexOf("const DEDUPE_PREFIX"));
+	expect(dedupe.slice(dedupe.lastIndexOf("/**"))).toContain("TODO-OWNER");
+	const cites = source.slice(0, source.indexOf("export function citesALevel"));
+	expect(cites.slice(cites.lastIndexOf("/**"))).toContain("TODO-OWNER");
 });
 
 // ── choosing what to show ───────────────────────────────────────────────────

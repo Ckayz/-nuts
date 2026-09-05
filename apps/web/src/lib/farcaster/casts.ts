@@ -14,19 +14,24 @@ import { env } from "@nuts/env/server";
  * being wrong about it — a payload that does not match yields "no rail", never a
  * crash and never a fabricated cast.
  *
- *   host + path   GET https://api.neynar.com/v2/farcaster/feed/channels/
- *                 docs.neynar.com/reference/fetch-feed-by-channel-ids.md
+ * B-C4 / CL-4: this block used to document the CHANNEL FEED
+ * (`/v2/farcaster/feed/channels/`), which the code stopped calling when the rail
+ * moved to cast search, along with a `FARCASTER_CHANNEL_IDS` constant nothing
+ * read. It now documents the endpoint the code actually calls.
+ *
+ *   host + path   GET https://api.neynar.com/v2/farcaster/cast/search
+ *                 docs.neynar.com/reference/search-casts.md
  *                 (OpenAPI `servers: [{url: https://api.neynar.com}]`,
- *                  `paths: /v2/farcaster/feed/channels/`, method `get`)
+ *                  `paths: /v2/farcaster/cast/search`, method `get`)
+ *                 — the URL this module builds; see NEYNAR_SEARCH_URL.
  *   auth header   `x-api-key` — same document, `components.securitySchemes`:
  *                 `ApiKeyAuth: {in: header, name: x-api-key, type: apiKey}`
- *   parameters    `channel_ids` required, "Comma separated list of up to 10
- *                 channel IDs e.g. neynar,farcaster"; `limit` default 25,
- *                 minimum 1, maximum 100; `with_replies` default false;
- *                 `with_recasts` default true; `cursor`; `viewer_fid`;
- *                 `members_only` default true
- *   response      `FeedResponse { casts: Cast[], next: NextCursor }`
- *                 (both `required`)
+ *   parameters    `q` (the search text), `mode` and `limit` (1..100) are the
+ *                 three this module sends; their VALUES were chosen from live
+ *                 probes, recorded on FARCASTER_SEARCH_QUERY and ASSET_TERMS.
+ *   response      the page arrives nested under `result` — `{ result: { casts:
+ *                 Cast[] } }` — which is why `feedResponseSchema` accepts BOTH
+ *                 that shape and a bare `{ casts: [...] }`.
  *   Cast          `required` includes `hash`, `text`, `timestamp`, `author`,
  *                 `channel` (channel is `nullable: true`)
  *   author (User) `required` lists `object, fid, username, custody_address,
@@ -39,23 +44,19 @@ import { env } from "@nuts/env/server";
  * ── Rate and credit budget ──────────────────────────────────────────────────
  * docs.neynar.com/reference/what-are-the-rate-limits-on-neynar-apis.md:
  * the Free plan is 600 RPM / 10 RPS per API endpoint and 1000 RPM across all
- * APIs, with 10M credits/month. Only `GET v2/farcaster/cast/search` carries a
- * lower per-endpoint limit (120 RPM on Free); this endpoint falls under "All
- * others" at 600 RPM. The per-request CREDIT cost is NOT published anywhere in
- * the documentation — see the module's TODO-OWNER on the revalidate window.
- */
-
-/**
- * TODO-OWNER: which Farcaster channels the rail reads.
+ * APIs, with 10M credits/month. `GET v2/farcaster/cast/search` — the endpoint
+ * this module calls — is the ONE endpoint carrying a LOWER per-endpoint limit:
+ * 120 RPM on Free. The budget is therefore computed against 120, not the 600
+ * this comment used to cite.
  *
- * Both ids VERIFIED to exist 2026-09-06 against Farcaster's own public channel
- * directory (GET https://api.farcaster.xyz/v2/all-channels, 16,452 channels):
- * "base" (Base, 481,220 followers) and "farcaster" (Farcaster, 445,607). That
- * check is a one-off by hand, not something this code performs — a channel id
- * that stops existing produces an empty or rejected response, which renders the
- * honest line below, never an invented cast.
+ * Recomputed for 120 RPM: one rail read issues FARCASTER_ASSET_COUNT × 2
+ * requests (two terms per asset, see ASSET_TERMS), i.e. 4 today, once per
+ * FARCASTER_REVALIDATE_SECONDS = 300 s per cache key. That is 0.8 requests per
+ * minute against a 120 RPM ceiling — 0.67% of it — and about 34,560 requests in
+ * a 30-day month. The per-request CREDIT cost is NOT published anywhere in the
+ * documentation, so the share of the 10M monthly credits CANNOT be computed
+ * here; see the TODO-OWNER on the revalidate window.
  */
-export const FARCASTER_CHANNEL_IDS = "base,farcaster";
 
 /** TODO-OWNER: how many casts the rail shows. The mockup's rail draws five rows. */
 export const FARCASTER_RAIL_LIMIT = 5;
@@ -64,11 +65,13 @@ export const FARCASTER_RAIL_LIMIT = 5;
  * TODO-OWNER: cache window, in seconds, for the Neynar read.
  *
  * Chosen against the MEASURED rate limit and against an UNMEASURABLE credit
- * cost. 300 s is one request per five minutes per cache key — 0.2 RPM against a
- * documented 600 RPM per-endpoint ceiling, roughly 8,640 requests in a 30-day
- * month. Neynar publishes no per-request credit price for this endpoint, so the
- * share of the 10M monthly credits this spends CANNOT be computed here; the
- * number is deliberately conservative rather than tuned.
+ * cost. B-C4: the ceiling that applies is cast search's 120 RPM, not the 600
+ * RPM "All others" figure this comment used to cite. 300 s is one rail read per
+ * five minutes per cache key, and one rail read is FARCASTER_ASSET_COUNT × 2
+ * requests (4 today) — 0.8 RPM against 120 RPM, roughly 34,560 requests in a
+ * 30-day month. Neynar publishes no per-request credit price for this endpoint,
+ * so the share of the 10M monthly credits this spends CANNOT be computed here;
+ * the number is deliberately conservative rather than tuned.
  */
 export const FARCASTER_REVALIDATE_SECONDS = 300;
 
@@ -163,7 +166,31 @@ export const FARCASTER_MIN_FOLLOWERS = 25;
 const OVERFETCH = 8;
 
 /**
+ * TODO-OWNER: how long the rail waits for Neynar before giving up, in ms.
+ *
+ * B-C2 (lane B confirming pass). The read had NO deadline of any kind, and the
+ * feed page awaits it in the same `Promise.all` as its own database reads
+ * (`app/page.tsx`), so a stalled Neynar connection held the whole feed open
+ * with nothing on screen. Measured before the fix, with an injected
+ * never-resolving `fetchImpl` and with OK headers plus a never-resolving body:
+ * both were still pending after 1,500 ms and would have stayed pending forever.
+ *
+ * The number is PROVISIONAL and picked to be defensible, not tuned: the rail is
+ * a secondary panel, the four searches run in parallel so one timeout is the
+ * whole added ceiling, and a serverless function's own budget is single-digit
+ * seconds — 3 s leaves the page's own reads the rest of it. Nothing was
+ * measured about Neynar's real latency (no API key in this repository), so
+ * treat this as a bound, not an estimate.
+ */
+export const FARCASTER_TIMEOUT_MS = 3_000;
+
+/**
  * Characters of normalised text compared when collapsing duplicates.
+ *
+ * TODO-OWNER: the number. B-C3 — this is a SELECTION RULE, not an
+ * implementation detail: it decides which casts vanish from the rail, so it is
+ * the owner's to set even though a measurement suggested it. A measurement is
+ * evidence for a number, never approval of it.
  *
  * MEASURED: 28, not 40. The farm's shared opening "Unlock the power of crypto
  * options!" normalises to 33 characters, so a 40-character key reaches past it
@@ -204,6 +231,11 @@ export function dedupeKey(text: string): string {
  * MEASURED 2026-09-06: on `implied volatility` this keeps 2 of 5 and both are
  * real; on `options trading calls puts` it keeps 0 of 40, which is the correct
  * answer for a page containing no observations at all.
+ *
+ * TODO-OWNER: the rule itself — the $TICKER / percentage / price formula below.
+ * B-C3 — it is the strictest filter in the module, and it is what decides which
+ * casts a visitor never sees. The measurement above is evidence for the rule,
+ * not approval of it.
  */
 export function citesALevel(text: string): boolean {
 	return /\$[A-Za-z]{2,6}\b|\d+(?:[.,]\d+)?\s?%|\$\s?\d/.test(text);
@@ -548,6 +580,7 @@ async function fetchOnePage(
 	query: string,
 	limit: number,
 	request: typeof fetch,
+	timeoutMs: number,
 ): Promise<{ ok: true; casts: FarcasterRailCast[] } | { ok: false; detail: string }> {
 	const url = new URL(NEYNAR_SEARCH_URL);
 	url.searchParams.set("q", query);
@@ -559,24 +592,66 @@ async function fetchOnePage(
 	// cast search is the one endpoint rate-limited at 120 RPM.
 	url.searchParams.set("limit", String(Math.min(Math.max(limit * OVERFETCH, 1), 100)));
 
+	// One deadline for the WHOLE exchange, headers and body alike. A response
+	// whose headers arrive and whose body never does is the same stall to the
+	// page as a connection that never answers, and only the body read below
+	// puts the signal in front of it — `Response.text()` takes no signal of its
+	// own, so it is raced against the same one.
+	//
+	// NOT VERIFIED: Next.js documents that passing a signal opts a fetch out of
+	// per-render MEMOIZATION (node_modules/next/dist/docs/01-app/03-api-reference/
+	// 04-functions/fetch.md), which it states is separate from the persistent
+	// `next: { revalidate }` cache. Whether the data cache still applies here
+	// was not measured — there is no API key in this repository. Memoization
+	// itself is worth nothing to this module: every query is a different URL and
+	// the rail is read once per render.
+	const signal = AbortSignal.timeout(timeoutMs);
+	const timedOut = () => `Neynar did not answer within ${timeoutMs} ms.`;
+
+	// The signal is passed to the transport AND raced against, on purpose. The
+	// signal alone only bounds a transport that honours it; the race bounds this
+	// function whatever the transport does, which is what the page needs.
 	let response: Response;
 	try {
-		response = await request(url, {
-			headers: { "x-api-key": apiKey, accept: "application/json" },
-			// Server-side cache window; see FARCASTER_REVALIDATE_SECONDS.
-			next: { revalidate: FARCASTER_REVALIDATE_SECONDS },
-		});
+		response = await Promise.race([
+			request(url, {
+				headers: { "x-api-key": apiKey, accept: "application/json" },
+				// Server-side cache window; see FARCASTER_REVALIDATE_SECONDS.
+				next: { revalidate: FARCASTER_REVALIDATE_SECONDS },
+				signal,
+			}),
+			aborted(signal),
+		]);
 	} catch (error) {
+		if (signal.aborted) return { ok: false, detail: timedOut() };
 		return { ok: false, detail: `Neynar could not be reached (${error instanceof Error ? error.message : String(error)}).` };
 	}
 	if (!response.ok) return { ok: false, detail: `Neynar returned HTTP ${response.status}.` };
 	let body: unknown;
 	try {
-		body = await response.json();
+		body = await Promise.race([response.json(), aborted(signal)]);
 	} catch {
+		if (signal.aborted) return { ok: false, detail: timedOut() };
 		return { ok: false, detail: "Neynar returned a body that is not JSON." };
 	}
 	return readCastPage(body);
+}
+
+/**
+ * A promise that never resolves and rejects when `signal` aborts.
+ *
+ * Used only inside `Promise.race`, which attaches a handler to it, so its
+ * rejection is always handled even when the body wins. `AbortSignal.timeout`'s
+ * timer does not hold the event loop open, so a losing race costs nothing.
+ */
+function aborted(signal: AbortSignal): Promise<never> {
+	return new Promise((_resolve, reject) => {
+		if (signal.aborted) {
+			reject(signal.reason);
+			return;
+		}
+		signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+	});
 }
 
 /**
@@ -605,14 +680,17 @@ export async function loadFarcasterRail(
 		minFollowers?: number;
 		maxAgeDays?: number;
 		fetchImpl?: typeof fetch;
+		/** Only tests pass this; production uses `FARCASTER_TIMEOUT_MS`. */
+		timeoutMs?: number;
 	} = {},
 ): Promise<FarcasterRailState> {
 	if (apiKey === undefined || apiKey.trim() === "") return { status: "unconfigured" };
 	const limit = options.limit ?? FARCASTER_RAIL_LIMIT;
 	const queries = options.queries ?? searchQueriesFor(options.assets ?? [], options.now, options.maxAgeDays);
 	const request = options.fetchImpl ?? fetch;
+	const timeoutMs = options.timeoutMs ?? FARCASTER_TIMEOUT_MS;
 
-	const pages = await Promise.all(queries.map((query) => fetchOnePage(apiKey, query, limit, request)));
+	const pages = await Promise.all(queries.map((query) => fetchOnePage(apiKey, query, limit, request, timeoutMs)));
 
 	const understood: FarcasterRailCast[][] = [];
 	let lastFailure: string | null = null;

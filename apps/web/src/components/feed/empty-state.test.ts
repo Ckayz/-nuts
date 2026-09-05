@@ -30,15 +30,23 @@ test("an empty Following says something different from an empty All", () => {
 	expect(feedEmptyState(AUDIENCE_FOLLOWING, RANKING_TRENDING).line).toContain("follow");
 });
 
-test("audience outranks ranking, so the reason stays true across all three pills", () => {
-	const lines = RANKINGS.map((ranking) => feedEmptyState(AUDIENCE_FOLLOWING, ranking).line);
-	expect(new Set(lines).size).toBe(1);
+/**
+ * D-n3. This used to assert the OPPOSITE — that the audience "outranks" the
+ * ranking, so all three pills shared one line. That is what made the Following
+ * tab claim nobody it follows has posted while a followed post sat one pill
+ * away. The selection is what is empty, so every pill states its own selection.
+ */
+test("each ranking pill states its OWN empty selection, per audience", () => {
+	for (const audience of AUDIENCES) {
+		const lines = RANKINGS.map((ranking) => feedEmptyState(audience, ranking).line);
+		expect(new Set(lines).size, String(audience)).toBe(3);
+	}
 });
 
-test("the three All-audience rankings each state their own reason", () => {
+test("the three All-audience rankings each name their own pill", () => {
 	const lines = RANKINGS.map((ranking) => feedEmptyState(AUDIENCE_ALL, ranking).line);
 	expect(new Set(lines).size).toBe(3);
-	expect(feedEmptyState(AUDIENCE_ALL, RANKING_ENDING).line).toContain("expiry");
+	expect(feedEmptyState(AUDIENCE_ALL, RANKING_ENDING).line).toContain("ending soon");
 	expect(feedEmptyState(AUDIENCE_ALL, RANKING_SETTLED).line).toContain("settled");
 });
 

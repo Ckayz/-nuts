@@ -55,12 +55,15 @@ export function Avatar({
 	seed?: string;
 	asset?: string;
 	/**
-	 * A REMOTE picture the app did not generate — today only a Farcaster
-	 * `author.pfp_url`, which callers must already have narrowed to https
-	 * (`lib/farcaster/casts.ts`). It outranks the generated `seed` avatar and is
-	 * outranked by a vendored `asset` logo. When it is absent, or when the remote
-	 * image fails to load, the generated avatar and then the monogram remain the
-	 * fallback, so a person is never drawn as a broken image.
+	 * A REMOTE picture the app did not generate. It outranks the generated `seed`
+	 * avatar and is outranked by a vendored `asset` logo.
+	 *
+	 * D-N2: this comment used to promise that a remote picture which FAILS TO
+	 * LOAD falls back to the generated avatar. It does not — there is no `onError`
+	 * handler below, and a dead URL draws a broken image. The `seed` fallback
+	 * applies only when `src` is ABSENT. Nothing in the app passes `src` today
+	 * (the Farcaster rail dropped it); a caller that wants remote pictures has to
+	 * add the failure handling first.
 	 */
 	src?: string;
 	size?: AvatarSize;
@@ -109,9 +112,18 @@ export function Chip({
 }
 
 /**
- * The lifecycle chip. The mockup gives an open position the accent chip and a
- * settled one the flat chip; `ending` reads as still open, so it keeps the
- * accent. Signature unchanged — `pnl-card.tsx` and the post header both use it.
+ * The lifecycle chip, and the ONE place a status becomes a chip class.
+ *
+ * The mockup gives an open position the accent chip and a settled one the flat
+ * chip; `ending` reads as still open, so it keeps the accent.
+ *
+ * D-n2 (lane D confirming pass). Three list rows used to build the class by
+ * hand as `chip ${statusTone}`, which emits `chip settled` / `chip live` /
+ * `chip ending` — none of which `index.css` defines, so every one of them fell
+ * back to the plain ACCENT chip while `PnlCard` drew the same settled position
+ * with `chip flat`. The reviewer measured `ROW ["<span class=\"chip settled\">"]`
+ * against `CARD ["<span class=\"chip flat\">"]`. Every caller goes through this
+ * component now, so a status has exactly one look.
  */
 export function StatusChip({
 	status,

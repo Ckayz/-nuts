@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Avatar } from "@/components/primitives";
+import { Avatar, StatusChip } from "@/components/primitives";
 import { getSession } from "@/lib/auth/session";
 import { usingDatabase } from "@/lib/data/source";
 import { PNL_BASIS_SHORT, position } from "@/lib/display";
@@ -46,7 +46,7 @@ export async function YourPositionsRail({ asset }: { asset: string }) {
 								<b>{row.thesisHeadline || row.underlyingAsset}</b>
 								<i>
 									{view.side === "bull" ? "Bull" : "Bear"} · {view.riskedUsd.usd} risked ·{" "}
-									<span className={`chip ${view.statusTone}`}>{view.statusLabel}</span>
+									<StatusChip status={view.statusTone} label={view.statusLabel} />
 								</i>
 							</span>
 							<span className="v">

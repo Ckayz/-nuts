@@ -1,10 +1,10 @@
 "use client";
 
-import type { ComponentProps } from "react";
+import { Fragment, isValidElement, type ComponentProps, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { marketLinkParts } from "./market-link";
+import { isMarketPath, marketLinkParts } from "./market-link";
 
 /**
  * Renders an assistant reply.
@@ -28,31 +28,72 @@ import { marketLinkParts } from "./market-link";
  * greys and serifs contradict the one-accent design rule.
  */
 
-/** Every text node in the tree gets the market-link treatment, nothing else does. */
-function LinkedText({ children }: { readonly children?: unknown }) {
-	if (typeof children !== "string") return <>{children as never}</>;
-	return (
-		<>
-			{marketLinkParts(children).map((piece, i) =>
-				piece.href === null ? (
-					piece.text
-				) : (
-					<a key={i} className="agent-md-link" href={piece.href}>
-						{piece.text}
-					</a>
-				),
-			)}
-		</>
-	);
+/**
+ * Every STRING child gets the market-link treatment, nothing else does.
+ *
+ * D-N1 (lane D confirming pass). This used to return its children untouched
+ * unless they were ONE string, and react-markdown hands a paragraph an ARRAY as
+ * soon as it contains any formatting. Measured before the fix:
+ *
+ *   "Trade /m/btc"             -> <p>Trade <a href="/m/btc">/m/btc</a></p>
+ *   "Trade **BTC** at /m/btc"  -> <p>Trade <strong>BTC</strong> at /m/btc</p>
+ *
+ * i.e. one bold word anywhere in the paragraph silently killed the Explain ->
+ * market handoff. Every string in the child list is treated on its own now.
+ *
+ * Elements OTHER than fragments are left alone: their own component (`p`, `li`,
+ * `td`, `th`) does the same work when react-markdown renders them, and
+ * descending into an arbitrary element would mean rewriting children this
+ * component does not own — including `code`, where a URL is quoted text and
+ * must stay text. A URL wrapped in bold markers therefore stays text; that is
+ * deliberate, not an oversight.
+ */
+function linkStrings(node: ReactNode, keyPrefix: string): ReactNode {
+	if (typeof node === "string") {
+		return marketLinkParts(node).map((piece, i) =>
+			piece.href === null ? (
+				<Fragment key={`${keyPrefix}.${i}`}>{piece.text}</Fragment>
+			) : (
+				<a key={`${keyPrefix}.${i}`} className="agent-md-link" href={piece.href}>
+					{piece.text}
+				</a>
+			),
+		);
+	}
+	if (Array.isArray(node)) {
+		return node.map((child, i) => (
+			<Fragment key={`${keyPrefix}.${i}`}>{linkStrings(child as ReactNode, `${keyPrefix}.${i}`)}</Fragment>
+		));
+	}
+	// A fragment is not an element the caller owns — it is a grouping, so its
+	// children are still this function's business.
+	if (isValidElement(node) && node.type === Fragment) {
+		const { children } = node.props as { children?: ReactNode };
+		return <Fragment key={keyPrefix}>{linkStrings(children, `${keyPrefix}.f`)}</Fragment>;
+	}
+	return node;
+}
+
+function LinkedText({ children }: { readonly children?: ReactNode }) {
+	return <>{linkStrings(children, "l")}</>;
 }
 
 /**
  * A markdown link. The model is only ever told to emit app-relative market
  * URLs, so anything else is rendered as its own text rather than followed —
  * a model-authored destination is not a destination this app offers.
+ *
+ * D-n1: the test used to be `href.startsWith("/m/")`, which is not the grammar.
+ * Measured before the fix, both of these became live anchors:
+ *
+ *   [Trade](/m/../portfolio)          -> <a href="/m/../portfolio">
+ *   [Trade](/m/btc?thesis=not-a-uuid) -> <a href="/m/btc?thesis=not-a-uuid">
+ *
+ * `isMarketPath` is the SAME expression `marketLinkParts` uses, anchored, so
+ * the two entry points cannot drift apart.
  */
 function SafeAnchor({ href, children }: ComponentProps<"a">) {
-	const internal = typeof href === "string" && href.startsWith("/m/");
+	const internal = typeof href === "string" && isMarketPath(href);
 	if (!internal) return <>{children}</>;
 	return (
 		<a className="agent-md-link" href={href}>
@@ -103,6 +144,25 @@ export function AgentMarkdown({ text }: { readonly text: string }) {
 						<li>
 							<LinkedText>{children}</LinkedText>
 						</li>
+					),
+					// Table cells and quotes carry the same prose, so they carry
+					// the same treatment. A blockquote's children are normally a
+					// `<p>` element, which `p` above already handles; wrapping it
+					// costs nothing and covers the shape where they are not.
+					td: ({ children }) => (
+						<td>
+							<LinkedText>{children}</LinkedText>
+						</td>
+					),
+					th: ({ children }) => (
+						<th>
+							<LinkedText>{children}</LinkedText>
+						</th>
+					),
+					blockquote: ({ children }) => (
+						<blockquote>
+							<LinkedText>{children}</LinkedText>
+						</blockquote>
 					),
 				}}
 			>

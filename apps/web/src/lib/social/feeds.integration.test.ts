@@ -41,4 +41,33 @@ if (!process.env.DATABASE_URL) {
    throw rollback;
   }); } catch (error) { if (error !== rollback) throw error; }
  });
+ test("rank-seven eligible posts survive Following and Top SQL caps", async () => {
+  const rollback = new Error("rollback rank-seven probe");
+  try { await db.transaction(async tx => {
+   const viewer = "b3330000-0000-4000-8000-000000000001";
+   const creator = "b3330000-0000-4000-8000-000000000002";
+   await tx.insert(users).values([
+    { id: viewer, walletAddress: "0x00000000000000000000000000000000feed9301" },
+    { id: creator, walletAddress: "0x00000000000000000000000000000000feed9302" },
+   ]);
+   const ids = Array.from({ length: 7 }, (_, i) => `b4440000-0000-4000-8000-00000000000${i + 1}`);
+   await tx.insert(theses).values(ids.map((id, i) => ({
+    id, slug: `rank-seven-${i}`, headline: `Rank ${i}`, creatorUserId: i === 6 ? creator : viewer,
+    status: "open" as const,
+   })));
+   await tx.insert(comments).values(ids.slice(0, 6).map(thesisId => ({ thesisId, userId: viewer, body: "Higher engagement" })));
+   await tx.insert(follows).values({ followerUserId: viewer, followedUserId: creator });
+   const options = { database: tx, viewerUserId: viewer };
+   // Other integration files may leave committed open posts behind, so assert
+   // membership, not exact lists: the seventh-ranked eligible post must survive.
+   const trendingIds = (await trending(options)).map(r => r.id);
+   expect(trendingIds).toHaveLength(6);
+   expect(trendingIds).not.toContain(ids[6]!);
+   expect((await following(options)).map(r => r.id)).toEqual([ids[6]!]);
+   await tx.execute(sql`update theses set status = 'settled' where creator_user_id = ${viewer}`);
+   expect((await top(options)).map(r => r.id)).toContain(ids[6]!);
+   throw rollback;
+  }); } catch (error) { if (error !== rollback) throw error; }
+ });
+
 }

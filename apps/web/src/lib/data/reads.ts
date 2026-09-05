@@ -503,7 +503,14 @@ export async function leaderboard(options: ReadOptions & { window: "1W"; now?: D
 	});
 }
 
-async function rankedTheses(kind: "trending" | "ending" | "settled", options: ReadOptions & { limit?: number }): Promise<Domain.Thesis[]> {
+export interface RankedReadOptions extends ReadOptions {
+	limit?: number;
+	creatorIds?: string[];
+	statuses?: Domain.ThesisStatus[];
+}
+
+async function rankedTheses(kind: "trending" | "ending" | "settled", options: RankedReadOptions): Promise<Domain.Thesis[]> {
+	if (options.creatorIds?.length === 0 || options.statuses?.length === 0) return [];
 	const database = options.database ?? defaultDb;
 	// Rank the full eligible population in SQL before bounding the result.
 	// Same engagement sum and tie-break as rankTheses; no join multiplication.
@@ -515,7 +522,11 @@ async function rankedTheses(kind: "trending" | "ending" | "settled", options: Re
 	const ordering = kind === "trending" ? desc(engagement) : kind === "ending" ? theses.expiryAt : sql`${theses.settledAt} desc nulls last`;
 	const rows = await database.select({ thesis: theses, creator: users, creatorPosition: positions }).from(theses)
 		.innerJoin(users, eq(users.id, theses.creatorUserId)).leftJoin(positions, eq(positions.id, theses.creatorPositionId))
-		.where(eligible)
+		.where(and(
+			eligible,
+			options.creatorIds === undefined ? undefined : inArray(theses.creatorUserId, options.creatorIds),
+			options.statuses === undefined ? undefined : inArray(theses.status, options.statuses),
+		))
 		.orderBy(ordering, theses.id)
 		.limit(options.limit ?? RANKED_THESIS_LIMIT);
 	const aggregates = await aggregatesByThesis(database, rows.map(row => row.thesis.id), viewerId(options));
@@ -526,7 +537,7 @@ async function rankedTheses(kind: "trending" | "ending" | "settled", options: Re
 	}), kind);
 	return ranked.map(row => mapThesis({ ...row, aggregates: aggregates.get(row.id) ?? { ...emptyAggregates }, dataAsOf: new Date() }));
 }
-export async function trending(options: ReadOptions & { limit?: number } = {}) { return rankedTheses("trending", options); }
+export async function trending(options: RankedReadOptions = {}) { return rankedTheses("trending", options); }
 export async function endingSoon(options: ReadOptions & { limit?: number } = {}) { return rankedTheses("ending", options); }
 export async function settled(options: ReadOptions & { limit?: number } = {}) { return rankedTheses("settled", options); }
 

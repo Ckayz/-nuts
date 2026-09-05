@@ -7,13 +7,13 @@
  * Component and use React `useActionState`"). `pending` comes from the same
  * hook and disables the button while the post is in flight.
  *
- * The mockup specifies no composer copy beyond the rail button's title "Launch
- * a thesis" (docs/mockups/thesis-fun-mockup.html), so the labels below are the
- * ones the page already carried; every one of them is still the owner's to set.
+ * The existing headline/rationale fields remain separate to preserve the
+ * action contract. The mockup only shows one textarea; unifying them is not a
+ * presentation-only change.
  */
 import { useActionState, useState } from "react";
 import { Textarea } from "@nuts/ui/components/textarea";
-import { Pill, TodoOwner } from "@/components/primitives";
+import { TodoOwner } from "@/components/primitives";
 import { TradeCards } from "@/components/feed/trade-card";
 import type { TradeCard } from "@/lib/display-types";
 import { publishPostFromForm } from "@/lib/thesis/actions";
@@ -63,20 +63,22 @@ export function Composer({
 	const disabled = pending || !signedIn || !databaseMode;
 
 	return (
-		<form action={formAction} className="panel" style={{ maxWidth: "480px" }}>
-			<h3>Write a post</h3>
-			<div className="field">
+		<form action={formAction} className="card pad">
+			<div className="card-h"><h3>New thesis</h3><span className="x">Text is required. A trade is optional.<TodoOwner /></span></div>
+			<div className="field compose-field">
+				<span className="av av-40 av-asset compose-avatar" aria-hidden="true">{signedIn ? "•" : "?"}</span>
 				<label className="lbl" htmlFor="post-headline">
-					Your call
+					What's your read?
 				</label>
 				<Textarea
 					id="post-headline"
 					name="headline"
 					rows={4}
+					placeholder="What's your read?"
 					required
-					className="rounded-[9px] border-[var(--tn-l2)] bg-[var(--tn-g)] px-3 py-[9px] text-[13px] text-[var(--tn-k)]"
+					className="compose-input"
 				/>
-				<span className="note">
+				<span className="mut compose-note">
 					Composer copy, length limits and posting rules <TodoOwner />
 				</span>
 			</div>
@@ -91,10 +93,10 @@ export function Composer({
 					rows={3}
 					value={rationale}
 					onChange={(event) => setRationale(event.target.value)}
-					className="rounded-[9px] border-[var(--tn-l2)] bg-[var(--tn-g)] px-3 py-[9px] text-[13px] text-[var(--tn-k)]"
+					className="compose-input"
 				/>
-				<span className="note">
-					Paste a <span className="mono">/p/…</span> link to one of your trades and it
+				<span className="mut compose-note">
+					Paste a <span className="num">/p/…</span> link to one of your trades and it
 					renders as a card under the post.
 				</span>
 			</div>
@@ -109,30 +111,29 @@ export function Composer({
 			<div className="field">
 				<span className="lbl">Tag a market (optional)</span>
 				<input type="hidden" name="taggedAsset" value={tag ?? ""} />
-				<div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+				<div className="pills">
 					{assets.map((asset) => (
 						<button
 							key={asset}
+							className="pill"
 							type="button"
 							aria-pressed={tag === asset}
 							onClick={() => setTag(tag === asset ? null : asset)}
 						>
-							<Pill on={tag === asset}>{asset}</Pill>
+							<span className="av av-asset" aria-hidden="true">{asset}</span>{asset}
 						</button>
 					))}
 				</div>
-				<span className="note">
+				<span className="mut compose-note">
 					Markets come from live OptionBook liquidity, never a fixed list. Pick a
 					structure on the market page once you have tagged one.
 				</span>
 			</div>
 
-			{/* `.btn.primary` has no disabled style and `src/index.css` belongs to
-			    another worker this round, so the unavailable state is dimmed
-			    inline rather than left looking clickable. */}
+
 			<button
 				type="submit"
-				className="btn primary block"
+				className="btn acc compose-submit"
 				disabled={disabled}
 				style={disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
 			>
@@ -140,18 +141,18 @@ export function Composer({
 			</button>
 
 			{signedIn && databaseMode ? null : (
-				<span className="note" role="status">
+				<span className="mut compose-note" role="status">
 					{databaseMode
 						? "Sign in with your wallet in the header to post."
 						: "This build is serving example data; posting is disabled."}
 				</span>
 			)}
 
-			<p className="note" aria-live="polite" role="status">
+			<p className="mut compose-note" aria-live="polite" role="status">
 				{message}
 			</p>
 
-			<span className="note">
+			<span className="mut compose-note">
 				A post is text. It shows the verified badge only after your own fill on the
 				market page confirms onchain.
 			</span>

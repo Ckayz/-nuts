@@ -11,7 +11,7 @@ export function ProfileEditor({ profile, walletAddress }: { profile: ProfileFiel
 	const [pending, startTransition] = useTransition();
 	const [error, setError] = useState<string | null>(null);
 	// TODO-OWNER: profile editor labels, Save/error copy and content limits await owner approval; no mockup screen exists.
-	return <section className="panel">
+	return <details className="card pad profile-editor"><summary>Edit profile</summary>
 		<form onSubmit={(event) => {
 			event.preventDefault();
 			const form = new FormData(event.currentTarget);
@@ -33,9 +33,9 @@ export function ProfileEditor({ profile, walletAddress }: { profile: ProfileFiel
 				<span>{field === "displayName" ? "Display name" : field === "handle" ? "Handle" : "Bio"}</span>
 				{field === "bio" ? <textarea className="inp" name={field} defaultValue={profile[field] ?? ""} disabled={pending} /> : <input className="inp" name={field} defaultValue={profile[field] ?? ""} disabled={pending} maxLength={field === "handle" ? 32 : undefined} />}
 			</label>)}
-			{pending ? <p className="dim" aria-live="polite">{optimistic.displayName ?? optimistic.handle ?? walletAddress}{optimistic.bio ? ` · ${optimistic.bio}` : ""}</p> : null}
+			{pending ? <p className="mut" aria-live="polite">{optimistic.displayName ?? optimistic.handle ?? walletAddress}{optimistic.bio ? ` · ${optimistic.bio}` : ""}</p> : null}
 			{error ? <p role="alert">{error}</p> : null}
-			<button className="btn primary" type="submit" disabled={pending}>Save</button>
+			<button className="btn acc" type="submit" disabled={pending}>Save</button>
 		</form>
-	</section>;
+	</details>;
 }

@@ -8,10 +8,10 @@
  * layout does not call `cookies()` — that would make every route dynamic and
  * change the build output of pages this round is not meant to touch.
  *
- * TODO-OWNER: the mockup's header (docs/mockups/thesis-fun-mockup.html, the
- * `.hdr .r` block) has only the connected `0x7c4a…e10b` chip — it specifies no
- * connect, sign-in, or sign-out control. Every label below is a placeholder.
+ * TODO-OWNER: connector, signing, disconnect and sign-out labels retain the
+ * existing auth copy; the mockup specifies only the chip's resting state.
  */
+import "@/styles/thread.css";
 import { useCallback, useEffect, useState } from "react";
 import { useAccount, useConnect, useDisconnect, useSignMessage } from "wagmi";
 import type { SignInSessionSummary } from "@/lib/auth/address";
@@ -81,7 +81,7 @@ export function WalletBar({ network }: { network: string }) {
 		setSession(null);
 	}, []);
 
-	if (phase === "loading") return <span className="wallet dim">…</span>;
+	if (phase === "loading") return <span className="wallet mut">…</span>;
 
 	// The session belongs to one address. If the wallet is now on a different
 	// account, the header must not keep showing the old identity — it drops back
@@ -92,53 +92,10 @@ export function WalletBar({ network }: { network: string }) {
 		(!isConnected || !address || address.toLowerCase() === session.walletAddress.toLowerCase());
 
 	if (session !== null && sessionMatchesAccount) {
-		return (
-			<span className="wallet">
-				<span className="dot" />
-				{session.truncatedAddress}
-				<span className="dim">{network}</span>
-				<button type="button" className="acts" onClick={runSignOut}>
-					Sign out
-				</button>
-			</span>
-		);
-	}
-
-	if (!isConnected || !address) {
-		const connector = connectors[0];
-		return (
-			<span className="wallet">
-				{connectors.map((c) => (
-					<button
-						type="button"
-						key={c.uid}
-						className="acts"
-						disabled={connectPending}
-						onClick={() => connect({ connector: c })}
-					>
-						{c.name}
-					</button>
-				))}
-				{connector === undefined ? <span className="dim">no connector</span> : null}
-			</span>
-		);
-	}
-
-	return (
-		<span className="wallet">
-			<span className="dot" />
-			<button
-				type="button"
-				className="acts"
-				disabled={phase === "signing"}
-				onClick={runSignIn}
-			>
-				{phase === "signing" ? "Signing…" : "Sign in"}
-			</button>
-			<button type="button" className="acts dim" onClick={() => disconnect()}>
-				Disconnect
-			</button>
-			{message !== null ? <span className="dim">{message}</span> : null}
-		</span>
-	);
+  return <details className="wallet-menu"><summary className="wallet"><span className="av av-26 av-asset" aria-hidden="true">{session.truncatedAddress.slice(2, 4).toUpperCase()}</span><span className="dot" aria-hidden="true" /><span className="num">{session.truncatedAddress}</span></summary><div className="card pad"><span className="mut">{network}</span><button type="button" className="btn sec" onClick={runSignOut}>Sign out</button></div></details>;
+ }
+ if (!isConnected || !address) {
+  return <details className="wallet-menu"><summary className="btn out">Sign in</summary><div className="card pad stack">{connectors.map(c => <button type="button" key={c.uid} className="btn sec" disabled={connectPending} onClick={() => connect({ connector: c })}>{c.name}</button>)}{connectors.length === 0 ? <span className="mut">no connector</span> : null}</div></details>;
+ }
+ return <span className="wallet-actions"><button type="button" className="btn out" disabled={phase === "signing"} onClick={runSignIn}>{phase === "signing" ? "Signing…" : "Sign in"}</button><details className="wallet-menu"><summary className="btn sec" aria-label="Wallet options">…</summary><div className="card pad"><button type="button" className="btn sec" onClick={() => disconnect()}>Disconnect</button></div></details>{message !== null ? <span className="mut" role="status">{message}</span> : null}</span>;
 }

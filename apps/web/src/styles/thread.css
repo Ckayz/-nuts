@@ -1,0 +1,32 @@
+/* Thread-specific declarations ported from the mockup's inline styles. */
+.thread-post{padding:24px;gap:14px}
+.thread-post .p-name{font-size:17px}
+.thread-post .p-body,.thread-post .p-body h1,.thread-post .p-body p{font-size:18px;line-height:1.5;font-weight:400;letter-spacing:normal}
+.thread-post .second{margin-top:10px;color:#c9c9d4}
+.thread-post .p-body{margin-top:2px;overflow-wrap:anywhere}
+.thread-post .tcard{margin-top:6px}
+.thread-post .p-acts{margin-top:4px}
+.thread-link{font-size:12.5px;overflow-wrap:anywhere}
+.thread-market h3{font-size:15px}
+.thread-market p{font-size:12.5px;margin-top:4px}
+.thread-market .btn{margin-top:14px}
+.thread-comments{padding:0 20px 8px}
+.comment-form{display:flex;gap:11px;align-items:center;padding:4px 0 16px}
+.comment-form textarea{flex:1;min-width:0;min-height:42px;padding:10px 14px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--r-field);font-size:14px;resize:vertical}
+.thread-comment{display:flex;gap:12px;padding:16px 0;border-top:1px solid var(--line-soft);font-size:15px;line-height:1.5}
+.thread-comment .post-main{gap:5px;overflow-wrap:anywhere}
+.thread-comment b{font-size:14px}
+@media(max-width:900px){.thread-post{padding:16px}.thread-post .p-body,.thread-post .p-body h1,.thread-post .p-body p{font-size:16px}.comment-form{flex-wrap:wrap}}
+
+/* Shared creator and wallet controls used by the thread and top bar. */
+.creator-card .card-b{padding:0 20px 0}
+.creator-card .row{padding-left:0;padding-right:0}
+.creator-metrics{padding:0 20px 16px;display:flex;flex-direction:column}
+.creator-metrics .tile{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border:0}
+.creator-metrics .tile+.tile{border-top:1px solid var(--line-soft)}
+.creator-metrics .tile b{margin:0}
+.wallet-menu{position:relative}
+.wallet-menu summary{list-style:none;cursor:pointer}
+.wallet-menu summary::-webkit-details-marker{display:none}
+.wallet-menu>.card{position:absolute;right:0;top:calc(100% + 8px);min-width:200px;z-index:40}
+.wallet-actions{display:flex;align-items:center;gap:8px}

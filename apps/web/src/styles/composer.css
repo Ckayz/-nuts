@@ -1,0 +1,14 @@
+/* Composer rules ported from #new; existing two-field action retained. */
+.compose{max-width:720px;margin:0 auto}
+.compose .card.pad{padding:24px}
+.compose .card-h{padding:0 0 16px;flex-wrap:wrap}
+.compose .field{margin:18px 0 0 54px;display:flex;flex-direction:column;gap:8px}
+.compose .compose-field{position:relative;margin-top:0}
+.compose-avatar{position:absolute;left:-54px;top:0}
+.compose textarea{width:100%;min-height:96px;resize:vertical;font-size:18px;line-height:1.5;font-weight:400;background:transparent;border:0;border-radius:0;box-shadow:none;padding:0;color:var(--text)}
+.compose textarea::placeholder{color:var(--muted)}
+.compose textarea:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.compose-note{display:block;font-size:12.5px;line-height:1.6}
+.compose .pills .av{width:22px;height:22px;font-size:10px}
+.compose-submit{display:flex;margin:20px 0 14px auto}
+@media(max-width:900px){.compose textarea{font-size:16px}.compose .card.pad{padding:20px}.compose .field{margin-left:0}.compose-avatar{position:static}}

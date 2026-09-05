@@ -1,25 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ActivityList } from "@/components/creator/activity-list";
 import { CreatorStats } from "@/components/creator/creator-stats";
 import { LikeButton } from "@/components/feed/like-button";
 import { PostText, TradeCards } from "@/components/feed/trade-card";
-import { CommentIcon, ShareIcon, SparkIcon } from "@/components/icons";
-import { Avatar, Pill, SplitBar, StatusChip, TagRow } from "@/components/primitives";
+import { CommentIcon, ShareIcon } from "@/components/icons";
+import { Avatar, StatusChip } from "@/components/primitives";
 import { CommentsList } from "@/components/thesis/comments-list";
-import { ParticipantsTable } from "@/components/thesis/participants-table";
-import { PayoffChart } from "@/components/thesis/payoff-chart";
-import { SharePanel } from "@/components/thesis/share-panel";
-import { ThesisTabs } from "@/components/thesis/thesis-tabs";
-import { signedUsd, usd } from "@/lib/format";
+import { PagesFrame } from "@/components/thesis/pages-frame";
 import { thesisDetailData, socialPageState } from "@/lib/page-data";
-
-/**
- * The post thread. Owner 2026-09-05: a thesis is a post, so this page shows the
- * post, what it names, whether the creator backed it, and the replies. There is
- * no ticket here — the right rail links to the market page instead.
- */
+import "@/styles/thread.css";
 /**
  * Rendered per request, never from a build-time cache.
  *
@@ -49,223 +39,33 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 	};
 }
 
-export default async function ThesisPage({
-	params,
-}: {
-	params: Promise<{ slug: string }>;
-}) {
-	const { slug } = await params;
-	const detail = await thesisDetailData(slug);
-	if (!detail) notFound();
-	const t = detail.thesis;
-	const backing = t.backing;
-	const social = await socialPageState(t.creator.id);
-
-	return (
-		<div className="work">
-			<aside className="col l">
-				<CreatorStats creator={t.creator} {...social} />
-				{detail.activity.length > 0 ? (
-					<ActivityList items={detail.activity} count={detail.activityCount} />
-				) : null}
-			</aside>
-
-			<main className="col">
-				<header className="hero">
-					<div>
-						<div
-							style={{
-								display: "flex",
-								gap: "6px",
-								marginBottom: "12px",
-								alignItems: "center",
-								flexWrap: "wrap",
-							}}
-						>
-							{t.asset ? <Pill on>{t.asset}</Pill> : null}
-							{t.structure ? (
-								<>
-									<Pill on>
-										{t.structure.productType.charAt(0).toUpperCase()}
-										{t.structure.productType.slice(1)}
-									</Pill>
-									<Pill>{t.structure.venueLabel}</Pill>
-								</>
-							) : (
-								<Pill>Text only</Pill>
-							)}
-							{t.status && t.statusLabel ? (
-								<StatusChip
-									status={t.status}
-									label={t.statusLabel}
-									style={{ marginLeft: "4px" }}
-								/>
-							) : null}
-						</div>
-						<h1 className="h">{t.headline}</h1>
-						{t.note ? <PostText text={t.note} tokens={t.noteTokens} /> : null}
-						{/* A `/p/<uuid>` link in the post text unfurls into a trade
-						    card here, exactly as it does in the feed. */}
-						<TradeCards cards={t.tradeCards} />
-						<div className="meta">
-							<Avatar initials={t.creator.initials} size="s" />
-							<b>{t.creator.displayName}</b>
-							<span>{detail.launchedLabel}</span>
-							{detail.expiryLabel ? (
-								<>
-									<span>·</span>
-									<span>
-										expires <b className="mono">{detail.expiryLabel}</b>
-									</span>
-								</>
-							) : null}
-							{detail.settlementLabel !== null ? (
-								<>
-									<span>·</span>
-									<span>{detail.settlementLabel}</span>
-								</>
-							) : null}
-							<button
-								type="button"
-								className="acts ai"
-								style={{
-									display: "inline-flex",
-									gap: "6px",
-									color: "var(--tn-m)",
-								}}
-							>
-								<SparkIcon style={{ width: "12px", height: "12px" }} />
-								Explain this thesis
-							</button>
-						</div>
-						<TagRow tag={t.tag} backed={backing !== null} />
-						<div className="acts" style={{ marginTop: "12px" }}>
-							<LikeButton thesisId={t.id} {...social} likes={t.likes} liked={t.likedByViewer} />
-							<span className="cnt">
-								<CommentIcon />
-								{t.commentCount}
-							</span>
-							<button type="button">
-								<ShareIcon />
-								share
-							</button>
-						</div>
-					</div>
-					{backing ? (
-						<div className="board">
-							<div>
-								<span className="lbl">Pooled</span>
-								<span className="v">{usd(backing.pooledUsd)}</span>
-							</div>
-							<div>
-								<span className="lbl">Bull</span>
-								<span className="v bull">{backing.bull.count}</span>
-							</div>
-							<div>
-								<span className="lbl">Bear</span>
-								<span className="v bear">{backing.bear.count}</span>
-							</div>
-							<div>
-								<span className="lbl">Creator live</span>
-								<span className="v bull">
-									{signedUsd(backing.creatorLivePnlUsd)}
-								</span>
-							</div>
-						</div>
-					) : null}
-				</header>
-
-				{backing ? (
-					<SplitBar
-						bullLabel={`${backing.bull.pct}% Bull · ${backing.bull.amountLabel}`}
-						bearLabel={`${backing.bear.pct}% Bear · ${backing.bear.amountLabel}`}
-						bullPct={backing.bull.pct}
-						barStyle={{ height: "14px", borderRadius: "7px" }}
-					/>
-				) : null}
-
-				{backing && t.asset ? (
-					<div className="charts">
-						<div className="chartbox">
-							<div className="hh">
-								<span className="lbl">Payoff at expiry · per $1,000</span>
-								<span className="v">
-									max{" "}
-									<span className="bull">{signedUsd(detail.maxPayoutUsd)}</span>
-								</span>
-							</div>
-							<PayoffChart label="Payoff diagram of the put spread at expiry" />
-							<div className="legend">
-								<span>
-									<i style={{ background: "var(--tn-bull)" }} />
-									Bull · long spread
-								</span>
-								<span>
-									<i style={{ background: "var(--tn-bear)" }} />
-									Bear · short spread
-								</span>
-								<span className="dim">
-									break-even {usd(detail.breakEvenUsd)}
-								</span>
-							</div>
-						</div>
-					</div>
-				) : null}
-
-				{detail.participants.length > 0 ? (
-					<ThesisTabs
-						participantCount={detail.participantCount}
-						commentCount={t.commentCount}
-						participants={<ParticipantsTable rows={detail.participants} />}
-						comments={<CommentsList comments={detail.comments} thesisId={t.id} {...social} />}
-					/>
-				) : (
-					<div className="sec">
-						<div className="sec-h">
-							<h2 className="h2">Replies</h2>
-							<span className="mono dim" style={{ fontSize: "11px" }}>
-								{t.commentCount}
-							</span>
-						</div>
-						<CommentsList comments={detail.comments} thesisId={t.id} {...social} />
-					</div>
-				)}
-			</main>
-
-			<aside className="col r">
-				{/* A post carries no ticket. Trading happens on the market page. */}
-				{t.tag ? (
-					<div className="panel">
-						<h3>Trade this</h3>
-						<span className="note">
-							{t.tag.structureLabel
-								? `This post names the ${t.tag.asset} ${t.tag.structureLabel}.`
-								: `This post is about the ${t.tag.asset} market.`}
-						</span>
-						<Link className="btn primary block" href={`/m/${t.tag.slug}`}>
-							Trade this on the {t.tag.asset} market
-						</Link>
-						<span className="note">
-							Bull buys the structure, Bear sells it. Both fills happen on the
-							market page.
-						</span>
-					</div>
-				) : (
-					<div className="panel">
-						<h3>Trade this</h3>
-						<span className="note">
-							This post names no market yet, so there is nothing to fill. Its
-							author can tag one at any time.
-						</span>
-					</div>
-				)}
-				<SharePanel
-					url={detail.shareUrl}
-					headline={detail.shareHeadline}
-					bull={backing?.bull}
-					bear={backing?.bear}
-				/>
-			</aside>
-		</div>
-	);
+export default async function ThesisPage({ params }: { params: Promise<{ slug: string }> }) {
+ const detail = await thesisDetailData((await params).slug);
+ if (!detail) notFound();
+ const t = detail.thesis;
+ const social = await socialPageState(t.creator.id);
+ return <PagesFrame right={<div className="stack">
+  {t.tag ? <section className="card pad thread-market">
+   <h3>Trade this on the {t.tag.asset} market</h3>
+   <p className="mut">{t.tag.structureLabel ? `This post names the ${t.tag.asset} ${t.tag.structureLabel}.` : `This post is about the ${t.tag.asset} market.`}</p>
+   {detail.expiryLabel ? <p className="mut num">{detail.expiryLabel}</p> : null}
+   <Link className="btn acc block" href={`/m/${t.tag.slug}`}>Open the {t.tag.asset} market</Link>
+  </section> : null}
+  <CreatorStats creator={t.creator} {...social} />
+ </div>}>
+  <article className="post thread-post">
+   <Link href={`/u/${t.creator.handle}`} aria-label={t.creator.displayName}><Avatar initials={t.creator.initials} /></Link>
+   <div className="post-main">
+    <div className="p-head"><Link className="p-name" href={`/u/${t.creator.handle}`}>{t.creator.displayName}</Link><span className="p-handle">@{t.creator.handle}</span><span className="p-time">{t.postedLabel}</span>
+     {t.status && t.statusLabel ? <StatusChip status={t.status} label={t.statusLabel} /> : null}
+     {t.backing ? <span className="chip flat">Backed</span> : null}
+    </div>
+    <div className="p-body"><h1>{t.headline}</h1>{t.note ? <div className="second"><PostText text={t.note} tokens={t.noteTokens} /></div> : null}</div>
+    <TradeCards cards={t.tradeCards} />
+    <div className="p-acts"><LikeButton thesisId={t.id} {...social} likes={t.likes} liked={t.likedByViewer} /><a className="act" href="#comments"><CommentIcon />{t.commentCount}</a><button className="act" type="button"><ShareIcon />Share</button></div>
+    <span className="mut num thread-link">{detail.shareUrl}</span>
+   </div>
+  </article>
+  <section className="card" id="comments"><div className="card-h"><h3>Comments</h3><span className="x num">{t.commentCount}</span></div><div className="card-b thread-comments"><CommentsList comments={detail.comments} thesisId={t.id} {...social} /></div></section>
+ </PagesFrame>;
 }

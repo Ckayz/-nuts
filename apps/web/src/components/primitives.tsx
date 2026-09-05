@@ -14,7 +14,7 @@ import type { Tag, ThesisStatus } from "@/lib/display-types";
  * components outside this round's fence keep compiling; each maps to the
  * nearest mockup step (`s` → 26, default → 34, `lg` → 40).
  */
-export type AvatarSize = "s" | "lg" | 26 | 30 | 34 | 40 | 44 | 80;
+export type AvatarSize = "s" | "lg" | 22 | 26 | 30 | 34 | 40 | 44 | 80;
 
 const AVATAR_STEP: Record<string, number> = { s: 26, lg: 40 };
 

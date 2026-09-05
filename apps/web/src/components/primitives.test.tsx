@@ -23,3 +23,9 @@ test("unknown assets and seed-only asset tone preserve monograms", () => {
 	expect(renderToStaticMarkup(<Avatar initials="FOO" asset="FOO" seed="wallet-a" />)).toBe(html);
 	expect(renderToStaticMarkup(<Avatar initials="FOO" tone="asset" seed="wallet-a" />)).toBe(html);
 });
+
+test("market pills render a 22px local asset logo", () => {
+ const html = renderToStaticMarkup(<Avatar asset="BTC" tone="asset" initials="BTC" size={22} />);
+ expect(html).toMatch(/<span class="av av-22 av-asset"[^>]*><img[^>]*src="\/asset-icons\/btc.svg"/);
+ expect(html).toContain('width="22" height="22"');
+});

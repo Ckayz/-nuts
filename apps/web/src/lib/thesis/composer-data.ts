@@ -13,6 +13,7 @@
  * foreign host, a `javascript:` URL, junk — is dropped and the composer simply
  * opens empty. `?asset=` must be a ticker shape and is uppercased.
  */
+import { creatorInitials } from "../data/identity";
 import { siteOrigin } from "../site-origin";
 import { marketSummariesData } from "../market/summaries";
 import type { PnlCard } from "../display-types";
@@ -34,6 +35,8 @@ export interface ComposerData {
 	presetRationale: string;
 	previewCards: PnlCard[];
 	signedIn: boolean;
+	viewerSeed?: string;
+	viewerInitials?: string;
 	databaseMode: boolean;
 }
 
@@ -96,6 +99,9 @@ export async function composerData(
 		presetRationale,
 		previewCards: entry === undefined ? [] : [linkedPositionCard(entry)],
 		signedIn: session !== null,
+		// This data path has the session address, not the user row.
+		viewerSeed: session?.walletAddress.toLowerCase(),
+		viewerInitials: session ? creatorInitials(null, session.walletAddress) : "?",
 		databaseMode,
 	};
 }

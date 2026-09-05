@@ -71,6 +71,6 @@ export default async function ThesisPage({ params }: { params: Promise<{ slug: s
     <span className="mut num thread-link">{detail.shareUrl}</span>
    </div>
   </article>
-  <section className="card" id="comments"><div className="card-h"><h3>Comments</h3><span className="x num">{t.commentCount}</span></div><div className="card-b thread-comments"><CommentsList comments={detail.comments} thesisId={t.id} {...social} /></div></section>
+  <section className="card" id="comments"><div className="card-h"><h3>Comments</h3><span className="x num">{t.commentCount}</span></div><div className="card-b thread-comments"><CommentsList viewerSeed={social.signedIn ? social.mockCreator?.avatarSeed : undefined} viewerInitials={social.signedIn ? social.mockCreator?.initials : "?"} comments={detail.comments} thesisId={t.id} {...social} /></div></section>
  </PageFrame>;
 }

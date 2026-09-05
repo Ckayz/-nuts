@@ -31,7 +31,18 @@ test("NODE_ENV=production DATA_SOURCE=db routes the shared boundary to the live 
 	`;
 	const child = Bun.spawnSync([process.execPath, "--preload", "./test/setup.ts", "-e", script], {
 		cwd: new URL("../../..", import.meta.url).pathname,
-		env: { ...process.env, NODE_ENV: "production", DATA_SOURCE: "db", DATABASE_URL: "", SKIP_ENV_VALIDATION: "1" }, stdout: "pipe", stderr: "pipe",
+		// A fully valid production env: A-C5 made SKIP_ENV_VALIDATION inert in
+		// production, so the case has to satisfy the schema to reach the code it
+		// is about. The URL is a loopback fixture that is never connected to —
+		// `@/lib/market/live` is stubbed above and `fetch` throws.
+		env: {
+			...process.env,
+			NODE_ENV: "production",
+			DATA_SOURCE: "db",
+			DATABASE_URL: "postgresql://user:pw@127.0.0.1:5432/fixture",
+			SESSION_SECRET: "x".repeat(32),
+			SKIP_ENV_VALIDATION: "1",
+		}, stdout: "pipe", stderr: "pipe",
 	});
 	expect({ code: child.exitCode, stderr: child.stderr.toString() }).toEqual({ code: 0, stderr: "" });
 	const result = JSON.parse(child.stdout.toString());

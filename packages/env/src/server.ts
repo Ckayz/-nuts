@@ -134,11 +134,29 @@ export const env = createEnv({
 			.default("https://round-snowflake-9c31.devops-118.workers.dev/"),
 	},
 	runtimeEnv: runtimeEnv,
-	skipValidation: !!process.env.SKIP_ENV_VALIDATION,
+	/**
+	 * A-C5 (one-shot review 2026-09-06). `SKIP_ENV_VALIDATION` is a BUILD-TIME
+	 * convenience — it lets a checkout typecheck or build without credentials —
+	 * and it used to work in production too. Measured before the fix:
+	 *
+	 *   NODE_ENV=production DATA_SOURCE=db DATABASE_URL=fixture \
+	 *   SESSION_SECRET=short SKIP_ENV_VALIDATION=1 bun -e '…'
+	 *   -> {"mode":"production","source":"db","secretLength":5}
+	 *
+	 * `turbo.json` forwards the variable into builds and Vercel builds run with
+	 * NODE_ENV=production, so one stray environment variable could have shipped a
+	 * deployment whose env was never checked. `auth/secret.ts` and
+	 * `data/source.ts` refuse independently, so this was not by itself a session
+	 * forgery — but the fence has to hold on its own. The bypass is now ignored
+	 * whenever NODE_ENV is production; read from `process.env` because the
+	 * validated `env` does not exist yet at this point.
+	 */
+	skipValidation: !!process.env.SKIP_ENV_VALIDATION && process.env.NODE_ENV !== "production",
 	emptyStringAsUndefined: true,
 });
 
-// Keep the explicit build-time validation bypass consistent with createEnv.
-if (!process.env.SKIP_ENV_VALIDATION && env.NODE_ENV === "production" && !env.SESSION_SECRET) {
+// Keep the explicit build-time validation bypass consistent with createEnv:
+// production ignores it there, so production ignores it here.
+if (env.NODE_ENV === "production" && !env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET is required in production (at least 32 characters)");
 }

@@ -37,11 +37,18 @@ import "@/styles/position.css";
  *   RIGHT   the ticket, ALWAYS VISIBLE and never behind a tab because it is the
  *           money path, then a tabbed panel: `About | Agent | Positions`.
  *
- * NO PRICE CHART (owner 2026-09-05, "remove the chart then"): Thetanuts
- * publishes a spot price and no history — `api.getMarketData()` returns
- * `{prices, metadata}` and nothing else, measured the same day — and this app
- * does not call a third-party price API, so there is no series to draw and the
- * owner will not ship an example one. The live spot stays, as a number.
+ * THE PRICE CHART, and why it is here after being removed three times. The
+ * owner's 2026-09-05 ruling ("remove the chart then if this the case … think
+ * for the users man") was aimed at a chart with no honest series behind it:
+ * Thetanuts publishes a spot price and no history — `api.getMarketData()`
+ * returns `{prices, metadata}` and nothing else, measured that day — so the
+ * only chart available then would have been an invented one. The owner's
+ * 2026-09-06 decision kept a chart on one condition, that its prices are real
+ * and the source is named on the page. They are: the series is Binance spot
+ * klines, read through `/api/klines/[asset]`, and the chart carries
+ * `CHART_SOURCE_NOTE` under it saying so and saying that Thetanuts settles on a
+ * Chainlink TWAP, which can differ. `lib/chart/klines.ts` holds the
+ * measurement. The live spot still stays, as a number, in the header tiles.
  *
  * `src/styles/position.css` is imported here as well as on `/p/[id]`: the
  * post-fill dialog renders the same share card, and the card is defined once.

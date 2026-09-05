@@ -6,10 +6,12 @@ import { getThesisContext as loadThesisContext } from "@/lib/thesis-context";
 
 import { instrumentKey, findByInstrumentKey } from "@/lib/thetanuts/instrument";
 import {
+	COLLATERAL_USD_UNAVAILABLE,
 	CONTRACT_UNITS_UNVERIFIED,
+	collateralUsdPrice,
 	getAvailableAssets,
 	getOrderSnapshot,
-	isSdkIncompatible,
+	isFeedUnavailable,
 	searchOrders,
 	sizeFill,
 	usdRisk,
@@ -98,28 +100,32 @@ export const searchOptionBookOrders = tool({
 			: undefined;
 
 		const result = await searchOrders({
-			asset, side,
+			asset, side, kind,
 			isCall: direction === undefined ? undefined : direction === "call",
 			expiryBefore,
+			// TODO-OWNER: page size fetched from the adapter before `limit` trims it for the
+			// model. Every filter — `kind` included — is applied inside searchOrders, ahead of
+			// this cap, so `totalMatched` counts the whole matching set and is never capped by it.
 			limit: 200,
 		});
-		// A broken SDK boundary is returned verbatim: it is not an empty book, and must
-		// never be reported as "nothing matches".
-		if (isSdkIncompatible(result)) return result;
+		// A broken SDK boundary or an unreadable feed is returned verbatim: neither is an
+		// empty book, and neither may be reported as "nothing matches".
+		if (isFeedUnavailable(result)) return result;
 		const { orders, fetchedAt, totalMatched, droppedEntries } = result;
-
-		const filtered = kind ? orders.filter((o) => o.kind === kind) : orders;
 
 		return {
 			asOf: fetchedAt.toISOString(),
-			totalMatched: kind ? filtered.length : totalMatched,
-			returned: Math.min(filtered.length, limit),
+			totalMatched,
+			returned: Math.min(orders.length, limit),
 			// Feed rows dropped for failing validation. Non-zero means this view of the
-			// book is partial; say so rather than implying it is complete.
+			// book is partial; say so rather than implying it is complete. Rows parsed, so
+			// this is a partial book, never a lost one: losing every row is `feed_unusable`.
 			droppedEntries,
-			orders: filtered.slice(0, limit).map(describe),
+			orders: orders.slice(0, limit).map(describe),
+			// Only reachable once rows parsed: the caller's own filters excluded them, or the
+			// book really is empty. A feed that returned nothing readable never gets here.
 			note:
-				filtered.length === 0
+				totalMatched === 0
 					? "Nothing on the book matches those constraints right now. Say so plainly and offer to widen them; do not invent an alternative."
 					: undefined,
 		};
@@ -133,15 +139,24 @@ export const getMarketData = tool({
 	inputSchema: z.object({}),
 	execute: async () => {
 		const [assets, snapshot] = await Promise.all([getAvailableAssets(), getOrderSnapshot()]);
-		if (isSdkIncompatible(snapshot)) return snapshot;
-		if (isSdkIncompatible(assets)) return assets;
+		// Same two failures as the other tools: a broken SDK boundary or an unreadable feed
+		// is returned verbatim, never flattened into an empty asset list.
+		if (isFeedUnavailable(snapshot)) return snapshot;
+		if (isFeedUnavailable(assets)) return assets;
 		return {
 			asOf: snapshot.fetchedAt.toISOString(),
 			chain: "Base mainnet",
+			// Feed rows dropped for failing validation, carried here for the same reason the
+			// search tool carries it: non-zero means these counts are of a partial book.
+			droppedEntries: snapshot.droppedEntries,
 			assets: assets.map((a) => ({
 				asset: a.asset,
 				spotUsd: a.spotUsd === null ? null : String(a.spotUsd),
-				tradeableOrders: a.orders,
+				// Orders QUOTED on this asset. Not a count of what could be executed: whether
+				// an order is executable depends on the taker's budget and on gates that only
+				// previewOptionBookTrade evaluates (contract units, structure/collateral
+				// verification, the USD risk limit), so no honest executable count exists here.
+				quotedOrders: a.orders,
 				calls: a.calls,
 				puts: a.puts,
 			})),
@@ -163,31 +178,39 @@ export const previewOptionBookTrade = tool({
         ),
 	}),
 	execute: async ({ instrumentKey: key, budget }) => {
-		// Fresh snapshot: a preview built from a stale price misleads the user.
+		// Cached snapshot, up to the adapter's TTL and never past an order's signature or
+		// option deadline. Its age is reported as `asOf` on every result below.
+		// TODO: the approval-gated calldata path (build step 5) must call
+		// getOrderSnapshot(true) instead — a signature re-read from cache can already be
+		// spent by the time a transaction is signed.
 		const snapshot = await getOrderSnapshot();
-		if (isSdkIncompatible(snapshot)) return snapshot;
+		if (isFeedUnavailable(snapshot)) return snapshot;
+		const asOf = snapshot.fetchedAt.toISOString();
 		const order = findByInstrumentKey(snapshot.orders, key);
 
 		if (!order) {
 			return {
 				found: false as const,
+				asOf,
 				reason:
 					"That instrument is no longer quoted. The book re-signs about every minute. Search again and use a current instrumentKey.",
 			};
 		}
 
         const fill = sizeFill(order, budget);
-        if (!fill.executable) return { ...fill, instrument: describe(order) };
-        // Never treat a collateral amount as USD or assume a wrapper's exchange rate.
-        // TODO-OWNER: supply a verified collateral/USD valuation source for tokens absent here.
-        const tokenUsd = snapshot.marketData[fill.collateralToken.symbol];
+        if (!fill.executable) return { ...fill, asOf, instrument: describe(order) };
+        // Never treat a collateral amount as USD or assume a wrapper's exchange rate. The
+        // spot map is keyed by UNDERLYING ASSET, so it can never be indexed by a collateral
+        // token symbol; `collateralUsdPrice` is the explicit collateral -> price-source
+        // mapping, and it refuses every token it cannot justify (see orders.ts).
+        const tokenUsd = collateralUsdPrice(fill.collateralToken.symbol) ?? undefined;
         const valuation = usdRisk(fill.maxLoss.amount, tokenUsd, MAX_LOSS_USD);
         const maxLossUsd = valuation?.amount ?? null;
         const executable = valuation?.withinLimit ?? false;
         const token = fill.collateralToken.symbol;
         return {
-            ...fill, executable, asOf: snapshot.fetchedAt.toISOString(), instrument: describe(order),
-            reason: executable ? undefined : maxLossUsd === null ? "Collateral USD valuation unavailable; cannot verify the 10 USD risk limit." : "Maximum loss exceeds the 10 USD agent risk limit.",
+            ...fill, executable, asOf, instrument: describe(order),
+            reason: executable ? undefined : maxLossUsd === null ? COLLATERAL_USD_UNAVAILABLE : "Maximum loss exceeds the 10 USD agent risk limit.",
             budget: { amount: budget, token, decimals: fill.collateralToken.decimals },
             risk: {
                 maxLossUsd: maxLossUsd === null ? null : String(maxLossUsd),

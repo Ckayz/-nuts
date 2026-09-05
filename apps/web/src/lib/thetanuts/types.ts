@@ -70,3 +70,23 @@ export interface SdkIncompatible {
 	readonly error: "sdk_incompatible";
 	readonly detail: string;
 }
+
+/**
+ * The feed answered, but nothing usable came back: either the payload carried no
+ * `orders` array at all, or every row it did carry failed validation.
+ *
+ * Both are total losses of the book's contents, and both are indistinguishable from a
+ * genuinely empty book once they collapse to zero orders — so they are reported as their
+ * own structured error, the same shape as `SdkIncompatible`, and never through the
+ * "nothing on the book matches" note. A genuinely empty `orders: []` is NOT this: it is
+ * a real, readable book that happens to hold nothing.
+ */
+export interface FeedUnusable {
+	readonly error: "feed_unusable";
+	readonly detail: string;
+	/** Rows the feed returned that failed validation. Zero when there was no array at all. */
+	readonly droppedEntries: number;
+}
+
+/** Either reason the order book cannot be read. Tools return these verbatim. */
+export type FeedUnavailable = SdkIncompatible | FeedUnusable;

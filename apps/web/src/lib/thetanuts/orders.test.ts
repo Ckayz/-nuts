@@ -7,13 +7,15 @@ mock.module("server-only", () => ({}));
 process.env.DATABASE_URL ??= "postgresql://localhost/offline";
 process.env.OPENROUTER_API_KEY ??= "offline-test";
 const { toTradeable, sizeFill, readClient, getOrderSnapshot, usdRisk, rawOrderApi, decimalString, searchOrders,
- isSdkIncompatible, CONTRACT_UNITS_UNVERIFIED, buyContractSizeDecimals } = await import("./orders");
+ isSdkIncompatible, isFeedUnusable, isFeedUnavailable, CONTRACT_UNITS_UNVERIFIED, COLLATERAL_USD_UNAVAILABLE,
+ collateralUsdPrice, COLLATERAL_USD_SOURCES, buyContractSizeDecimals } = await import("./orders");
 const { instrumentKey } = await import("./instrument");
 const { env } = await import("@nuts/env/server");
 type SdkIncompatible = import("./types").SdkIncompatible;
-/** Narrow away the adapter-failure arm; a test that hits it should fail loudly, not silently skip. */
-const ok = <T extends object>(value: T | SdkIncompatible): T => {
- if (isSdkIncompatible(value)) throw new Error(`unexpected sdk_incompatible: ${value.detail}`);
+type FeedUnavailable = import("./types").FeedUnavailable;
+/** Narrow away BOTH unreadable-book arms; a test that hits one should fail loudly, not silently skip. */
+const ok = <T extends object>(value: T | FeedUnavailable): T => {
+ if (isFeedUnavailable(value)) throw new Error(`unexpected ${value.error}: ${value.detail}`);
  return value;
 };
 const client = createReadClient({ rpcUrl: "http://127.0.0.1:1", referrer: env.THESIS_REFERRER });
@@ -228,22 +230,28 @@ function callRow18() {
 
 test("string isLong is dropped before the SDK coerces it into a BUY", async () => {
  // SDK dist/index.js:3387 does isLong: Boolean(rawOrder["isLong"]), so "false" would become true.
+ // A genuine BUY row rides along so the book stays readable: a book whose EVERY row is
+ // dropped is a feed failure and is covered by its own test below.
+ const stringified = rawFixture(fixture(false));
  const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: [
-  { ...rawFixture(fixture(false)), order: { ...rawFixture(fixture(false)).order, isLong: "false" } },
+  rawFixture(fixture(true)),
+  { ...stringified, order: { ...stringified.order, isLong: "false" } },
  ] } });
  const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
  try {
   const result = ok(await getOrderSnapshot(true));
-  console.log("STRING_FALSE", JSON.stringify({ retained: result.orders.length, dropped: result.droppedEntries, side: result.orders[0]?.side }));
-  expect(result.orders).toHaveLength(0);
+  console.log("STRING_FALSE", JSON.stringify({ retained: result.orders.length, dropped: result.droppedEntries, sides: result.orders.map(o => o.side) }));
+  expect(result.orders).toHaveLength(1);
   expect(result.droppedEntries).toBe(1);
-  // And at the agent surface: the row can never be previewed as an executable BUY.
+  // The survivor is the real buy row; the coerced sell row never reached the book.
+  expect(result.orders.map(o => o.side)).toEqual(["buy"]);
+  // And at the agent surface: the dropped row can never be previewed as an executable BUY.
   const { searchOptionBookOrders, previewOptionBookTrade } = await import("../agent/tools");
   const search = await searchOptionBookOrders.execute!({ limit: 6 }, { toolCallId: "test", messages: [], context: {} });
   if (!search || !("orders" in search)) throw Error("Missing orders");
-  expect(search.orders).toHaveLength(0);
+  expect(search.orders).toHaveLength(1);
   expect(search.droppedEntries).toBe(1);
-  const preview = await previewOptionBookTrade.execute!({ instrumentKey: "ETH|buy|x|P|1|1|y", budget: "1" }, { toolCallId: "test", messages: [], context: {} });
+  const preview = await previewOptionBookTrade.execute!({ instrumentKey: "ETH|sell|x|P|1|1|y", budget: "1" }, { toolCallId: "test", messages: [], context: {} });
   console.log("MALFORMED_SIDE_TOOL", JSON.stringify(preview));
   expect(preview).toMatchObject({ found: false });
  } finally { request.mockRestore(); data.mockRestore(); }
@@ -380,4 +388,278 @@ test("the sell view withholds a per-contract price for the family the package re
  const put = view(fixture(false));
  expect(put.contractSizeDecimals).toBe(6);
  expect(put.pricePerContractUsd).toBe(decimalString(put.sdkOrder.order.price, 100_000_000n));
+});
+
+
+// ─── Round 5 folds ──────────────────────────────────────────────────────────────
+const CTX = { toolCallId: "test", messages: [], context: {} };
+const FLAT_PRICES = { prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } };
+/** The live spot map, measured 2026-09-05: keyed by UNDERLYING ASSET only. */
+const REAL_PRICES = { prices: { ETH: 2451.42, BTC: 79536.18, SOL: 101.86565608, XRP: 1.3989, BNB: 722.05638627, AVAX: 7.412 }, metadata: { lastUpdated: 0, currentTime: 0 } };
+const PUT_SPREAD = "0x02Fe0d9635e0139DBB3768a5d5Db404Fd84d9134"; // SPREAD, 2 strikes (SDK dist/index.js)
+async function tools() { return await import("../agent/tools"); }
+function mockBook(rows: unknown[], prices = FLAT_PRICES) {
+ const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: rows } } as never);
+ const data = spyOn(readClient.api, "getMarketData").mockResolvedValue(prices);
+ return () => { request.mockRestore(); data.mockRestore(); };
+}
+/** Push the clock past the 20s snapshot TTL so an UNFORCED read re-fetches through the
+ * current mock. Needed only where the forced read cannot refresh the cache itself: an
+ * unusable feed is deliberately never cached, so a still-valid earlier snapshot survives it.
+ * Fixture deadlines sit ~10000s out, so the jump does not expire any order. */
+function expireSnapshotCache() {
+ const future = Date.now() + 60_000;
+ const clock = spyOn(Date, "now").mockReturnValue(future);
+ return () => clock.mockRestore();
+}
+/** Pick the arm of a tool's result union that actually reached the book. The streaming and
+ * structured-error arms are real outcomes elsewhere; in these tests reaching one is the bug,
+ * so it throws rather than silently skipping the assertions. */
+function armed<T, S extends object>(result: T, shape: keyof S, label: string): Extract<T, S> {
+ if (!result || typeof result !== "object" || !(shape in result)) {
+  throw new Error(`expected a ${label} result, got ${JSON.stringify(result)}`);
+ }
+ return result as Extract<T, S>;
+}
+const searched = <T,>(result: T) => armed<T, { totalMatched: number; returned: number; droppedEntries: number; note?: string; orders: Array<{ kind: string | null }> }>(result, "totalMatched", "search");
+const previewed = <T,>(result: T) => armed<T, { found: boolean; asOf: string }>(result, "found", "preview");
+
+test("MAJOR1: the spot map is keyed by asset, so no collateral symbol can ever be looked up in it", async () => {
+ const restore = mockBook([rawFixture(fixture())], REAL_PRICES);
+ try {
+  const snapshot = ok(await getOrderSnapshot(true));
+  const collateralSymbols = Object.values(readClient.chainConfig.tokens).map(t => t.symbol);
+  const overlap = collateralSymbols.filter(s => s in snapshot.marketData);
+  console.log("MAJOR1_KEYSPACES", JSON.stringify({ marketData: Object.keys(snapshot.marketData), collateralSymbols, overlap }));
+  expect(overlap).toEqual([]);
+  // Which is exactly why valuation goes through the explicit mapping, not the price map.
+  for (const symbol of collateralSymbols) expect(snapshot.marketData[symbol]).toBeUndefined();
+ } finally { restore(); }
+});
+
+test("MAJOR1: collateral USD sources price the stablecoins and refuse everything else", () => {
+ expect(Object.keys(COLLATERAL_USD_SOURCES).sort()).toEqual(["USDC", "aBasUSDC"]);
+ expect(collateralUsdPrice("USDC")).toBe(1);
+ expect(collateralUsdPrice("aBasUSDC")).toBe(1);
+ // Wrapped/bridged majors have no citable token -> underlying relation, so they are refused,
+ // never silently valued at 0 and never assumed 1:1 with their underlying.
+ for (const symbol of ["WETH", "aBasWETH", "cbBTC", "aBascbBTC", "cbDOGE", "cbXRP"]) {
+  expect(collateralUsdPrice(symbol)).toBeNull();
+ }
+ // Nothing resolves through Object.prototype, and an ASSET symbol is not a collateral symbol.
+ for (const symbol of ["constructor", "toString", "__proto__", "hasOwnProperty", "", "ETH", "BTC"]) {
+  expect(collateralUsdPrice(symbol)).toBeNull();
+ }
+ expect(collateralUsdPrice(null)).toBeNull();
+});
+
+test("MAJOR1: the decoded aBasUSDC taker-BUY put previews as executable with maxLossUsd equal to its premium", async () => {
+ const row = fixture(); // aBasUSDC (6 decimals), taker BUY, PHYSICAL_PUT 0x6aD53D…
+ const restore = mockBook([rawFixture(row)], REAL_PRICES);
+ try {
+  const snapshot = ok(await getOrderSnapshot(true));
+  const order = snapshot.orders[0]!;
+  expect(order.collateralToken.symbol).toBe("aBasUSDC");
+  const { previewOptionBookTrade } = await tools();
+  const preview = previewed(await previewOptionBookTrade.execute!({ instrumentKey: instrumentKey(order), budget: "1" }, CTX));
+  console.log("D1_TOOL_WITH_REAL_PRICES", JSON.stringify(preview));
+  expect(preview).toMatchObject({ found: true, executable: true, verification: "verified", side: "buy" });
+  if (!("risk" in preview) || !("premium" in preview)) throw new Error("expected an executable preview");
+  // maxLossUsd is the premium itself, at the documented 1 USD stablecoin peg.
+  expect(preview.premium.amount).toBe("0.999998");
+  expect(preview.risk.maxLossUsd).toBe(preview.premium.amount);
+  expect(preview.reason).toBeUndefined();
+ } finally { restore(); }
+});
+
+test("MAJOR1: an aBasWETH order is refused, never valued at zero", async () => {
+ const row = callRow18(); // aBasWETH (18 decimals)
+ const restore = mockBook([rawFixture(row)], REAL_PRICES);
+ try {
+  const snapshot = ok(await getOrderSnapshot(true));
+  const order = snapshot.orders[0]!;
+  expect(order.collateralToken.symbol).toBe("aBasWETH");
+  const { previewOptionBookTrade } = await tools();
+  const preview = previewed(await previewOptionBookTrade.execute!({ instrumentKey: instrumentKey(order), budget: "0.01" }, CTX));
+  console.log("D1_ABASWETH", JSON.stringify(preview));
+  expect(preview).toMatchObject({ found: true, executable: false });
+  // Never a zero valuation: either the units gate or the valuation gate refuses it outright.
+  if (!("reason" in preview)) throw new Error("expected a refusal reason");
+  expect([CONTRACT_UNITS_UNVERIFIED, COLLATERAL_USD_UNAVAILABLE]).toContain(String(preview.reason));
+  expect(JSON.stringify(preview)).not.toContain('"maxLossUsd":"0"');
+  // The valuation layer itself refuses the token, independently of the units gate.
+  expect(collateralUsdPrice("aBasWETH")).toBeNull();
+  expect(usdRisk("1", collateralUsdPrice("aBasWETH") ?? undefined, 10)).toBeNull();
+ } finally { restore(); }
+});
+
+test("MAJOR2a: a payload carrying no orders array is feed_unusable in every tool, not an empty book", async () => {
+ const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { market_data: {} } } as never);
+ const data = spyOn(readClient.api, "getMarketData").mockResolvedValue(FLAT_PRICES);
+ const unfreeze = expireSnapshotCache();
+ const { searchOptionBookOrders, getMarketData, previewOptionBookTrade } = await tools();
+ try {
+  const snapshot = await getOrderSnapshot(true);
+  const search = await searchOptionBookOrders.execute!({ limit: 6 }, CTX);
+  const market = await getMarketData.execute!({}, CTX);
+  const preview = await previewOptionBookTrade.execute!({ instrumentKey: "x", budget: "1" }, CTX);
+  console.log("S1_ALL_TOOLS", JSON.stringify({ snapshot, search, market, preview }));
+  for (const result of [snapshot, search, market, preview]) {
+   expect(result).toMatchObject({ error: "feed_unusable", droppedEntries: 0 });
+   expect(JSON.stringify(result)).not.toContain("Nothing on the book");
+  }
+  expect(isFeedUnusable(snapshot)).toBe(true);
+  expect(isFeedUnavailable(snapshot)).toBe(true);
+  expect(isSdkIncompatible(snapshot)).toBe(false);
+  // A non-array `orders` is the same failure.
+  request.mockResolvedValue({ data: { orders: "many" } } as never);
+  expect(await getOrderSnapshot(true)).toMatchObject({ error: "feed_unusable" });
+  // The error is never cached: an unforced read goes back to the feed and reports it again.
+  expect(await getOrderSnapshot()).toMatchObject({ error: "feed_unusable" });
+ } finally { unfreeze(); request.mockRestore(); data.mockRestore(); }
+});
+
+test("MAJOR2b: losing every row is feed_unusable in every tool, however the rows fail", async () => {
+ const stringified = rawFixture(fixture(false));
+ const cases: Array<[string, unknown[]]> = [
+  ["S4_schema", [null, null, { order: {} }]],
+  ["E2_stringified_isLong", Array.from({ length: 5 }, () => ({ ...stringified, order: { ...stringified.order, isLong: "false" } }))],
+ ];
+ const { searchOptionBookOrders, getMarketData, previewOptionBookTrade } = await tools();
+ for (const [name, rows] of cases) {
+  const restore = mockBook(rows);
+  const unfreeze = expireSnapshotCache();
+  try {
+   const snapshot = await getOrderSnapshot(true);
+   const search = await searchOptionBookOrders.execute!({ limit: 6 }, CTX);
+   const market = await getMarketData.execute!({}, CTX);
+   const preview = await previewOptionBookTrade.execute!({ instrumentKey: "x", budget: "1" }, CTX);
+   console.log(name, JSON.stringify({ snapshot, search, market, preview }));
+   for (const result of [snapshot, search, market, preview]) {
+    expect(result).toMatchObject({ error: "feed_unusable", droppedEntries: rows.length });
+    expect(JSON.stringify(result)).not.toContain("Nothing on the book");
+    expect(JSON.stringify(result)).not.toContain("no longer quoted");
+   }
+  } finally { unfreeze(); restore(); }
+ }
+});
+
+test("MAJOR2c/d: a readable book keeps the empty-book note, and getMarketData carries droppedEntries", async () => {
+ const { searchOptionBookOrders, getMarketData } = await tools();
+ // S5: genuinely empty. The feed worked; there is simply nothing on the book.
+ let restore = mockBook([]);
+ try {
+  ok(await getOrderSnapshot(true));
+  const search = searched(await searchOptionBookOrders.execute!({ limit: 6 }, CTX));
+  const market = await getMarketData.execute!({}, CTX);
+  console.log("S5_EMPTY", JSON.stringify({ search, market }));
+  expect(search).toMatchObject({ totalMatched: 0, droppedEntries: 0 });
+  expect(String(search.note)).toContain("Nothing on the book");
+  expect(market).toMatchObject({ droppedEntries: 0, assets: [] });
+  expect(market).not.toHaveProperty("error");
+ } finally { restore(); }
+ // S6: rows parsed; the caller's own filters excluded them. Note, and a partial-book count.
+ restore = mockBook([rawFixture(fixture()), null]);
+ try {
+  ok(await getOrderSnapshot(true));
+  const search = searched(await searchOptionBookOrders.execute!({ limit: 6, asset: "SOL" }, CTX));
+  const market = await getMarketData.execute!({}, CTX);
+  console.log("S6_FILTERED_OUT", JSON.stringify({ search, market }));
+  expect(search).toMatchObject({ totalMatched: 0, droppedEntries: 1 });
+  expect(String(search.note)).toContain("Nothing on the book");
+  // getMarketData reports the same partial-book signal the search tool does.
+  expect(market).toMatchObject({ droppedEntries: 1 });
+  // A book that still holds rows is never the structured error.
+  expect(searched(await searchOptionBookOrders.execute!({ limit: 6 }, CTX))).toMatchObject({ totalMatched: 1 });
+ } finally { restore(); }
+});
+
+test("MAJOR3: kind is filtered before the page cap, so totalMatched counts the whole set", async () => {
+ const spreadRow = (i: number) => {
+  const row = fixture();
+  row.rawApiData!.implementation = PUT_SPREAD;
+  row.rawApiData!.strikes = [String(220000000000 + i), String(230000000000 + i)];
+  row.rawApiData!.orderExpiryTimestamp += 1000 + i;
+  row.order.expiry = BigInt(row.rawApiData!.orderExpiryTimestamp);
+  return rawFixture(row);
+ };
+ const vanillaRow = (i: number) => {
+  const row = fixture();
+  row.rawApiData!.strikes = [String(220000000000 + i)];
+  row.rawApiData!.orderExpiryTimestamp += i;
+  row.order.expiry = BigInt(row.rawApiData!.orderExpiryTimestamp);
+  return rawFixture(row);
+ };
+ // 227 vanilla FIRST, so a 200-row page would contain no spread at all.
+ const rows = [...Array.from({ length: 227 }, (_, i) => vanillaRow(i)), ...Array.from({ length: 101 }, (_, i) => spreadRow(i))];
+ const { searchOptionBookOrders } = await tools();
+ let restore = mockBook(rows);
+ try {
+  const snapshot = ok(await getOrderSnapshot(true));
+  const truth = snapshot.orders.reduce<Record<string, number>>((a, o) => { const k = String(o.kind); a[k] = (a[k] ?? 0) + 1; return a; }, {});
+  console.log("E1_TRUE_COUNTS", JSON.stringify({ total: snapshot.orders.length, ...truth }));
+  expect(snapshot.orders).toHaveLength(328);
+  expect(truth).toEqual({ vanilla: 227, multi_leg: 101 });
+  for (const kind of ["vanilla", "multi_leg"] as const) {
+   const result = searched(await searchOptionBookOrders.execute!({ limit: 6, kind }, CTX));
+   console.log("E1_TOOL_" + kind, JSON.stringify({ totalMatched: result.totalMatched, returned: result.returned }));
+   // The whole filtered set, not the 200-row page it was once counted from.
+   expect(result.totalMatched).toBe(truth[kind]!);
+   expect(result.returned).toBe(6);
+   expect(result.note).toBeUndefined();
+   expect(result.orders.every(o => o.kind === kind)).toBe(true);
+  }
+  // Unfiltered still counts the whole book.
+  expect(searched(await searchOptionBookOrders.execute!({ limit: 6 }, CTX)).totalMatched).toBe(328);
+ } finally { restore(); }
+ // A kind nothing matches is the empty-book note, not a structured error.
+ restore = mockBook([rawFixture(fixture())]);
+ try {
+  ok(await getOrderSnapshot(true));
+  const none = searched(await searchOptionBookOrders.execute!({ limit: 6, kind: "multi_leg" }, CTX));
+  console.log("E1_TOOL_none", JSON.stringify({ totalMatched: none.totalMatched, returned: none.returned, note: none.note }));
+  expect(none.totalMatched).toBe(0);
+  expect(String(none.note)).toContain("Nothing on the book");
+ } finally { restore(); }
+});
+
+test("MINOR1: a taker-SELL view withholds the unit and price on non-6-decimal collateral", () => {
+ // aBasWETH is 18-decimal; sellContractSizeDecimals is UNVERIFIED beyond 6 decimals
+ // (packages/thetanuts/src/quote.ts), and the package's own quote refuses the pair.
+ const sell = view(fixture(false, ABASWETH));
+ expect(sell.side).toBe("sell");
+ expect(sell.contractSizeDecimals).toBeNull();
+ expect(sell.pricePerContractUsd).toBeNull();
+ const quoted = sizeFill(sell, "1", client);
+ console.log("D2_SELL_18DEC", JSON.stringify({ csd: sell.contractSizeDecimals, price: sell.pricePerContractUsd, executable: quoted.executable }));
+ expect(quoted.executable).toBe(false);
+ // 8-decimal collateral is withheld for the same reason.
+ const eight = view(fixture(false, client.chainConfig.tokens.cbBTC.address));
+ expect(eight.contractSizeDecimals).toBeNull();
+ expect(eight.pricePerContractUsd).toBeNull();
+ // The proven 6-decimal unit is still published.
+ const six = view(fixture(false));
+ expect(six.contractSizeDecimals).toBe(6);
+ expect(six.pricePerContractUsd).toBe(decimalString(six.sdkOrder.order.price, 100_000_000n));
+});
+
+test("MINOR3/4: every preview result carries asOf, and market counts are named for what they count", async () => {
+ const restore = mockBook([rawFixture(fixture()), rawFixture(callRow18())], REAL_PRICES);
+ const { previewOptionBookTrade, getMarketData } = await tools();
+ try {
+  const snapshot = ok(await getOrderSnapshot(true));
+  const asOf = snapshot.fetchedAt.toISOString();
+  const executable = previewed(await previewOptionBookTrade.execute!({ instrumentKey: instrumentKey(snapshot.orders[0]!), budget: "1" }, CTX));
+  const refused = previewed(await previewOptionBookTrade.execute!({ instrumentKey: instrumentKey(snapshot.orders[1]!), budget: "0.01" }, CTX));
+  const missing = previewed(await previewOptionBookTrade.execute!({ instrumentKey: "no-such-instrument", budget: "1" }, CTX));
+  console.log("ASOF", JSON.stringify({ executable: executable.asOf, refused: refused.asOf, missing: missing.asOf }));
+  expect(executable).toMatchObject({ found: true, executable: true, asOf });
+  expect(refused).toMatchObject({ found: true, executable: false, asOf });
+  expect(missing).toMatchObject({ found: false, asOf });
+  const market = await getMarketData.execute!({}, CTX);
+  if (!market || !("assets" in market)) throw new Error("expected market data");
+  console.log("MARKET_COUNT_NAME", JSON.stringify(market.assets[0]));
+  expect(market.assets[0]).toHaveProperty("quotedOrders");
+  expect(market.assets[0]).not.toHaveProperty("tradeableOrders");
+ } finally { restore(); }
 });

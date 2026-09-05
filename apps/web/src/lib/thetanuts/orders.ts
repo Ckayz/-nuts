@@ -2,12 +2,12 @@ import "server-only";
 import { z } from "zod";
 import { env } from "@nuts/env/server";
 import { createReadClient, sellContractSizeDecimals, deriveMarkets, takerSide, quoteFill, quoteSellFill, ThetanutsLogicError, type Market, type SellQuoteClient } from "@nuts/thetanuts";
-import type { OrderSnapshot, SdkIncompatible, TradeableOrder } from "./types";
+import type { FeedUnavailable, FeedUnusable, OrderSnapshot, SdkIncompatible, TradeableOrder } from "./types";
 
 export const readClient = createReadClient({ rpcUrl: env.BASE_RPC_URL, referrer: env.THESIS_REFERRER });
 const CACHE_TTL_MS = 20_000;
 let cached: { snapshot: OrderSnapshot; expiresAt: number } | null = null;
-let inFlight: Promise<OrderSnapshot> | null = null;
+let inFlight: Promise<OrderSnapshot | FeedUnusable> | null = null;
 
 export function decimalString(value: bigint, scale: bigint): string {
  const sign = value < 0n ? "-" : "";
@@ -39,15 +39,22 @@ export function buyContractSizeDecimals(collateralDecimals: number | null): numb
 /** The contract-size unit for an order VIEW, where there is no quote to ask.
  *
  * Taker-BUY: the proven-only unit above. Taker-SELL: the unit the package's sell quote
- * would supply (`sellContractSizeDecimals`) — except single-strike calls, the one family
- * `quoteSellFill` refuses outright because the SDK's capacity view and its collateral view
- * disagree there (packages/thetanuts/src/quote.ts). For that family the package supplies
- * no unit, so neither does this view.
+ * would supply (`sellContractSizeDecimals`) — with two withholdings:
+ *  - single-strike calls, the one family `quoteSellFill` refuses outright because the SDK's
+ *    capacity view and its collateral view disagree there (packages/thetanuts/src/quote.ts).
+ *    For that family the package supplies no unit, so neither does this view.
+ *  - collateral that is not 6 decimals. `sellContractSizeDecimals` returns the collateral
+ *    decimals and its own doc says so from SDK-internal consistency only: "UNVERIFIED beyond
+ *    6 decimals: every decoded fill supplied so far uses 6-decimal collateral"
+ *    (packages/thetanuts/src/quote.ts). The BUY side already withholds every unit that no
+ *    decoded fill established (`buyContractSizeDecimals`); the SELL view must not publish a
+ *    unit — or a per-contract price scaled by it — on weaker evidence than the BUY view does.
  */
 function viewContractSizeDecimals(side: "buy" | "sell", isCall: boolean, strikeCount: number, collateralDecimals: number | null): number | null {
  if (side === "buy") return buyContractSizeDecimals(collateralDecimals);
  if (isCall && strikeCount === 1) return null;
- return collateralDecimals === null ? null : sellContractSizeDecimals(collateralDecimals);
+ if (collateralDecimals !== 6) return null;
+ return sellContractSizeDecimals(collateralDecimals);
 }
 
 export function toTradeable(market: Market): TradeableOrder {
@@ -125,20 +132,47 @@ export function isSdkIncompatible(value: object): value is SdkIncompatible {
  return "error" in value && (value as { error?: unknown }).error === "sdk_incompatible";
 }
 
-async function fetchSnapshot(): Promise<OrderSnapshot> {
+export function isFeedUnusable(value: object): value is FeedUnusable {
+ return "error" in value && (value as { error?: unknown }).error === "feed_unusable";
+}
+
+/** True for either reason the book could not be read. Callers must return these verbatim
+ * instead of describing an empty book. */
+export function isFeedUnavailable(value: object): value is FeedUnavailable {
+ return isSdkIncompatible(value) || isFeedUnusable(value);
+}
+
+async function fetchSnapshot(): Promise<OrderSnapshot | FeedUnusable> {
  const [response, data] = await Promise.all([rawOrderApi.request("/"), readClient.api.getMarketData()]);
- const rows = response.data?.orders ?? response.orders ?? [];
- if (!Array.isArray(rows)) throw new Error("Order feed orders must be an array");
+ // No `?? []` fallback: a payload that carries no `orders` array is a feed whose shape this
+ // adapter does not understand. Defaulting it to an empty list produces output byte-identical
+ // to a genuinely empty book, which reads to the model as "there is nothing to trade".
+ const rows = response.data?.orders ?? response.orders;
+ if (!Array.isArray(rows)) {
+  return { error: "feed_unusable", droppedEntries: 0,
+   detail: "The Thetanuts order feed returned no `orders` array, so the OptionBook could not be read. This is a feed/adapter failure, not an empty book." };
+ }
  const orders: TradeableOrder[] = [];
+ // Rows that passed validation AND normalized. Counted separately from `orders`, because
+ // `deriveMarkets` legitimately drops a well-formed row that is expired or has no maker
+ // budget left (packages/thetanuts/src/markets.ts): that is an empty book, not a broken feed.
+ let retainedRows = 0;
  let droppedEntries = 0;
  for (const row of rows) {
   if (!rawOrderRowSchema.safeParse(row).success) { droppedEntries++; continue; }
   try {
    const normalized = rawOrderApi.normalizeOdetteOrder(row);
    orders.push(...deriveMarkets([normalized]).map(toTradeable));
+   retainedRows++;
   } catch {
    droppedEntries++;
   }
+ }
+ // Every row the feed sent was unreadable. The book's contents are entirely lost, so the
+ // result says nothing about what is or is not on the book.
+ if (droppedEntries > 0 && retainedRows === 0) {
+  return { error: "feed_unusable", droppedEntries,
+   detail: `The Thetanuts order feed returned ${rows.length} row(s) and every one failed validation, so the OptionBook could not be read. This is a feed/adapter failure, not an empty book.` };
  }
  return { orders, fetchedAt: new Date(),
   marketData: Object.fromEntries(Object.entries(data.prices).filter(([, price]) => Number.isFinite(price) && price > 0)),
@@ -153,16 +187,22 @@ function liveSnapshot(snapshot: OrderSnapshot): OrderSnapshot {
  return orders.length === snapshot.orders.length ? snapshot : { ...snapshot, orders };
 }
 
-export async function getOrderSnapshot(force = false): Promise<OrderSnapshot | SdkIncompatible> {
+export async function getOrderSnapshot(force = false): Promise<OrderSnapshot | FeedUnavailable> {
 	const incompatible = sdkCompatibility();
 	// Before the cache and before any fetch: a broken adapter must never be cached, and
 	// must never be reported through the "nothing matches" path.
 	if (incompatible) return incompatible;
 	if (!force && cached && cached.expiresAt > Date.now()) return liveSnapshot(cached.snapshot);
-	if (!force && inFlight) return liveSnapshot(await inFlight);
+	if (!force && inFlight) {
+		const pending = await inFlight;
+		return isFeedUnusable(pending) ? pending : liveSnapshot(pending);
+	}
 
 	const request = fetchSnapshot()
 		.then((snapshot) => {
+			// An unusable feed is never cached: the next call must re-read it, exactly as a
+			// broken adapter does.
+			if (isFeedUnusable(snapshot)) return snapshot;
 			cached = { snapshot, expiresAt: Math.min(
                 snapshot.fetchedAt.getTime() + CACHE_TTL_MS,
                 ...snapshot.orders.map(order => Date.parse(order.orderExpiresAt)),
@@ -182,27 +222,34 @@ export interface OrderFilters {
  asset?: string;
  side?: "buy" | "sell";
  isCall?: boolean;
+ /** Product shape. Filtered here, with every other constraint, so `totalMatched` counts the
+  * whole matching set rather than whatever survived `limit`. */
+ kind?: "vanilla" | "multi_leg";
  expiryAfter?: Date;
  expiryBefore?: Date;
  limit?: number;
 }
+/** Every filter is applied BEFORE `limit`, so `totalMatched` is the size of the real
+ * matching set and `orders` is a page of it. A caller that filters the returned page
+ * afterwards would report the page's size as the book's — see the `kind` filter above. */
 export async function searchOrders(filters: OrderFilters = {}) {
  const snapshot = await getOrderSnapshot();
- if (isSdkIncompatible(snapshot)) return snapshot;
+ if (isFeedUnavailable(snapshot)) return snapshot;
  const matched = snapshot.orders.filter(o =>
   (!filters.asset || o.asset === filters.asset.toUpperCase()) &&
   (!filters.side || o.side === filters.side) &&
   (filters.isCall === undefined || o.isCall === filters.isCall) &&
+  (!filters.kind || o.kind === filters.kind) &&
   (!filters.expiryAfter || new Date(o.expiryAt) >= filters.expiryAfter) &&
   (!filters.expiryBefore || new Date(o.expiryAt) <= filters.expiryBefore));
  return { orders: matched.slice(0, filters.limit ?? 25), fetchedAt: snapshot.fetchedAt, totalMatched: matched.length, droppedEntries: snapshot.droppedEntries };
 }
 
 export async function getAvailableAssets(): Promise<
-	Array<{ asset: string; orders: number; calls: number; puts: number; spotUsd: number | null }> | SdkIncompatible
+	Array<{ asset: string; orders: number; calls: number; puts: number; spotUsd: number | null }> | FeedUnavailable
 > {
 	const snapshot = await getOrderSnapshot();
-	if (isSdkIncompatible(snapshot)) return snapshot;
+	if (isFeedUnavailable(snapshot)) return snapshot;
 	const byAsset = new Map<string, { orders: number; calls: number; puts: number }>();
 
 	for (const o of snapshot.orders) {
@@ -277,6 +324,57 @@ export function sizeFill(order: TradeableOrder, budgetAmount: string, client: Se
    reason: error instanceof ThetanutsLogicError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : "Quote unavailable",
    raw: null };
  }
+}
+
+/** Human message for a collateral token this code cannot price in USD. */
+export const COLLATERAL_USD_UNAVAILABLE = "Collateral USD valuation unavailable; cannot verify the 10 USD risk limit.";
+
+/**
+ * Where one unit of a COLLATERAL token's USD price comes from.
+ *
+ * This exists because the two symbol spaces do not intersect and never can. Spot prices
+ * arrive from `client.api.getMarketData()`, whose `prices` object is built from a fixed
+ * list of UNDERLYING ASSET symbols (SDK dist/index.js:2604-2617: `ETH`, `BTC`, `SOL`,
+ * `XRP`, `BNB`, `AVAX`, plus whatever the upstream `market_data` object carries).
+ * Collateral symbols come from `chainConfig.tokens` (SDK dist/index.js:24-64: `USDC`,
+ * `WETH`, `cbBTC`, `aBasWETH`, `aBascbBTC`, `aBasUSDC`, `cbDOGE`, `cbXRP`). Measured live
+ * 2026-09-05: `Object.keys(prices)` = ["ETH","BTC","SOL","XRP","BNB","AVAX"], and no
+ * collateral symbol appears in it. Indexing the price map by a collateral symbol therefore
+ * misses every time, which is a silent refusal rather than a valuation.
+ *
+ * Only tokens listed here can be priced. Everything else is refused with
+ * `COLLATERAL_USD_UNAVAILABLE`; nothing is ever valued at zero by omission.
+ *
+ * TODO-OWNER: USD stablecoin collateral is valued at exactly 1 USD per token. That is an
+ * assumption about the peg, not a measurement — neither the SDK nor the OptionBook feed
+ * publishes a USDC/USD or aBasUSDC/USD price, so a depeg would understate the risk this
+ * limit is meant to cap. Supply a live stablecoin price source if the owner wants depeg
+ * risk inside the agent's USD ceiling.
+ *
+ * TODO-OWNER: wrapped and bridged majors (`WETH`, `aBasWETH`, `cbBTC`, `aBascbBTC`,
+ * `cbDOGE`, `cbXRP`) are deliberately ABSENT, so an order collateralised in one is refused
+ * rather than valued. Pricing them would need two things this code cannot cite:
+ *  1. a token -> underlying relation. SDK token metadata carries only
+ *     `{address, symbol, decimals}` (dist/index.js:24-64); `buildPriceFeedSymbolMap`
+ *     (dist/index.js:290-299) maps a FEED ADDRESS to an asset symbol and mentions no token;
+ *     and the SDK documents no symbol-prefix rule (no prefix-stripping code exists in the
+ *     bundle). An order's own `priceFeed` names the OPTION's underlying, not its
+ *     collateral's — a live ETH put is collateralised in aBasUSDC — so it cannot supply one.
+ *  2. an exchange rate. Even granting the relation, one aBasWETH is not defined anywhere in
+ *     the SDK as one ETH; assuming 1:1 would be inventing a rate.
+ * Supply an owner-approved collateral/USD source (or an explicit wrapper rate) to enable them.
+ */
+export const COLLATERAL_USD_SOURCES: Readonly<Record<string, { readonly kind: "usd_peg" }>> = {
+ USDC: { kind: "usd_peg" },
+ aBasUSDC: { kind: "usd_peg" },
+};
+
+/** USD price of ONE unit of a collateral token, or `null` when this code cannot justify one. */
+export function collateralUsdPrice(symbol: string | null): number | null {
+ if (symbol === null) return null;
+ // Object.hasOwn: a symbol like "constructor" must not resolve through the prototype chain.
+ if (!Object.hasOwn(COLLATERAL_USD_SOURCES, symbol)) return null;
+ return COLLATERAL_USD_SOURCES[symbol]?.kind === "usd_peg" ? 1 : null;
 }
 
 /** Exact decimal multiplication for a supplied token/USD quote; no peg or wrapper rate inferred. */

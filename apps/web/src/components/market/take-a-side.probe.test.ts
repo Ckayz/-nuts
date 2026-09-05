@@ -318,3 +318,202 @@ describe("C#2: a remount must not put a second fill in front of the user", () =>
 		expect(primary(again).text).toBe("Trade");
 	});
 });
+
+// ----------------------------------------------- C-R2: PRD 14's 30-second window
+
+/**
+ * C-R2 (confirming round, MAJOR). The ticket sent whatever the server had
+ * prepared, however old. `rg preparedAt|fillIsStale` in this component returned
+ * no matches, and the reviewer's probe broadcast 31-second-old calldata with
+ * the maker signature still valid:
+ *   MARKET_STALE {"sends":[{"to":"0x1bdff855…","data":"0xSTALE"}],"prepares":1}
+ */
+describe("C-R2: the ticket may not broadcast calldata older than 30 seconds", () => {
+	const at = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
+	const fillAt = (data: `0x${string}`, expected: QuoteRaw, preparedAt: string) =>
+		({
+			ok: true,
+			stage: "fill",
+			fill: { to: "0x1bdff855d6811728acadc00989e79143a2bdfded" as const, data, value: "0" as const },
+			token: data === "0xFRESH" ? "tok2" : "tok",
+			thesisId: null,
+			expected,
+			signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+			preparedAt,
+			note: "",
+		}) satisfies PrepareResult;
+
+	test("MARKET_STALE — 31 seconds old: re-prepare, then send the FRESH calldata", async () => {
+		reset();
+		let call = 0;
+		replies.prepare = async () => {
+			call += 1;
+			return call === 1 ? fillAt("0xSTALE", RAW_BUY, at(31_000)) : fillAt("0xFRESH", RAW_BUY, at(0));
+		};
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+		expect({ prepares: calls.prepares.length, sends: calls.sends.map((s) => s.data) }).toEqual({
+			prepares: 2,
+			sends: ["0xFRESH"],
+		});
+		// Recorded with the ticket that BUILT the sent calldata, not the stale one.
+		expect(calls.records.map((r) => r.token)).toEqual(["tok2"]);
+	});
+
+	test("a fill inside the window is sent with no extra round trip", async () => {
+		reset();
+		replies.prepare = async () => fillAt("0xBUY_A", RAW_BUY, at(29_000));
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+		expect({ prepares: calls.prepares.length, sends: calls.sends.map((s) => s.data) }).toEqual({
+			prepares: 1,
+			sends: ["0xBUY_A"],
+		});
+	});
+
+	test("a refresh that is ITSELF stale sends nothing", async () => {
+		reset();
+		replies.prepare = async () => fillAt("0xSTALE", RAW_BUY, at(31_000));
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+		expect({ prepares: calls.prepares.length, sends: calls.sends }).toEqual({ prepares: 2, sends: [] });
+		expect(h.text()).toContain("could not be refreshed inside the 30 seconds");
+	});
+
+	test("an absent preparedAt is treated as stale — fail closed", async () => {
+		reset();
+		let call = 0;
+		replies.prepare = async () => {
+			call += 1;
+			if (call === 1) {
+				const { preparedAt: _drop, ...rest } = fillAt("0xNOSTAMP", RAW_BUY, at(0));
+				return rest as unknown as PrepareResult;
+			}
+			return fillAt("0xFRESH", RAW_BUY, at(0));
+		};
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+		expect({ prepares: calls.prepares.length, sends: calls.sends.map((s) => s.data) }).toEqual({
+			prepares: 2,
+			sends: ["0xFRESH"],
+		});
+	});
+
+	test("a refresh that arrives after the ticket moved sends nothing", async () => {
+		reset();
+		const trade = context();
+		let call = 0;
+		const held = deferred<PrepareResult>();
+		replies.prepare = () => {
+			call += 1;
+			return call === 1 ? Promise.resolve(fillAt("0xSTALE", RAW_BUY, at(31_000))) : held.promise;
+		};
+		const h = mountTicket(trade);
+		h.click(primary(h));
+		await h.settle();
+		const moved: TradePanelContext = { ...trade, structureId: "s9", quote: { ...trade.quote, structureId: "s9" } };
+		h.setProps({ ticket: moved.quote.ticket, structureLabel: moved.structureLabel, expiryLabel: moved.expiryLabel, trade: moved });
+		await h.settle();
+		held.resolve(fillAt("0xFRESH", RAW_BUY, at(0)));
+		await h.settle();
+		expect(calls.sends).toEqual([]);
+		expect(h.text()).toContain("The ticket changed while this was being prepared");
+	});
+});
+
+// -------------------------- C-R3: the approval is signed for what the panel shows
+
+/**
+ * C-R3 (confirming round, MAJOR). `prepare.ts:155-185` issues an approval for
+ * EXACTLY the fresh quote's debit, and the ticket signed it before comparing
+ * that quote with the panel — measured on a $5.00 panel:
+ *   APPROVE_BEFORE_COMPARE {"sends":1,"sentAllowance":"20000000"}
+ */
+describe("C-R3: no allowance is signed before the economics are compared", () => {
+	const RAW_BIG: QuoteRaw = { ...RAW_BUY, budget: "20000000", numContracts: "40000", premiumGross: "20000000", debit: "20000000", maxLossUsd8: "2000000000" };
+	const USDC_TOKEN = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+	const BOOK = "1bdff855d6811728acadc00989e79143a2bdfded";
+	const approveFor = (expected: QuoteRaw, amount: bigint, calldataAmount = amount) =>
+		({
+			ok: true,
+			stage: "approve",
+			approve: {
+				to: USDC_TOKEN as `0x${string}`,
+				data: `0x095ea7b3${"0".repeat(24)}${BOOK}${calldataAmount.toString(16).padStart(64, "0")}` as `0x${string}`,
+				value: "0" as const,
+			},
+			allowance: {
+				amount: amount.toString(),
+				spender: `0x${BOOK}`,
+				tokenAddress: USDC_TOKEN,
+				tokenSymbol: "USDC",
+				tokenDecimals: 6,
+			},
+			expected,
+			note: "Approve USDC first.",
+		}) satisfies PrepareResult;
+
+	test("APPROVE_BEFORE_COMPARE — a 20 USDC approval under a $5 panel is not sent", async () => {
+		reset();
+		replies.prepare = async () => approveFor(RAW_BIG, 20_000_000n);
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+		expect(calls.sends).toEqual([]);
+		expect(h.text()).toContain("The price moved while this was prepared");
+		// The panel was refreshed from the server, so the next click signs for
+		// figures the user has seen.
+		expect(calls.quotes.length).toBe(1);
+	});
+
+	test("an approval for the SHOWN economics is sent, and its note names the decoded allowance", async () => {
+		reset();
+		let call = 0;
+		// The SECOND preparation is held, so the card can be inspected while the
+		// approval is on chain and the fill has not been built yet.
+		const second = deferred<PrepareResult>();
+		replies.prepare = () => {
+			call += 1;
+			return call === 1 ? Promise.resolve(approveFor(RAW_BUY, 5_000_000n)) : second.promise;
+		};
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+		const approval = calls.sends[0];
+		expect({
+			sends: calls.sends.length,
+			// The bytes carry exactly the amount the note printed.
+			allowance: approval === undefined ? null : BigInt(`0x${approval.data.slice(-64)}`).toString(),
+			note: h.text().includes("This approval allows 5 USDC"),
+		}).toEqual({ sends: 1, allowance: "5000000", note: true });
+
+		second.resolve({
+			ok: true,
+			stage: "fill",
+			fill: { to: "0x1bdff855d6811728acadc00989e79143a2bdfded" as const, data: "0xBUY_A" as const, value: "0" as const },
+			token: "tok",
+			thesisId: null,
+			expected: RAW_BUY,
+			signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+			preparedAt: new Date().toISOString(),
+			note: "",
+		} satisfies PrepareResult);
+		await h.settle();
+		expect(calls.sends.map((s) => s.data).slice(1)).toEqual(["0xBUY_A"]);
+	});
+
+	test("an approval whose BYTES disagree with the printed amount is not sent", async () => {
+		reset();
+		// The server says 5 USDC; the calldata allows 20.
+		replies.prepare = async () => approveFor(RAW_BUY, 5_000_000n, 20_000_000n);
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+		expect(calls.sends).toEqual([]);
+		expect(h.text()).toContain("Nothing was sent");
+	});
+});

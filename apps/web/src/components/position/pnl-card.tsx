@@ -72,7 +72,7 @@ function CompactCard({ card, href }: { card: PnlCardView; href?: boolean }) {
 				    no instrument has "BTC" as its whole title, and the mockup never
 				    prints the same word twice in one row. */}
 				{card.asset === null || card.asset === card.instrumentLabel ? null : (
-					<Avatar initials={card.asset} tone="asset" size={26} />
+					<Avatar asset={card.asset} initials={card.asset} tone="asset" size={26} />
 				)}
 				<span className="tc-inst">{card.instrumentLabel}</span>
 				<Chip flat={card.statusTone === "settled"}>{card.statusLabel}</Chip>
@@ -139,7 +139,7 @@ function ShareCard({ card }: { card: PnlCardView }) {
 		<div className="frame">
 			<div className="sc">
 				<div className="sc-top">
-					<Avatar initials={card.owner.initials} size={40} />
+					<Avatar seed={card.owner.avatarSeed} initials={card.owner.initials} size={40} />
 					<div style={{ minWidth: 0 }}>
 						<div className="sc-name">{card.owner.displayName}</div>
 						<Chip flat={card.statusTone === "settled"}>{card.statusLabel}</Chip>
@@ -148,7 +148,7 @@ function ShareCard({ card }: { card: PnlCardView }) {
 				</div>
 
 				<div className="sc-inst">
-					{card.asset === null ? null : <Avatar initials={card.asset} tone="asset" size={30} />}
+					{card.asset === null ? null : <Avatar asset={card.asset} initials={card.asset} tone="asset" size={30} />}
 					<b>{card.instrumentLabel}</b>
 				</div>
 				<div className="sc-strikes num">{subLine}</div>

@@ -93,7 +93,7 @@ export function PositionPage({ page, rail }: { page: PositionPageView; rail: The
 					</div>
 					<div className="card-b" style={{ padding: "0 20px 16px" }}>
 						<Link className="row owner-row" href={`/u/${page.ownerHandle}`}>
-							<Avatar initials={owner.initials} size={40} />
+							<Avatar seed={owner.avatarSeed} initials={owner.initials} size={40} />
 							<span className="t">
 								<b>{owner.displayName}</b>
 								<i className="num">

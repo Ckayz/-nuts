@@ -96,6 +96,7 @@ export function creator(value: Domain.Creator): View.Creator {
     const handleLabel = /^0x[0-9a-f]{40}$/i.test(value.handle) ? fragment(value.handle) : value.handle;
     return { id: value.id, followerCount: value.followers ?? undefined, handle: value.handle, handleLabel,
         displayName: value.displayName ?? (address === null ? handleLabel : fragment(address)), initials: value.initials,
+        avatarSeed: value.walletAddress ? value.walletAddress.toLowerCase() : value.id || value.handle,
         walletAddress: value.walletAddress ? fragment(value.walletAddress) : value.mockWalletFragment ?? undefined,
         sinceLabel: value.sinceLabel ?? undefined, winRatePct: value.winRatePct ?? undefined, thesesCount: value.thesesCount ?? undefined,
         followers: value.followers === null ? undefined : new Intl.NumberFormat("en-US").format(value.followers),

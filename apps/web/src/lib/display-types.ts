@@ -30,6 +30,8 @@ export interface Creator {
     displayName: string;
     /** Two-letter monogram used by the `.av` avatar. */
     initials: string;
+    /** Full lowercase wallet address, else creator id, else handle; stable across profile edits. */
+    avatarSeed: string;
     walletAddress?: string;
     /** Rendered verbatim next to the address, e.g. "since Jun 26". */
     sinceLabel?: string;

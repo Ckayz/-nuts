@@ -27,12 +27,12 @@ export function CreatorStats({ creator, following = false, signedIn = false, dat
   {profile && creator.biggestLossUsd !== undefined ? <span className="tile"><i>Biggest loss</i><b className="loss num">{signedUsd(creator.biggestLossUsd)}</b></span> : null}
  </>;
  const followers = state.followers === undefined ? creator.followers : new Intl.NumberFormat("en-US").format(state.followers);
- if (compact) return <div className="row"><Avatar initials={creator.initials} size="s" /><span className="t"><Link href={`/u/${creator.handle}`}><b>{creator.displayName}</b></Link><i className={`num ${pnlClass(creator.netPnlUsd) === "bear" ? "loss" : pnlClass(creator.netPnlUsd) === "bull" ? "gain" : "mut"}`}>{signedUsd(creator.netPnlUsd)}</i></span>{follow}</div>;
+ if (compact) return <div className="row"><Avatar seed={creator.avatarSeed} initials={creator.initials} size="s" /><span className="t"><Link href={`/u/${creator.handle}`}><b>{creator.displayName}</b></Link><i className={`num ${pnlClass(creator.netPnlUsd) === "bear" ? "loss" : pnlClass(creator.netPnlUsd) === "bull" ? "gain" : "mut"}`}>{signedUsd(creator.netPnlUsd)}</i></span>{follow}</div>;
  return <section className={profile ? "card pad profile-header" : "card creator-card"}>
   {!profile ? <div className="card-h"><h3>Creator</h3><span className="x">{follow}</span></div> : null}
   <div className={profile ? "prof" : "card-b"}>
    <div className={profile ? "profile-avatar" : "row"}>
-    <Avatar initials={creator.initials} size={profile ? "lg" : undefined} />
+    <Avatar seed={creator.avatarSeed} initials={creator.initials} size={profile ? "lg" : undefined} />
     {!profile ? <span className="t"><Link href={`/u/${creator.handle}`}><b>{creator.displayName}</b></Link><i>{[creator.walletAddress, creator.sinceLabel].filter(Boolean).join(" · ")}</i></span> : null}
    </div>
    {profile ? <><div className="profile-identity"><h1>{creator.displayName}</h1><div className="handle">@{creator.handleLabel}</div><div className="meta num">{[creator.walletAddress, creator.sinceLabel].filter(Boolean).join(" · ")}</div><div className="counts">{followers !== undefined ? <span><b className="num">{followers}</b> Followers</span> : null}{creator.thesesCount !== undefined ? <span><b className="num">{creator.thesesCount}</b> Theses</span> : null}</div></div><div className="prof-act">{!self ? follow : null}</div></> : null}

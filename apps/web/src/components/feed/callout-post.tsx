@@ -47,7 +47,7 @@ export function CalloutPost({
 	return (
 		<article className="post" aria-labelledby={`post-${thesis.slug}`}>
 			<Link href={`/u/${thesis.creator.handle}`} aria-label={thesis.creator.displayName}>
-				<Avatar initials={thesis.creator.initials} size={compact ? 34 : 40} />
+				<Avatar seed={thesis.creator.avatarSeed} initials={thesis.creator.initials} size={compact ? 34 : 40} />
 			</Link>
 			<div className="post-main">
 				<div className="p-head">

@@ -17,13 +17,13 @@ export function walletQuery(query: string): boolean {
 }
 export interface SearchResults {
 	markets: { slug: string; asset: string; name: string }[];
-	people: { handle: string; handleLabel: string; displayName: string; initials: string; href: `/u/${string}` }[];
+	people: { handle: string; handleLabel: string; displayName: string; initials: string; avatarSeed: string; href: `/u/${string}` }[];
 	unavailable?: boolean;
 }
 export function personResult(value: Creator): SearchResults["people"][number] {
 	const view = creator(value);
 	return { handle: view.handle, handleLabel: view.handleLabel, displayName: view.displayName,
-		initials: view.initials, href: `/u/${encodeURIComponent(view.handle)}` };
+		initials: view.initials, avatarSeed: view.avatarSeed, href: `/u/${encodeURIComponent(view.handle)}` };
 }
 export function searchMockPeople(query: string, people: Creator[]): SearchResults["people"] {
 	return people.filter(person =>

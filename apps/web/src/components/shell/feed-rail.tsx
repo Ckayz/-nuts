@@ -23,7 +23,7 @@ export function FeedRail({ posts, limit = 5 }: { posts: Thesis[]; limit?: number
 			<div className="card-b">
 				{posts.slice(0, limit).map((post) => (
 					<Link className="rail-post" href={`/t/${post.slug}`} key={post.slug}>
-						<Avatar initials={post.creator.initials} size={30} />
+						<Avatar seed={post.creator.avatarSeed} initials={post.creator.initials} size={30} />
 						<div className="t">
 							<div className="n">
 								{post.creator.handleLabel}

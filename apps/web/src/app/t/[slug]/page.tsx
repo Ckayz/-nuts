@@ -58,7 +58,7 @@ export default async function ThesisPage({ params }: { params: Promise<{ slug: s
   <CreatorStats creator={t.creator} {...social} />
  </>}>
   <article className="post thread-post">
-   <Link href={`/u/${t.creator.handle}`} aria-label={t.creator.displayName}><Avatar initials={t.creator.initials} /></Link>
+   <Link href={`/u/${t.creator.handle}`} aria-label={t.creator.displayName}><Avatar seed={t.creator.avatarSeed} initials={t.creator.initials} /></Link>
    <div className="post-main">
     <div className="p-head"><Link className="p-name" href={`/u/${t.creator.handle}`}>{t.creator.displayName}</Link><span className="p-handle">@{t.creator.handleLabel}</span><span className="p-time">{t.postedLabel}</span>
      {t.status && t.statusLabel ? <StatusChip status={t.status} label={t.statusLabel} /> : null}

@@ -15,7 +15,7 @@ export function NewCalloutsBar() {
 		<div className="newbar">
 			<span className="st" aria-hidden="true">
 				{newCallouts.avatars.map((c) => (
-					<Avatar key={c.handle} initials={c.initials} size={26} />
+					<Avatar key={c.handle} seed={c.avatarSeed} initials={c.initials} size={26} />
 				))}
 			</span>
 			<span>

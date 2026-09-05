@@ -175,3 +175,65 @@ export const agentUsage = pgTable(
 	},
 	(t) => [uniqueIndex("agent_usage_subject_day_key").on(t.subjectKind, t.subject, t.day)],
 );
+
+/**
+ * A standing instruction the agent may act on without the user present
+ * (owner ruling 2026-09-05: autonomous trading is opt-in, manual stays default).
+ *
+ * The floor is the user's, not the agent's. Every autonomous trade therefore has
+ * a reason the user authored, which is what makes the log auditable rather than
+ * a list of things that happened to them.
+ *
+ * Money is decimal strings, matching the rest of the agent tables and the
+ * ThesisAiContext contract. Prices are USD; budgets are in the order's collateral
+ * token and validated against the on-chain cap at execution time, never here.
+ */
+export const agentHedgeRules = pgTable(
+	"agent_hedge_rules",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		walletAddress: walletAddress().notNull(),
+
+		/** Underlying to watch, e.g. "ETH". */
+		asset: text("asset").notNull(),
+		/**
+		 * Spot at or below which the rule fires. Stored as a decimal string so no
+		 * float rounding can move a trigger boundary.
+		 */
+		floorUsd: text("floor_usd").notNull(),
+		/** Premium to spend per trigger, decimal string. */
+		budgetPerTrigger: text("budget_per_trigger").notNull(),
+		/** Ceiling across a UTC day, decimal string. Independent of the on-chain cap. */
+		dailyCapUsd: text("daily_cap_usd").notNull(),
+
+		/**
+		 * The on-chain spend permission this rule executes under. The contract is the
+		 * authoritative limit; this column only records which permission to use, so a
+		 * row edited in the database cannot widen what the agent may spend.
+		 */
+		permissionRef: text("permission_ref"),
+		/** Smart account the trade executes as. The position lands here, not with the agent. */
+		accountAddress: text("account_address").notNull(),
+
+		status: text("status", {
+			enum: ["armed", "paused", "exhausted", "revoked"],
+		})
+			.notNull()
+			.default("armed"),
+
+		lastFiredAt: timestamp("last_fired_at", { withTimezone: true }),
+		/** UTC day the spend counter belongs to, YYYY-MM-DD. */
+		spentDay: text("spent_day"),
+		/** Spent within `spentDay`, decimal string. Reset when the day rolls over. */
+		spentToday: text("spent_today").notNull().default("0"),
+
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [
+		index("agent_hedge_rules_wallet_idx").on(t.walletAddress, t.createdAt),
+		// The watcher reads only armed rules, on every tick.
+		index("agent_hedge_rules_status_idx").on(t.status, t.asset),
+	],
+);
+

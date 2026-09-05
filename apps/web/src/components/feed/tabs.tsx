@@ -20,9 +20,12 @@ export function tabKey(key: string, current: number, count: number): number | nu
  * filter row it puts on the right (`.pill`).
  *
  */
-export function TabHeading({ id, labels, selected, onSelect, variant = "tabs" }: {
+export function TabHeading({ id, labels, selected, onSelect, variant = "tabs", label }: {
 	id: string; labels: readonly string[]; selected: number; onSelect: (index: number) => void;
 	variant?: "tabs" | "pills";
+	/** Accessible name for the tablist. Defaults to the first tab's label, which
+	 *  is what every caller got before this prop existed. */
+	label?: string;
 }) {
 	function keyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
 		const next = tabKey(event.key, index, labels.length);
@@ -32,12 +35,12 @@ export function TabHeading({ id, labels, selected, onSelect, variant = "tabs" }:
 		const target = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next];
 		target?.focus();
 	}
-	if (variant === "pills") return <div className="pills">{labels.map((label, index) => <button key={label} type="button" className="pill" aria-pressed={selected === index} onClick={() => onSelect(index)}>{label}</button>)}</div>;
-	return <div className="tabs" role="tablist" aria-label={labels[0]}>
-		{labels.map((label, index) => <button key={label} type="button"
+	if (variant === "pills") return <div className="pills">{labels.map((text, index) => <button key={text} type="button" className="pill" aria-pressed={selected === index} onClick={() => onSelect(index)}>{text}</button>)}</div>;
+	return <div className="tabs" role="tablist" aria-label={label ?? labels[0]}>
+		{labels.map((text, index) => <button key={text} type="button"
 			id={`${id}-tab-${index}`} role="tab" aria-selected={selected === index}
 			aria-controls={`${id}-panel`} tabIndex={selected === index ? 0 : -1}
-			onClick={() => onSelect(index)} onKeyDown={event => keyDown(event, index)}>{label}</button>)}
+			onClick={() => onSelect(index)} onKeyDown={event => keyDown(event, index)}>{text}</button>)}
 	</div>;
 }
 

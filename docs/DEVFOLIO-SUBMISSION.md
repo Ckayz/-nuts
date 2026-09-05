@@ -32,3 +32,7 @@ Read live from Devfolio's own submission guide on 2026-09-05 19:5x via the Devfo
 - The two required fields: the draft copy above (owner edits).
 - Repo: `https://github.com/Ckayz/-nuts` (public at submission time — confirm).
 - Filing path: `mcp__devfolio__getSignedUploadUrl` per image → upload → `mcp__devfolio__updateHackathonProject` with name, tagline, hashtags, pictures, the two fields, `tracksToApplyTo`, repo link → the owner presses submit in Devfolio (or asks Claude to). Nothing is uploaded or written to the draft until the owner says so.
+
+
+## SUBMITTED 2026-09-05 22:50 +0800 (published_at 14:50:20Z, commit "Submit Thesis.fun: copy, six screenshots, tracks")
+Verified by `getMyHackathonProject`: status `publish`, team status `submit`; tagline "Say it. Trade it. Real onchain options on Base." (owner's words, 47 chars); six pictures (`docs/screenshots/01…06`); both organizer fields answered in Markdown; hashtags Thetanuts, Base, Next.js, wagmi, viem, Drizzle, Supabase, Bun, AI SDK; link `https://github.com/Ckayz/-nuts`; platform Web; tracks BEST PRODUCT BUILT ON THE THETANUTS SDK + AI × OPTIONS with applications. Not set: video, cover image, favicon (optional). Edits after submission go through `updateHackathonProject` with a new commit message.

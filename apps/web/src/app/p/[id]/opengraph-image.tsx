@@ -1,4 +1,5 @@
 import { ogFonts } from "@/lib/og-fonts";
+import { ogText } from "@/lib/og-text";
 import { ImageResponse } from "next/og";
 import { notFound } from "next/navigation";
 import { positionPageData } from "@/lib/page-data";
@@ -93,10 +94,10 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 								fontWeight: 700,
 							}}
 						>
-							{card.owner.initials}
+							{ogText(card.owner.initials)}
 						</div>
 						<div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-							<span style={{ fontSize: 26, fontWeight: 700 }}>{card.owner.displayName}</span>
+							<span style={{ fontSize: 26, fontWeight: 700 }}>{ogText(card.owner.displayName)}</span>
 							<span
 								style={{
 									display: "flex",
@@ -110,31 +111,31 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 									color: settled ? MUTED : ACCENT_LIFT,
 								}}
 							>
-								{card.statusLabel}
+								{ogText(card.statusLabel)}
 							</span>
 						</div>
-						<span style={{ marginLeft: "auto", fontSize: 22, color: MUTED }}>{card.dateLabel}</span>
+						<span style={{ marginLeft: "auto", fontSize: 22, color: MUTED }}>{ogText(card.dateLabel)}</span>
 					</div>
 
 					<div style={{ display: "flex", marginTop: 12, fontSize: 26, fontWeight: 700, flexShrink: 0 }}>
-						{card.instrumentLabel}
+						{ogText(card.instrumentLabel)}
 					</div>
 					<div style={{ display: "flex", marginTop: 6, fontSize: 18, color: MUTED, flexShrink: 0 }}>
-						{[card.strikesLabel, card.expiryFullLabel, card.sideLabel, "Base"].filter(Boolean).join(" · ")}
+						{ogText([card.strikesLabel, card.expiryFullLabel, card.sideLabel, "Base"].filter(Boolean).join(" · "))}
 					</div>
 
 					<div style={{ display: "flex", alignItems: "baseline", gap: 20, marginTop: 10, flexShrink: 0 }}>
 						<span style={{ fontSize: 56, fontWeight: 700, letterSpacing: "-0.035em", color: pnlColor }}>
-							{card.pnl.signed2}
+							{ogText(card.pnl.signed2)}
 						</span>
 						{card.pnlPctLabel ? (
-							<span style={{ fontSize: 28, fontWeight: 700 }}>({card.pnlPctLabel})</span>
+							<span style={{ fontSize: 28, fontWeight: 700 }}>({ogText(card.pnlPctLabel)})</span>
 						) : null}
 					</div>
 					<div style={{ display: "flex", marginTop: 4, fontSize: 18, color: MUTED, flexShrink: 0 }}>
-						{card.pnlLabel}
+						{ogText(card.pnlLabel)}
 					</div>
-					<div style={{ display: "flex", marginTop: 6, marginBottom: 10, fontSize: 16, color: MUTED, flexShrink: 0 }}>{card.pnlBasisLabel}</div>
+					<div style={{ display: "flex", marginTop: 6, marginBottom: 10, fontSize: 16, color: MUTED, flexShrink: 0 }}>{ogText(card.pnlBasisLabel)}</div>
 
 					<div
 						style={{
@@ -160,8 +161,8 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 									borderLeft: index === 0 ? "none" : `1px solid ${LINE}`,
 								}}
 							>
-								<span style={{ fontSize: 18, color: MUTED }}>{stat.label}</span>
-								<span style={{ fontSize: 24, fontWeight: 700 }}>{stat.value}</span>
+								<span style={{ fontSize: 18, color: MUTED }}>{ogText(stat.label)}</span>
+								<span style={{ fontSize: 24, fontWeight: 700 }}>{ogText(stat.value)}</span>
 							</div>
 						))}
 					</div>
@@ -171,7 +172,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 					<span style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.03em" }}>thesis.fun</span>
 					{/* Says "verified" only when the receipt says so (PRD 7.3). */}
 					<span style={{ marginLeft: "auto", fontSize: 22, fontWeight: 600, color: "rgba(255,255,255,.72)" }}>
-						{card.verified ? "Verified onchain · Base" : "Base · not confirmed yet"}
+						{ogText(card.verified ? "Verified onchain · Base" : "Base · not confirmed yet")}
 					</span>
 				</div>
 			</div>

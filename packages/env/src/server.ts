@@ -125,6 +125,29 @@ export const env = createEnv({
 		AGENT_GATE_MODEL: z.string().min(1).default("anthropic/claude-haiku-4.5"),
 
 		/**
+		 * C-P2-2 (one-shot review pass 2, 2026-09-06). The operator secret that
+		 * unlocks `GET /api/agent/health?probe=1`, presented as the
+		 * `x-agent-probe-token` header.
+		 *
+		 * OPTIONAL, and its absence is the SAFE state: with no value configured
+		 * the paid probe answers 403 for everyone and calls no model at all. It
+		 * exists because that endpoint used to make one real model call per model
+		 * for any anonymous request, bounded only by a 60-second process-local
+		 * cache — which a second instance does not share — against the owner's
+		 * ruling of 2026-09-06 03:4x ("don't spam it and finish his credits").
+		 *
+		 * The plain `GET /api/agent/health` is unaffected: it stays public, calls
+		 * nothing and is what an uptime monitor polls.
+		 *
+		 * A value shorter than 16 characters is REFUSED here rather than
+		 * silently ignored, so a half-configured deployment fails loudly at boot
+		 * instead of believing it has a fence. `lib/agent/health.ts` checks the
+		 * same floor again, so the module fails closed on its own.
+		 * TODO-OWNER: 16 is a floor, not the owner's number.
+		 */
+		AGENT_HEALTH_PROBE_TOKEN: z.string().min(16).optional(),
+
+		/**
 		 * Neynar API key for the "From Farcaster" rail (sent as the `x-api-key`
 		 * header, docs.neynar.com/reference/search-casts).
 		 *

@@ -16,6 +16,8 @@
  * process-wide in bun (measured by lane C), so the probe is a PARAMETER, never a
  * mocked import.
  */
+import { timingSafeEqual } from "node:crypto";
+
 import type { AgentErrorClass } from "./errors";
 import { classifyAgentError } from "./errors";
 import { type ConfiguredModel, providerModelProblem, providerName } from "./model-config";
@@ -28,6 +30,51 @@ import { type ConfiguredModel, providerModelProblem, providerName } from "./mode
  * TODO-OWNER: 60 seconds is provisional and nobody's number yet.
  */
 export const PROBE_CACHE_MS = 60_000;
+
+/**
+ * C-P2-2 (lane C pass 2, MAJOR). The header an operator presents to run a paid
+ * probe, and the shortest secret this module will accept as a configured one.
+ *
+ * The endpoint used to run `?probe=1` for ANYONE, with a 60-second
+ * process-local cache as its only spending control — and a cache is per
+ * instance, so a new instance means new calls (reviewer: three windows = six
+ * injected model calls, a fresh instance = eight). Against the owner's ruling
+ * of 2026-09-06 03:4x ("don't spam it and finish his credits"), so the paid
+ * probe is now operator-only and FAILS CLOSED: no variable configured means no
+ * probe at all, for anyone, ever.
+ *
+ * TODO-OWNER: 16 characters is not the owner's number. It is a floor, not a
+ * policy — a real operator token should be a long random string.
+ */
+export const PROBE_TOKEN_HEADER = "x-agent-probe-token";
+export const PROBE_TOKEN_MIN_LENGTH = 16;
+
+/** What the request presented, and what the deployment configured. */
+export interface ProbeToken {
+	/** `env.AGENT_HEALTH_PROBE_TOKEN`. Absent on a deployment that never set it. */
+	readonly configured?: string | undefined;
+	/** The request's `x-agent-probe-token` header, or null when it had none. */
+	readonly presented?: string | null | undefined;
+}
+
+/**
+ * Is this request allowed to spend model credit?
+ *
+ * Fail-closed at every branch: an unset variable, a variable shorter than the
+ * floor, an absent header and a mismatched header all answer false. The compare
+ * is `timingSafeEqual` over the UTF-8 bytes; unequal lengths short-circuit,
+ * which leaks the token's LENGTH and nothing else.
+ */
+export function probeAuthorised(token: ProbeToken | undefined): boolean {
+	const configured = token?.configured;
+	const presented = token?.presented;
+	if (typeof configured !== "string" || configured.length < PROBE_TOKEN_MIN_LENGTH) return false;
+	if (typeof presented !== "string" || presented.length === 0) return false;
+	const a = Buffer.from(configured, "utf8");
+	const b = Buffer.from(presented, "utf8");
+	if (a.length !== b.length) return false;
+	return timingSafeEqual(a, b);
+}
 
 export interface ModelHealth {
 	readonly id: string;
@@ -45,6 +92,13 @@ export interface HealthBody {
 	readonly probed: boolean;
 	/** True when the answer was served from the window's cache rather than re-run. */
 	readonly cached: boolean;
+	/**
+	 * C-P2-2. True when `?probe=1` was asked for and refused for lack of an
+	 * operator token. Deliberately ONE flag rather than a reason: "no token is
+	 * configured" and "your token is wrong" answer identically, so the endpoint
+	 * is not an oracle for whether a probe token exists.
+	 */
+	readonly probeRefused: boolean;
 	readonly config: { readonly ok: boolean; readonly problem: string | null };
 	readonly models: { readonly agent: ModelHealth; readonly gate: ModelHealth };
 }
@@ -58,6 +112,11 @@ export interface HealthInput {
 	readonly gate: ConfiguredModel;
 	/** True only when the caller asked for it explicitly (`?probe=1`). */
 	readonly probe: boolean;
+	/**
+	 * C-P2-2. Required in practice for any probe to run: omitting it refuses,
+	 * because an absent authorisation is not an authorisation.
+	 */
+	readonly probeToken?: ProbeToken;
 	readonly probeCaller?: ProbeCaller;
 	readonly now?: Date;
 }
@@ -124,34 +183,34 @@ export async function agentHealth(input: HealthInput): Promise<{ status: number;
 		errorClass: null,
 	});
 
+	const configOnly = (probeRefused: boolean): HealthBody => ({
+		provider: providerName(input.usingGateway),
+		checkedAt: now.toISOString(),
+		probed: false,
+		cached: false,
+		probeRefused,
+		config: { ok: configOk, problem },
+		models: { agent: unprobed(input.agent), gate: unprobed(input.gate) },
+	});
+
 	if (!input.probe || input.probeCaller === undefined) {
-		return {
-			status: configOk ? 200 : 503,
-			body: {
-				provider: providerName(input.usingGateway),
-				checkedAt: now.toISOString(),
-				probed: false,
-				cached: false,
-				config: { ok: configOk, problem },
-				models: { agent: unprobed(input.agent), gate: unprobed(input.gate) },
-			},
-		};
+		return { status: configOk ? 200 : 503, body: configOnly(false) };
+	}
+
+	/**
+	 * C-P2-2. The paid branch, and the only place in this app where an
+	 * unauthenticated request could have spent money. Checked BEFORE the
+	 * configuration branch below and before the cache, so a refused probe cannot
+	 * read a cached answer a real operator paid for either.
+	 */
+	if (!probeAuthorised(input.probeToken)) {
+		return { status: 403, body: configOnly(true) };
 	}
 
 	// A misconfigured id is known to fail without asking the provider, and asking
 	// anyway would spend credit to learn what the check already knows.
 	if (!configOk) {
-		return {
-			status: 503,
-			body: {
-				provider: providerName(input.usingGateway),
-				checkedAt: now.toISOString(),
-				probed: false,
-				cached: false,
-				config: { ok: false, problem },
-				models: { agent: unprobed(input.agent), gate: unprobed(input.gate) },
-			},
-		};
+		return { status: 503, body: configOnly(false) };
 	}
 
 	const at = now.getTime();
@@ -193,6 +252,7 @@ export async function agentHealth(input: HealthInput): Promise<{ status: number;
 		checkedAt: now.toISOString(),
 		probed: true,
 		cached: joined,
+		probeRefused: false,
 		config: { ok: true, problem: null },
 		models,
 	};

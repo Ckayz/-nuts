@@ -49,6 +49,27 @@ and reports `models.agent.errorClass` / `models.gate.errorClass`. **It spends
 real model credit — an uptime monitor must NOT use it.** The answer is cached for
 60 seconds (`PROBE_CACHE_MS`, TODO-OWNER), so reloading cannot burn quota.
 
+**The probe is operator-only and off by default (C-P2-2).** It runs only when the
+deployment sets `AGENT_HEALTH_PROBE_TOKEN` (16 characters or more, refused at
+boot if shorter) *and* the request presents that value in the
+`x-agent-probe-token` header. With no variable set — the default, and the safe
+state — `?probe=1` answers **403** with the same configuration-only body the
+plain GET returns, and calls no model at all. A wrong or missing header answers
+the same 403, so the endpoint never reveals whether a token exists.
+
+```sh
+# once, on the deployment (any long random string; keep it out of git)
+vercel env add AGENT_HEALTH_PROBE_TOKEN production
+
+# then, from an operator's machine
+curl -s -H "x-agent-probe-token: $AGENT_HEALTH_PROBE_TOKEN" \
+  "https://<deployment>/api/agent/health?probe=1" | jq
+```
+
+Monitors keep polling the plain `GET /api/agent/health` and must never be given
+the token: it is the difference between a free check and one that spends the
+deployment's model credit on every poll.
+
 | `errorClass` | What it means | The fix |
 | --- | --- | --- |
 | `ok` | the model answered | — |

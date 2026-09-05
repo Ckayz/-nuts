@@ -6,6 +6,9 @@
 import type * as Domain from "@/types";
 import type { PositionInstrument } from "./instrument";
 
+/** Re-exported so `@/types` and the read layer can name it without importing the SDK-heavy `./instrument` module. */
+export type { PositionInstrument };
+
 /** Raw fill amounts, each beside the decimals column that gives it its unit. */
 export interface PositionQuantities {
 	/** Option contract base units. */

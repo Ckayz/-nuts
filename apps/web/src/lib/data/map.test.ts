@@ -88,6 +88,8 @@ function positionRow(overrides: Partial<PositionRow> = {}): PositionRow {
 		fillEvent: null,
 		indexerPositionId: null,
 		txHash: `0x${"1".repeat(64)}`,
+		ticketHash: null,
+		failureReason: null,
 		optionAddress: null,
 		referrer: null,
 		budget: "1000000",

@@ -8,7 +8,7 @@ import "server-only";
 import type { User } from "@nuts/db/schema/index";
 import { SIGN_IN_STATEMENT } from "./constants";
 import { buildSignInMessage } from "./message";
-import { consumeChallenge, createOrFetchUser, issueChallenge, normalizeWalletAddress, type Database } from "./store";
+import { consumeChallenge, createOrFetchUser, issueChallenge, normalizeWalletAddress, peekChallenge, type Database } from "./store";
 import { verifyWalletSignature, type SignatureVerifier } from "./verifier";
 
 export interface SignInChallenge {
@@ -47,12 +47,25 @@ export type CompleteSignInResult =
 	| { ok: false; reason: CompleteSignInFailure };
 
 /**
- * Consumes the nonce **before** checking the signature. A burned nonce on a bad
- * signature is the safe direction: it costs an honest user one extra click and
- * denies an attacker repeated attempts against the same challenge.
+ * Verifies the signature FIRST, then consumes the nonce.
  *
- * The signed message is rebuilt from the consumed row, never taken from the
+ * `requestSignInChallenge` is unauthenticated and returns the wallet's LIVE
+ * challenge to any caller (`issueChallenge` reuses the unconsumed row), so a
+ * consume-before-verify order let anyone burn another wallet's challenge by
+ * posting junk: the honest owner's pending signature then failed as
+ * `challenge_invalid`. Order here is peek → domain → signature syntax →
+ * signature → atomic consume, so a failed attempt leaves the row spendable and
+ * only a genuine signature spends it.
+ *
+ * Single use is still enforced by the atomic consume: two verifications of the
+ * same nonce race on one UPDATE and the loser gets `challenge_invalid`.
+ *
+ * The signed message is rebuilt from the stored row, never taken from the
  * client, so domain, chain and expiry are the server's own values.
+ *
+ * TODO-OWNER: how many failed verification attempts one live challenge may
+ * absorb (and any per-wallet or per-IP rate limit) is a product limit and is
+ * not set here.
  */
 export async function completeSignIn(
 	database: Database,
@@ -66,7 +79,7 @@ export async function completeSignIn(
 	},
 ): Promise<CompleteSignInResult> {
 	const walletAddress = normalizeWalletAddress(input.walletAddress);
-	const challenge = await consumeChallenge(database, { nonce: input.nonce, walletAddress });
+	const challenge = await peekChallenge(database, { nonce: input.nonce, walletAddress });
 	if (challenge === null) return { ok: false, reason: "challenge_invalid" };
 	if (challenge.domain !== input.domain) return { ok: false, reason: "domain_mismatch" };
 	// No chain check: `issueChallenge` writes AUTH_CHAIN_ID (./constants) and the
@@ -93,6 +106,12 @@ export async function completeSignIn(
 		signature: input.signature as `0x${string}`,
 	});
 	if (!valid) return { ok: false, reason: "signature_invalid" };
+
+	// Only a verified signature spends the nonce. The UPDATE re-checks
+	// unconsumed + unexpired, so a concurrent verification of the same nonce and
+	// a challenge that expired during verification both land here as null.
+	const spent = await consumeChallenge(database, { nonce: challenge.nonce, walletAddress });
+	if (spent === null) return { ok: false, reason: "challenge_invalid" };
 
 	const user = await createOrFetchUser(database, walletAddress);
 	return { ok: true, user };

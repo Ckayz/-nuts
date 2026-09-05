@@ -227,13 +227,32 @@ export const previewOptionBookTrade = tool({
 
 export const getThesisContext = tool({
 	description:
-		"Look up a thesis posted on Thesis.fun by id, including its option structure and economics.",
+		"Look up a thesis posted on Thesis.fun by id, including its option structure and economics. " +
+		"When it has a structure the result carries `marketUrl`; end your answer with that link so the " +
+		"user can trade the same view from the market page.",
 	inputSchema: z.object({ thesisId: z.string() }),
 	execute: async ({ thesisId }) => {
 		const result = await loadThesisContext(thesisId);
-		return result.available
-			? { found: true as const, context: result.context }
-			: { found: false as const, reason: result.reason, thesisId };
+		if (!result.available) {
+			return { found: false as const, reason: result.reason, thesisId };
+		}
+		/**
+		 * The market page for this thesis, carrying the post so the fill is
+		 * recorded as a PARTICIPANT of it rather than as a standalone trade
+		 * (migration 0007). The shape is fixed by the fold brief:
+		 * `/m/<asset>?thesis=<uuid>`, which `app/m/[asset]/page.tsx` already
+		 * reads (`single("thesis")`).
+		 *
+		 * Built here rather than added to `ThesisAiContext`: that object is the
+		 * shared PRD v2.0 §10.3 contract with the AI track and is not changed
+		 * without telling them (PRD §15).
+		 */
+		const asset = result.context.market.underlyingAsset;
+		return {
+			found: true as const,
+			context: result.context,
+			marketUrl: `/m/${asset.toLowerCase()}?thesis=${result.context.thesis.id}`,
+		};
 	},
 });
 

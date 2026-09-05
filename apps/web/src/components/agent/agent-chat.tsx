@@ -1,7 +1,12 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { useState } from "react";
+import {
+	DefaultChatTransport,
+	lastAssistantMessageIsCompleteWithApprovalResponses,
+} from "ai";
+import { useEffect, useRef, useState } from "react";
+import { useAccount } from "wagmi";
 
 import { Button } from "@nuts/ui/components/button";
 import {
@@ -12,6 +17,8 @@ import {
 } from "@nuts/ui/components/input-group";
 
 import { ToolActivity } from "./tool-activity";
+import { TradeApproval } from "./trade-approval";
+import { TradeExecution, type PreparedTrade } from "./trade-execution";
 
 const STARTERS = [
 	"What can I trade right now?",
@@ -20,11 +27,68 @@ const STARTERS = [
 	"Show me the simplest bet you have on BTC.",
 ];
 
-export function AgentChat() {
+/**
+ * The opening message when the page was reached from a post's "Explain".
+ *
+ * It names the id and asks for the two things the owner asked for — what the
+ * thesis says, and whether it can be traded — so the agent calls its own
+ * `getThesisContext` tool. Nothing about the post is embedded here: the tool
+ * reads it server-side, so a post the viewer may not see cannot leak through
+ * the URL.
+ *
+ * TODO-OWNER: the wording of this opening message.
+ */
+function thesisOpener(thesisId: string): string {
+	return `Explain the thesis with id ${thesisId}: what is it saying, and what would it take to trade the same view? If it names a structure, end with the link to its market page.`;
+}
+
+export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 	const [input, setInput] = useState("");
-	const { messages, sendMessage, status, error } = useChat();
+	const { address } = useAccount();
+
+	// Read through a ref so the transport, created once, always sees the current
+	// wallet. A transport rebuilt on every address change would drop the stream.
+	const addressRef = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		addressRef.current = address;
+	}, [address]);
+
+	const thesisRef = useRef<string | null>(thesisId);
+	useEffect(() => {
+		thesisRef.current = thesisId;
+	}, [thesisId]);
+
+	const [transport] = useState(
+		() =>
+			new DefaultChatTransport({
+				api: "/api/agent/chat",
+				// Attaches the connected wallet to every request, including the turn the
+				// runtime resumes automatically after an approval. The server binds it
+				// into the write tool, so the model can never name a different address.
+				prepareSendMessagesRequest: ({ messages, body }) => ({
+					body: { ...body, messages, walletAddress: addressRef.current },
+				}),
+			}),
+	);
+
+	const { messages, sendMessage, status, error, addToolApprovalResponse } = useChat({
+		transport,
+		// Once the user answers an approval, resume the agent loop automatically
+		// rather than making them send another message.
+		sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+	});
 
 	const busy = status === "submitted" || status === "streaming";
+
+	// `/agent?thesis=<uuid>` opens the conversation with that post. The ref makes
+	// it fire exactly once: React runs effects twice in development, and a second
+	// send would ask the same question again on the user's bill.
+	const openedFor = useRef<string | null>(null);
+	useEffect(() => {
+		if (thesisId === null || openedFor.current === thesisId) return;
+		openedFor.current = thesisId;
+		void sendMessage({ text: thesisOpener(thesisId) });
+	}, [sendMessage, thesisId]);
 
 	function submit(text: string) {
 		const trimmed = text.trim();
@@ -34,7 +98,15 @@ export function AgentChat() {
 	}
 
 	return (
-		<div className="mx-auto flex h-[100dvh] w-full max-w-3xl flex-col px-4">
+		// F16: this used to be `h-[100dvh]`, the VIEWPORT height, while it renders
+		// inside the shell's `<main class="wrap">` BELOW two sticky bars — so the
+		// heading and the first messages sat underneath them and the page grew a
+		// second scrollbar. The chrome above `<main>` is 126px, measured from
+		// `src/index.css`: `.top` is 60px (line 74) and the nav sticks at
+		// `top:60px` (line 97), which the file's own `.sticky{top:126px}` (line
+		// 127) already states as the combined height. `min-h-0` keeps the message
+		// list the only scrolling element.
+		<div className="mx-auto flex h-[calc(100dvh-126px)] min-h-0 w-full max-w-3xl flex-col px-4">
 			<header className="border-b py-4">
 				<h1 className="font-medium text-lg">Agent</h1>
 				<p className="text-muted-foreground text-sm">
@@ -77,6 +149,33 @@ export function AgentChat() {
 									</p>
 								);
 							}
+							// The runtime suspended a write tool and is waiting for the user.
+							if (part.type === "tool-approval-request") {
+								const req = part as unknown as {
+									approvalId: string;
+									toolCall?: { input?: { instrumentKey?: unknown; budget?: unknown } };
+								};
+								return (
+									<TradeApproval
+										key={i}
+										input={req.toolCall?.input}
+										pending={busy}
+										onRespond={(approved) =>
+											addToolApprovalResponse({ id: req.approvalId, approved })
+										}
+									/>
+								);
+							}
+
+							// A prepared trade carries unsigned calldata for the user's wallet.
+							if (part.type === "tool-requestOptionBookExecution") {
+								const out = (part as { output?: unknown }).output as
+									| (PreparedTrade & { prepared?: boolean })
+									| undefined;
+								if (out?.prepared === true) return <TradeExecution key={i} trade={out} />;
+								return <ToolActivity key={i} part={part} />;
+							}
+
 							if (part.type.startsWith("tool-")) {
 								return <ToolActivity key={i} part={part} />;
 							}

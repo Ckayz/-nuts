@@ -1,3 +1,4 @@
+import type { PositionInstrument, PositionQuantities } from "@/lib/position/types";
 /**
  * Domain types: PRD §10.3 names, decimal strings and lifecycle enums.
  * Owner notes: LIVE / ENDING / SETTLED are display chips, not domain statuses.
@@ -198,6 +199,18 @@ export interface LinkedPosition {
     position: Position;
     /** The wallet that holds the position; not necessarily the post's author. */
     owner: Creator;
+    /**
+     * C8. Decoded from the stored order snapshot by the SAME mapper `/p/[id]`
+     * uses (`lib/position/read.ts` `positionPageDetailFromRow`).
+     *
+     * These were absent, so every linked and backing card was built with
+     * `instrument: null`, which routes the card builder down its BUYER branch:
+     * a seller's card read "Premium paid" next to the premium they RECEIVED,
+     * and the asset came from the post's tag rather than from the order. Both
+     * stay optional because the typed fixtures carry neither.
+     */
+    instrument?: PositionInstrument | null;
+    quantities?: PositionQuantities | null;
 }
 export interface Participant extends Position {
     creator: Creator;

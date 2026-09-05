@@ -27,6 +27,19 @@ export const positions = pgTable(
     fillEvent: jsonb("fill_event").$type<FillEventSnapshotV1>(),
     indexerPositionId: text("indexer_position_id"),
     txHash: text("tx_hash").notNull(),
+    /**
+     * C3 (migration 0008). Identity of the signed ticket that created this row,
+     * so a retry cannot confirm a `pending` row with a DIFFERENT ticket's
+     * economics. Null on rows written before 0008.
+     */
+    ticketHash: text("ticket_hash"),
+    /**
+     * C2 (migration 0008). Why a row was marked `failed`. A refusal used to
+     * leave a `pending` row squatting the globally unique (chain_id, tx_hash)
+     * key; refusals now mark the row `failed`, the uniqueness is partial over
+     * non-failed rows, and this column records which refusal it was.
+     */
+    failureReason: text("failure_reason"),
     optionAddress: text("option_address"),
     referrer: text("referrer"),
     // unit: collateral-token base units
@@ -127,7 +140,25 @@ export const positions = pgTable(
     check("positions_settlement_price_decimals_required", sql`${table.settlementPrice} is null or ${table.settlementPriceDecimals} is not null`),
     check("positions_payout_decimals_required", sql`${table.payout} is null or ${table.payoutDecimals} is not null`),
     check("positions_final_pnl_decimals_required", sql`${table.finalPnl} is null or ${table.finalPnlDecimals} is not null`),
-    uniqueIndex("positions_chain_id_tx_hash_unique").on(table.chainId, table.txHash),
+    /**
+     * C2 (migration 0008): PARTIAL. One live row may hold a transaction hash,
+     * but a `failed` row must not squat it forever - a refusal (no OptionBook
+     * fill, an order mismatch, a debit mismatch) marks the row `failed`, and the
+     * true taker must still be able to record the same transaction afterwards.
+     */
+    uniqueIndex("positions_chain_id_tx_hash_unique")
+      .on(table.chainId, table.txHash)
+      // The enum is compared DIRECTLY, not through `::text`: an enum-to-text
+      // cast is STABLE, not IMMUTABLE, and Postgres refuses it in an index
+      // predicate ("functions in index predicate must be marked IMMUTABLE",
+      // measured 2026-09-05). The `::text` form elsewhere in this file is in
+      // CHECK constraints, which do accept it. `failed` is an original
+      // `position_status` label, so no ALTER TYPE shares this migration.
+      .where(sql`${table.status} <> 'failed'`),
+    check(
+      "positions_failure_reason_only_when_failed",
+      sql`${table.failureReason} is null or ${table.status}::text = 'failed'`,
+    ),
     check("positions_wallet_address_lowercase", sql`${table.walletAddress} = lower(${table.walletAddress})`),
     check("positions_budget_integral_nonnegative", sql`scale(${table.budget}) = 0 and ${table.budget} >= 0`),
     check("positions_contracts_integral_nonnegative", sql`scale(${table.contracts}) = 0 and ${table.contracts} > 0`),

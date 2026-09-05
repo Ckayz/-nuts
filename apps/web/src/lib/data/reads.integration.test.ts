@@ -22,7 +22,9 @@ import type { NewPosition, NewThesis } from "@nuts/db/schema/index";
 import { encodeFillEventSnapshot } from "@nuts/db/fill-event-snapshot";
 import { orderSnapshotV1Schema } from "@nuts/db/order-snapshot";
 import type { Database } from "./reads";
-import { getCreator, getPortfolio, getThread, listFeed } from "./reads";
+import { getCreator, getPortfolio, getThread, leaderboard, listFeed, listPositionsByIds, trending } from "./reads";
+import { readPositionDetail } from "@/lib/position/read";
+import { thesisWithOrigin } from "@/lib/display";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -461,6 +463,150 @@ if (!databaseUrl) {
 		probe("accepts the address in any case", async (tx) => {
 			const upper = await getCreator(ALICE_WALLET.toUpperCase().replace("0X", "0x"), { database: tx });
 			expect(upper?.creator.walletAddress).toBe(ALICE_WALLET);
+		});
+	});
+
+	/**
+	 * Lane B fold: the five read-layer defects the one-shot review found.
+	 */
+	describe("Lane B fences", () => {
+		probe("B3: an EXPIRED post is ranked AND renders, instead of crashing the feed", async (tx) => {
+			await tx.update(theses).set({ status: "expired" }).where(sql`${theses.id} = ${T_TEXT}`);
+
+			// It is admitted by the rankings...
+			const ranked = await trending({ database: tx });
+			const row = ranked.find((entry) => entry.id === T_TEXT);
+			expect(row).toBeDefined();
+
+			// ...and the display no longer throws on it. Before the fold this line
+			// threw `No mockup presentation for expired` and took the feed with it.
+			const view = thesisWithOrigin(row!, undefined);
+			expect(view.id).toBe(T_TEXT);
+			// The settlement-pending vocabulary, not an invented winner.
+			expect(view.statusLabel).toBe("SETTLEMENT PENDING");
+			expect(view.status).toBe("ending");
+
+			// The thread reader returns it too, rather than nothing.
+			expect(await getThread("text-only-post-2222", { database: tx })).not.toBeNull();
+
+			// A draft still has NO presentation: `PUBLIC_THESIS_STATUSES` keeps it
+			// out of every ranking, and the display refuses it outright. (The
+			// reader itself has no status fence; `page-data.renderableStatus` and
+			// this throw are the two that matter.)
+			expect(ranked.some((entry) => entry.id === T_DRAFT)).toBe(false);
+			const draft = await getThread("secret-draft-2222", { database: tx });
+			expect(draft).not.toBeNull();
+			expect(() => thesisWithOrigin(draft!.thesis, undefined)).toThrow("No mockup presentation for draft");
+		});
+
+		probe("B4: the leaderboard counts STANDALONE positions, not only posted ones", async (tx) => {
+			// Dave's ONLY fill is standalone — the shape a market-page trade
+			// produces by default (migration 0007). The inner join to `theses`
+			// dropped every such row, so Dave did not exist on the leaderboard.
+			const DAVE = "11110000-0000-4000-8000-0000000000d4";
+			const DAVE_WALLET = "0x00000000000000000000000000000000feed1004";
+			await tx.insert(users).values([{ id: DAVE, walletAddress: DAVE_WALLET, displayName: "Dave Probe" }]);
+			await tx.insert(positions).values([
+				position({
+					id: "33330000-0000-4000-8000-0000000000b4",
+					thesisId: null,
+					role: "standalone",
+					userId: DAVE,
+					walletAddress: DAVE_WALLET,
+					side: "back",
+					entryPremiumUsd: "100.00",
+					estimatedPnlUsd: "1234.00",
+				}),
+			]);
+			const ranked = await leaderboard({ database: tx, window: "1W" });
+			const dave = ranked.find((entry) => entry.walletAddress === DAVE_WALLET);
+			expect(dave).toBeDefined();
+			// The stored 1234.00 comes back normalised by `sumDecimals`, so the
+			// VALUE is asserted rather than its spelling.
+			expect(dave?.netPnlUsd).not.toBeNull();
+			expect(Number(dave?.netPnlUsd)).toBe(1234);
+		});
+
+		probe("B4: a position on a DRAFT post is still excluded from the leaderboard", async (tx) => {
+			const ranked = await leaderboard({ database: tx, window: "1W" });
+			// Bob's only non-draft rows carry no P&L; the draft row's must not leak.
+			const bob = ranked.find((entry) => entry.walletAddress === BOB_WALLET);
+			expect(bob?.netPnlUsd ?? "0").not.toContain("10.00");
+		});
+
+		probe("B5: a NULL premium marks the side unavailable, never a partial total", async (tx) => {
+			// The Bull side holds a known 250.00 plus one unpriced fill.
+			await tx.insert(positions).values([
+				position({
+					id: "33330000-0000-4000-8000-0000000000b5",
+					thesisId: T_BACKED,
+					userId: BOB,
+					walletAddress: BOB_WALLET,
+					side: "back",
+					entryPremiumUsd: null,
+				}),
+			]);
+			const thread = await getThread("backed-post-2222", { database: tx });
+			const backing = thread?.thesis.backing;
+			expect(backing).not.toBeNull();
+			// Unavailable, not "750.00" (the creator's 500 + Bob's 250) presented
+			// as the whole pool while a third fill is unpriced.
+			expect(backing?.bull.amountUsd).toBeNull();
+			expect(backing?.pooledUsd).toBeNull();
+			// The count still includes it: the fill exists, its value does not.
+			expect(backing?.bull.count).toBe(3);
+			// The Bear side is untouched and still reports its total.
+			expect(backing?.bear.amountUsd).not.toBeNull();
+		});
+
+		probe("B5: with every premium known the total is still stated", async (tx) => {
+			const thread = await getThread("backed-post-2222", { database: tx });
+			expect(thread?.thesis.backing?.bull.amountUsd).not.toBeNull();
+			expect(thread?.thesis.backing?.pooledUsd).not.toBeNull();
+		});
+
+		probe("B6: a DRAFT post's headline never reaches a position page, a card or a portfolio", async (tx) => {
+			const detail = await readPositionDetail(P_DRAFT, { database: tx });
+			expect(detail).not.toBeNull();
+			// The position is public; the unpublished post's words are not.
+			expect(detail?.position.id).toBe(P_DRAFT);
+			expect(detail?.position.thesisHeadline).toBeNull();
+			expect(detail?.position.thesisSlug).toBeNull();
+			expect(detail?.thesis).toBeNull();
+			expect(JSON.stringify(detail)).not.toContain("SECRET DRAFT");
+
+			// The same through the batch reader the trade cards use.
+			const cards = await listPositionsByIds([P_DRAFT], { database: tx });
+			expect(JSON.stringify([...cards.values()])).not.toContain("SECRET DRAFT");
+
+			// And on the holder's own portfolio.
+			const portfolio = await getPortfolio(BOB_WALLET, { database: tx });
+			expect(portfolio.some((row) => row.id === P_DRAFT)).toBe(true);
+			expect(JSON.stringify(portfolio)).not.toContain("SECRET DRAFT");
+		});
+
+		probe("B6: a PUBLIC post's headline still reaches all three", async (tx) => {
+			const detail = await readPositionDetail(P_BULL, { database: tx });
+			expect(detail?.position.thesisHeadline).toBe("Backed post");
+			expect(detail?.thesis?.slug).toBe("backed-post-2222");
+			const portfolio = await getPortfolio(BOB_WALLET, { database: tx });
+			expect(JSON.stringify(portfolio)).toContain("Backed post");
+		});
+
+		probe("B-m1: a UUID-SHAPED slug resolves to its own post, not through the id column", async (tx) => {
+			// A slug is user-derived text and can look exactly like a uuid.
+			const uuidShapedSlug = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+			await tx.update(theses).set({ slug: uuidShapedSlug }).where(sql`${theses.id} = ${T_TEXT}`);
+			const bySlug = await getThread(uuidShapedSlug, { database: tx });
+			expect(bySlug).not.toBeNull();
+			expect(bySlug?.thesis.id).toBe(T_TEXT);
+
+			// The id lookup still works as the fallback.
+			const byId = await getThread(T_BACKED, { database: tx });
+			expect(byId?.thesis.id).toBe(T_BACKED);
+
+			// And an unknown identity is still nothing.
+			expect(await getThread("99990000-0000-4000-8000-000000000009", { database: tx })).toBeNull();
 		});
 	});
 }

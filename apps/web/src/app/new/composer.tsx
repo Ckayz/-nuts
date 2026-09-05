@@ -45,7 +45,7 @@ export function Composer({
 	/** Tag pills; they come from live book data, never a hardcoded list. */
 	assets: AssetTag[];
 	marketsUnavailable?: boolean;
-	siteOrigin?: string;
+	siteOrigin?: readonly string[];
 	/** `?asset=` from the URL, already validated; null when absent. */
 	presetAsset: string | null;
 	/** `?link=` turned into rationale text, so the card unfurls immediately. */

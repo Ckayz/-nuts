@@ -1,6 +1,10 @@
 /** Same UUID grammar as data/reads.ts; kept pure for offline input tests. */
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const SOCIAL_PUBLIC_STATUSES = ["open", "expired", "settled"] as const;
+/**
+ * B3. THE one public-status list, re-exported so the rankings and the readers
+ * cannot drift apart again. Two lists existed and disagreed about `expired`.
+ */
+export { PUBLIC_THESIS_STATUSES as SOCIAL_PUBLIC_STATUSES } from "@/lib/data/constants";
 export type SocialError = { error: "sign_in_required" | "invalid_id" | "self_follow" | "blank_comment" | "not_found" | "mock_mode" | "invalid_state" };
 export function actorGuard(actor: string | null, target: unknown, follow = false): SocialError | null {
 	if (actor === null) return { error: "sign_in_required" };

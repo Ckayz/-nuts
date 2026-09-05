@@ -40,7 +40,7 @@ import { db as defaultDb } from "@nuts/db";
 import { positions, theses, users } from "@nuts/db/schema/index";
 import type { Position as PositionRow, Thesis as ThesisRow } from "@nuts/db/schema/index";
 import type * as Domain from "@/types";
-import { mapCreator, mapPosition } from "@/lib/data/map";
+import { mapCreator, mapPosition, publicThesisOrNull } from "@/lib/data/map";
 import { positionInstrument } from "./instrument";
 import type { PositionPageDetail } from "./types";
 
@@ -83,9 +83,13 @@ export function positionPageDetailFromRow(row: {
 	user: Parameters<typeof mapCreator>[0];
 }): PositionPageDetail {
 	const instrument = positionInstrument(row.position.orderSnapshot);
-	const mapped = mapPosition({ position: row.position, thesis: row.thesis ?? NO_THESIS });
+	// B6. A `draft` or `cancelled` post's headline must never leave the database.
+	// The position is still public; only the post's words are withheld, which
+	// leaves exactly the shape a standalone position already has.
+	const thesisRow = publicThesisOrNull(row.thesis);
+	const mapped = mapPosition({ position: row.position, thesis: thesisRow ?? NO_THESIS });
 	const position: Domain.Position =
-		row.thesis === null
+		thesisRow === null
 			? {
 					...mapped,
 					thesisId: null,
@@ -111,7 +115,7 @@ export function positionPageDetailFromRow(row: {
 			collateral: row.position.collateral,
 			collateralDecimals: row.position.collateralDecimals,
 		},
-		thesis: row.thesis === null ? null : { slug: row.thesis.slug, headline: row.thesis.headline },
+		thesis: thesisRow === null ? null : { slug: thesisRow.slug, headline: thesisRow.headline },
 	};
 }
 

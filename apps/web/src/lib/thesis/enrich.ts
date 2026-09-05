@@ -20,7 +20,7 @@ export type PositionLookup = (
 /** Every distinct position id linked by these posts, in first-seen order. */
 export function linkedPositionIds(
 	posts: readonly Domain.Thesis[],
-	siteOrigin?: string,
+	siteOrigin?: string | readonly string[],
 ): string[] {
 	const ids: string[] = [];
 	for (const post of posts) {
@@ -42,7 +42,7 @@ export function linkedPositionIds(
 export function attachLinkedPositions<T extends Domain.Thesis>(
 	posts: readonly T[],
 	resolved: ReadonlyMap<string, Domain.LinkedPosition>,
-	siteOrigin?: string,
+	siteOrigin?: string | readonly string[],
 ): T[] {
 	return posts.map((post) => {
 		const linked = extractTradeLinks(`${post.thesis.headline}\n${post.thesis.rationale ?? ""}`, siteOrigin)
@@ -56,7 +56,7 @@ export function attachLinkedPositions<T extends Domain.Thesis>(
 export async function enrichWithTradeLinks<T extends Domain.Thesis>(
 	posts: readonly T[],
 	lookup: PositionLookup,
-	siteOrigin?: string,
+	siteOrigin?: string | readonly string[],
 ): Promise<T[]> {
 	const ids = linkedPositionIds(posts, siteOrigin);
 	if (ids.length === 0) return [...posts];

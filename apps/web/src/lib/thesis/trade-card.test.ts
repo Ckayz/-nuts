@@ -66,6 +66,91 @@ test("linkedPositionCard maps an open position through the ONE card builder", ()
 	]);
 });
 
+/**
+ * C8. A linked card used to be built with `instrument: null`, which routes the
+ * card builder down its BUYER branch: a taker-SELL fill printed "Premium paid"
+ * next to the premium it RECEIVED, and the asset came from the post's tag
+ * rather than from the order that was filled.
+ */
+test("C8: a SELLER's linked card locks collateral instead of paying a premium", () => {
+	const seller = linkedPositionCard({
+		position: position({ underlyingAsset: "" }),
+		owner,
+		instrument: {
+			asset: "ETH",
+			isCall: false,
+			// isLong true on the maker -> the TAKER SELLS (chain-verified rule).
+			takerSide: "sell",
+			strikesUsd8: ["230000000000"],
+			ascendingStrikesUsd8: ["230000000000"],
+			expiryAt: "2026-12-31T08:00:00.000Z",
+			implementationName: "PUT",
+			structureId: "0123456789abcdef",
+			collateralAddress: "0x4e65fe4dba92790696d040ac24aa414708f5c0ab",
+			collateralSymbol: "aBasUSDC",
+			collateralDecimals: 6,
+			riskKind: "put",
+		},
+		quantities: {
+			contracts: "500",
+			contractDecimals: 6,
+			premium: "9009",
+			premiumDecimals: 6,
+			fees: "737",
+			feeDecimals: 6,
+			collateral: "1150000",
+			collateralDecimals: 6,
+		},
+	}, new Date("2026-09-05T08:00:00Z"), "100000000");
+
+	// The seller's own tile, not the buyer's.
+	expect(seller.stats[0]?.label).toBe("Collateral locked");
+	expect(seller.stats[0]?.label).not.toBe("Premium paid");
+	// $1.15 of collateral: 1,150,000 base units at 6 decimals, valued at 1 USD.
+	expect(seller.stats[0]?.value).toBe("$1.15");
+	// The asset comes from the ORDER's price feed, not from the post's tag: the
+	// position row above carries no underlying asset at all.
+	expect(seller.instrumentLabel).toContain("ETH");
+
+	// The same fill with no instrument is the pre-fold behaviour, and it is wrong.
+	const blind = linkedPositionCard({ position: position({ underlyingAsset: "" }), owner });
+	expect(blind.stats[0]?.label).toBe("Premium paid");
+	expect(blind.instrumentLabel).not.toContain("ETH");
+});
+
+test("C8: a BUYER's linked card still pays a premium", () => {
+	const buyer = linkedPositionCard({
+		position: position(),
+		owner,
+		instrument: {
+			asset: "BTC",
+			isCall: false,
+			takerSide: "buy",
+			strikesUsd8: ["7400000000000"],
+			ascendingStrikesUsd8: ["7400000000000"],
+			expiryAt: "2026-12-31T08:00:00.000Z",
+			implementationName: "PUT",
+			structureId: "0123456789abcdef",
+			collateralAddress: "0x4e65fe4dba92790696d040ac24aa414708f5c0ab",
+			collateralSymbol: "aBasUSDC",
+			collateralDecimals: 6,
+			riskKind: "put",
+		},
+		quantities: {
+			contracts: "389926",
+			contractDecimals: 6,
+			premium: "999998",
+			premiumDecimals: 6,
+			fees: "124999",
+			feeDecimals: 6,
+			collateral: "0",
+			collateralDecimals: 6,
+		},
+	}, new Date("2026-09-05T08:00:00Z"), "100000000");
+	expect(buyer.stats[0]?.label).toBe("Premium paid");
+	expect(buyer.instrumentLabel).toContain("BTC");
+});
+
 test("the backing card and a linked card of the same fill agree", () => {
 	const backed: Domain.Thesis = {
 		...post(null),

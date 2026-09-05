@@ -36,6 +36,7 @@ import type { Comment as CommentRow, Position as PositionRow, Thesis as ThesisRo
 import type * as Domain from "@/types";
 import { decimalFromBaseUnits, decimalFromNullableBaseUnits, sumDecimals, usdDecimalOrNull } from "./decimal";
 import { creatorHandle, creatorInitials } from "./identity";
+import { PUBLIC_THESIS_STATUSES } from "./constants";
 
 /** Aggregates a caller computed for one thesis. */
 export interface ThesisAggregates {
@@ -334,6 +335,23 @@ function assetFromOrderSnapshot(snapshot: PositionRow["orderSnapshot"]): string 
 	const feed = snapshot.rawApiData?.["priceFeed"];
 	if (typeof feed !== "string") return "";
 	return buildPriceFeedSymbolMap(8453)[feed.toLowerCase()] ?? "";
+}
+
+/**
+ * B6. The post a position belongs to, but ONLY when that post is public.
+ *
+ * Position reads join `theses` with no status fence, so `/p/[id]`, the
+ * portfolio and every linked trade card rendered the headline and slug of a
+ * post whose status is `draft` or `cancelled` — text its author has never
+ * published. A non-public post is nulled out here, which is exactly the shape a
+ * STANDALONE position already has, so every consumer already handles it.
+ *
+ * The position itself stays public: a fill is public the moment it confirms
+ * (PRD 7.3). Only the post's words are withheld.
+ */
+export function publicThesisOrNull<T extends { status: string } | null>(thesis: T): T | null {
+	if (thesis === null) return null;
+	return PUBLIC_THESIS_STATUSES.some((value) => value === thesis.status) ? thesis : null;
 }
 
 export function mapPosition(input: MapPositionInput): Domain.Position {

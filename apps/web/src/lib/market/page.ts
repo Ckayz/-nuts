@@ -12,7 +12,7 @@ import { env } from "@nuts/env/server";
 import { decodeOrderSnapshot } from "@nuts/db/order-snapshot";
 import { toPosts } from "@/lib/page-data";
 import { enrichWithTradeLinks } from "@/lib/thesis/enrich";
-import { siteOrigin } from "@/lib/site-origin";
+import { siteOrigins } from "@/lib/site-origin";
 import type { Market as MarketView, MarketSummary, Thesis as ThesisView } from "@/lib/display-types";
 import { getSession } from "@/lib/auth/session";
 import { isFeedUnavailable } from "@/lib/thetanuts/orders";
@@ -147,7 +147,7 @@ export async function marketPageData(
 
 	const { listFeed, listPositionsByIds } = await import("@/lib/data/reads");
 	const feed = await listFeed({ viewerUserId: session?.userId ?? null });
-	const enriched = await enrichWithTradeLinks(feed, listPositionsByIds, await siteOrigin());
+	const enriched = await enrichWithTradeLinks(feed, listPositionsByIds, await siteOrigins());
 	const tagged = (await toPosts(enriched))
 		.filter((post) => post.tag !== null && post.tag.asset === structure.asset);
 

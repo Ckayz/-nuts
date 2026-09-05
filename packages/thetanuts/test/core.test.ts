@@ -112,6 +112,66 @@ describe("risk", () => {
 describe("fill", () => {
   function client(allowance: bigint) { const real = createReadClient({ rpcUrl: "http://127.0.0.1:1" }); return { optionBook: real.optionBook, erc20: { getAllowance: async () => allowance, encodeApprove: real.erc20.encodeApprove.bind(real.erc20) } }; }
   test("uses original budget for calldata and approves recomputed premium", async () => { const budget = 10_000_000n; const row = order({ price: 123_456_789n, available: 1_000_000_000_000n }); const result = await buildFillTransactions({ client: client(0n), order: row, budget, account: A("5") as Address, now }); const decoded = decodeFunctionData({ abi: OPTION_BOOK_ABI, data: result.fill.data }); const encodedOrder = decoded.args?.[0]; expect(typeof encodedOrder === "object" && encodedOrder !== null && "numContracts" in encodedOrder ? encodedOrder.numContracts : -1n).toBe(8_100_000n); expect(result.expected).toMatchObject({ budget, numContracts: 8_100_000n, premium: 9_999_999n }); expect(result.approve).toBeDefined(); expect(result.fill.value).toBe(0n); const high = await buildFillTransactions({ client: client(9_999_999n), order: row, budget, account: A("5") as Address, now }); expect(high.approve).toBeUndefined(); });
+  /**
+   * A-m3. The buy approval calldata was asserted only as `toBeDefined()`, so a
+   * mutant approving the WHOLE BUDGET (or the wrong token, or the wrong spender)
+   * survived the suite. Approving more than the recomputed premium hands the
+   * OptionBook a standing allowance over funds the fill never spends, so the
+   * three fields are decoded here: token, spender and exact amount.
+   */
+  test("the buy approval is decoded: exact token, spender and premium amount", async () => {
+    const ERC20_APPROVE_ABI = [{ type: "function", name: "approve", stateMutability: "nonpayable", inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ type: "bool" }] }] as const;
+
+    // Uncapped: the budget buys 8_100_000 contracts at price 123_456_789 → premium 9_999_999,
+    // one base unit BELOW the 10_000_000 budget. An approval of the budget is the mutant.
+    const budget = 10_000_000n;
+    const row = order({ price: 123_456_789n, available: 1_000_000_000_000n });
+    const result = await buildFillTransactions({ client: client(0n), order: row, budget, account: A("5") as Address, now });
+    expect(result.expected.premium).toBe(9_999_999n);
+    expect(result.expected.premium).toBeLessThan(budget);
+    expect(result.approve).toBeDefined();
+    expect(result.approve?.value).toBe(0n);
+    // Token: the approval must target the COLLATERAL token, not the OptionBook.
+    expect(result.approve?.to.toLowerCase()).toBe(result.expected.collateralToken.toLowerCase());
+    expect(result.approve?.to.toLowerCase()).not.toBe(result.fill.to.toLowerCase());
+    const decoded = decodeFunctionData({ abi: ERC20_APPROVE_ABI, data: result.approve!.data });
+    expect(decoded.functionName).toBe("approve");
+    // Spender: the OptionBook the fill is sent to, nobody else.
+    expect((decoded.args[0] as string).toLowerCase()).toBe(result.fill.to.toLowerCase());
+    expect((decoded.args[0] as string).toLowerCase()).toBe(result.expected.spender.toLowerCase());
+    // Amount: exactly the recomputed premium — never the budget, never unlimited.
+    expect(decoded.args[1]).toBe(9_999_999n);
+    expect(decoded.args[1]).not.toBe(budget);
+    expect(decoded.args[1]).not.toBe((1n << 256n) - 1n);
+
+    // Capped budget: the maker's remaining collateral caps the contract count,
+    // so the premium lands far below the budget and approving the BUDGET is
+    // grossly over-permissioned. Expectations derived from the chain rule
+    // (CLAUDE.md: the PUT maker posts strike x contracts / 1e8), never read back
+    // from the output: available 1_000_000 / (strike 10_000_000_000 / 1e8)
+    // = 10_000 contracts; premium 10_000 x 10_000_000 / 1e8 = 1_000.
+    const cappedBudget = 1_000_000_000n;
+    const cappedPrice = 10_000_000n;
+    const makerCollateral = 1_000_000n;
+    const strike = 10_000_000_000n; // the `order()` fixture default
+    const expectedContracts = makerCollateral * 100_000_000n / strike;
+    const expectedPremium = expectedContracts * cappedPrice / 100_000_000n;
+    expect(expectedContracts).toBe(10_000n);
+    expect(expectedPremium).toBe(1_000n);
+    const capped = await buildFillTransactions({ client: client(0n), order: order({ price: cappedPrice, available: makerCollateral }), budget: cappedBudget, account: A("5") as Address, now });
+    expect(capped.expected.numContracts).toBe(expectedContracts);
+    expect(capped.expected.premium).toBe(expectedPremium);
+    expect(capped.expected.premium).toBeLessThan(cappedBudget);
+    const cappedDecoded = decodeFunctionData({ abi: ERC20_APPROVE_ABI, data: capped.approve!.data });
+    expect(cappedDecoded.args[1]).toBe(expectedPremium);
+    expect(cappedDecoded.args[1]).not.toBe(cappedBudget);
+
+    // A sufficient existing allowance produces no approval at all.
+    expect((await buildFillTransactions({ client: client(9_999_999n), order: row, budget, account: A("5") as Address, now })).approve).toBeUndefined();
+    // One base unit short still approves.
+    expect((await buildFillTransactions({ client: client(9_999_998n), order: row, budget, account: A("5") as Address, now })).approve).toBeDefined();
+  });
+
   test("rejects a nonzero contract count with zero recomputed premium", async () => { await expect(buildFillTransactions({ client: client(0n), order: order({ price: 30_000_000n, available: 1_000_000_000_000n }), budget: 1n, account: A("5") as Address, now })).rejects.toMatchObject({ code: "ZERO_PREMIUM" }); });
   test("rejects expiry and gates taker sell", async () => { await expect(buildFillTransactions({ client: client(0n), order: order({ expiry: 1n, orderExpiry: 1 }), budget: 1n, account: A("5") as Address, now })).rejects.toBeInstanceOf(ThetanutsLogicError); const sell = order({ isLong: true }); await expect(buildFillTransactions({ client: client(0n), order: sell, budget: 1n, account: A("5") as Address, now })).rejects.toMatchObject({ code: "TAKER_SELL_UNVERIFIED" }); });
 });

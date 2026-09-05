@@ -64,6 +64,8 @@ function rowsFromExample(example: ThesisAiContext): { thesis: Thesis; creator: U
     walletAddress: example.creator.walletAddress,
     orderId: "example-order",
     orderHash: null,
+    ticketHash: null,
+    failureReason: null,
     orderSnapshot,
     fillEvent: canonicalFillEvent,
     indexerPositionId: null,

@@ -61,24 +61,41 @@ export function tradeLinkHref(positionId: string): string {
 const LEADING = /^[([{<"'`]+/;
 const TRAILING = /[)\]}>"'`.,;:!?]+$/;
 
-/** Lowercase scheme+host with any trailing slash removed; null when unusable. */
-function normalizeOrigin(origin: string | undefined): string | null {
-	if (origin === undefined) return null;
-	const trimmed = origin.trim().toLowerCase().replace(/\/+$/, "");
-	return trimmed === "" ? null : trimmed;
+/**
+ * Lowercase scheme+host with any trailing slash removed, for every origin the
+ * site answers on.
+ *
+ * 9(b). One origin is not enough. `CopyLink` builds the copied address from the
+ * BROWSER's `window.location.origin`, so a visitor on a custom domain or a
+ * branch alias copies a link on that host — while the server used to match only
+ * `VERCEL_URL`, the per-deployment URL. The link then stayed plain text and the
+ * trade card never unfurled. Every origin the request could legitimately have
+ * been served from is accepted; duplicates and unusable entries are dropped.
+ */
+function normalizeOrigins(origin: string | readonly string[] | undefined): string[] {
+	if (origin === undefined) return [];
+	const list = typeof origin === "string" ? [origin] : origin;
+	const seen: string[] = [];
+	for (const entry of list) {
+		const trimmed = entry.trim().toLowerCase().replace(/\/+$/, "");
+		if (trimmed !== "" && !seen.includes(trimmed)) seen.push(trimmed);
+	}
+	return seen;
 }
 
 /**
  * The position id a candidate word points at, or null.
  *
- * An absolute URL is accepted only when it starts with the site origin followed
- * by `/` — `https://thesis.fun.evil.example/p/<uuid>` fails that test because
- * the character after the origin is `.`, not `/`.
+ * An absolute URL is accepted only when it starts with ONE OF the site's own
+ * origins followed by `/` — `https://thesis.fun.evil.example/p/<uuid>` fails
+ * that test because the character after the origin is `.`, not `/`.
  */
-function tradeLinkTarget(candidate: string, origin: string | null): string | null {
+function tradeLinkTarget(candidate: string, origins: readonly string[]): string | null {
 	let path = candidate;
-	if (origin !== null && candidate.toLowerCase().startsWith(`${origin}/`)) {
-		path = candidate.slice(origin.length);
+	const lower = candidate.toLowerCase();
+	const matched = origins.find(origin => lower.startsWith(`${origin}/`));
+	if (matched !== undefined) {
+		path = candidate.slice(matched.length);
 	}
 	// Exactly one path segment after /p/, optionally followed by a query or
 	// fragment. A deeper path, another scheme or another host never matches.
@@ -94,12 +111,13 @@ function tradeLinkTarget(candidate: string, origin: string | null): string | nul
  * reproduces the input byte for byte, so this can neither drop the author's
  * words nor inject any.
  *
- * `origin` is the site's own origin, e.g. "https://thesis.fun". Omitted, only
- * path-only links are recognised — an absolute URL cannot be proven same-origin
- * without one, and guessing would be the open-redirect bug.
+ * `origin` is the site's own origin — or, on a deployment reachable under more
+ * than one name, every origin it answers on. Omitted, only path-only links are
+ * recognised: an absolute URL cannot be proven same-origin without one, and
+ * guessing would be the open-redirect bug.
  */
-export function renderTextWithLinks(text: string, origin?: string): TextToken[] {
-	const site = normalizeOrigin(origin);
+export function renderTextWithLinks(text: string, origin?: string | readonly string[]): TextToken[] {
+	const sites = normalizeOrigins(origin);
 	const tokens: TextToken[] = [];
 	const push = (value: string) => {
 		if (value !== "") tokens.push({ kind: "text", value });
@@ -117,7 +135,7 @@ export function renderTextWithLinks(text: string, origin?: string): TextToken[] 
 		const tail = TRAILING.exec(withoutLead)?.[0] ?? "";
 		const core = tail === "" ? withoutLead : withoutLead.slice(0, -tail.length);
 
-		const positionId = core === "" ? null : tradeLinkTarget(core, site);
+		const positionId = core === "" ? null : tradeLinkTarget(core, sites);
 		if (positionId === null) {
 			push(word[0]);
 			continue;
@@ -135,7 +153,7 @@ export function renderTextWithLinks(text: string, origin?: string): TextToken[] 
  * at `MAX_TRADE_CARDS_PER_POST`. Built from the same tokens the text renders
  * from, so the cards and the anchors can never disagree about what a link is.
  */
-export function extractTradeLinks(text: string, origin?: string): string[] {
+export function extractTradeLinks(text: string, origin?: string | readonly string[]): string[] {
 	const found: string[] = [];
 	for (const token of renderTextWithLinks(text, origin)) {
 		if (token.kind !== "link" || found.includes(token.positionId)) continue;

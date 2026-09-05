@@ -11,6 +11,7 @@ import { expiryLabel as instantLabel } from "@/lib/display";
 import type { Side, Ticket } from "@/lib/display-types";
 import { prepareTrade, quoteTicket, recordTrade } from "@/lib/trade/actions";
 import { FillDialog } from "@/components/market/fill-dialog";
+import { clearHeldFill, readHeldFill, sessionFillStore, writeHeldFill } from "@/lib/trade/held-fill";
 import type {
 	FillCard,
 	QuoteRaw,
@@ -288,10 +289,45 @@ export function TakeASide({
 	 * older render. Every write goes through `holdSent`, so the two cannot drift.
 	 */
 	const sentRef = useRef<SentFill | null>(null);
-	const holdSent = useCallback((fill: SentFill | null) => {
-		sentRef.current = fill;
-		setSent(fill);
-	}, []);
+	/**
+	 * C#2. Component state does not survive a reload; the money does. Every hold
+	 * is written to `sessionStorage` under the wallet and chain, and only a
+	 * TERMINAL recording answer clears it.
+	 */
+	const chainId = trade?.chainId ?? 8453;
+	const wallet = trade?.sessionWallet ?? null;
+	const holdSent = useCallback(
+		(fill: SentFill | null) => {
+			sentRef.current = fill;
+			setSent(fill);
+			const store = sessionFillStore();
+			if (fill === null) clearHeldFill(store, chainId, wallet);
+			else writeHeldFill(store, chainId, wallet, fill);
+		},
+		[chainId, wallet],
+	);
+	/**
+	 * C#2. On mount, an unrecorded fill for THIS wallet on THIS chain takes the
+	 * ticket over: the primary button reads "Record the fill" and cannot prepare
+	 * another one. `sentRef` is written directly rather than through `holdSent`
+	 * so restoring never rewrites what it just read.
+	 */
+	const restored = useRef(false);
+	useEffect(() => {
+		if (restored.current) return;
+		restored.current = true;
+		if (trade === undefined) return;
+		const held = readHeldFill(sessionFillStore(), chainId, wallet);
+		if (held === null) return;
+		sentRef.current = held;
+		setSent(held);
+		setTxHash(held.txHash);
+		setPhase("failed");
+		// TODO-OWNER: recovery copy.
+		setMessage(
+			"A fill you sent earlier is not recorded yet. Press the button to record it; it will not send a second trade.",
+		);
+	}, [chainId, trade, wallet]);
 	// The post-fill share card (owner's fomo reference, 2026-09-05).
 	const [card, setCard] = useState<FillCard | null>(null);
 	const [pending, startTransition] = useTransition();

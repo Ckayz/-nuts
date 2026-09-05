@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useConfig, useConnection, useSendTransaction, useSwitchChain } from "wagmi";
 import { waitForTransactionReceipt } from "wagmi/actions";
 
@@ -10,6 +10,7 @@ import { Button } from "@nuts/ui/components/button";
 // ticket's) does not, and this leg is the one that produces the fill calldata.
 import { prepareAgentTrade } from "@/lib/agent/actions";
 import { recordTrade } from "@/lib/trade/actions";
+import { clearHeldFill, readHeldFill, sessionFillStore, writeHeldFill } from "@/lib/trade/held-fill";
 import { formatBaseUnits, formatUsd8 } from "@/lib/market/units";
 import { sameEconomics, sendGuard } from "@/components/market/take-a-side";
 import type { QuoteRaw } from "@/lib/trade/types";
@@ -126,7 +127,42 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 	 * `""` and could never succeed.
 	 */
 	const [sent, setSent] = useState<{ hash: `0x${string}`; token: string } | null>(null);
-	const hash = sent?.hash ?? null;
+	/**
+	 * C#3/#4-r3. The hash for DISPLAY, kept apart from the recording hold. The
+	 * hold is released the moment a durable row exists — including a row that
+	 * says the fill reverted — and the BaseScan link must survive that.
+	 */
+	const [txHash, setTxHash] = useState<`0x${string}` | null>(null);
+	const hash = txHash;
+	/**
+	 * C#2-r3 (lane C confirming pass, finding 2). The same durable hold the
+	 * market ticket uses. `sent` above lives in component state, and the
+	 * reviewer's remount measured `{"sends":2}`: a fresh card knew nothing about
+	 * money that had already left the wallet.
+	 */
+	const holdWallet = (trade.account ?? address ?? null)?.toLowerCase() ?? null;
+	const holdChain = trade.chainId ?? BASE_CHAIN_ID;
+	const holdSent = useCallback(
+		(fill: { hash: `0x${string}`; token: string } | null) => {
+			setSent(fill);
+			const store = sessionFillStore();
+			if (fill === null) clearHeldFill(store, holdChain, holdWallet);
+			else writeHeldFill(store, holdChain, holdWallet, { token: fill.token, txHash: fill.hash });
+		},
+		[holdChain, holdWallet],
+	);
+	const restored = useRef(false);
+	useEffect(() => {
+		if (restored.current) return;
+		restored.current = true;
+		const held = readHeldFill(sessionFillStore(), holdChain, holdWallet);
+		if (held === null) return;
+		setSent({ hash: held.txHash as `0x${string}`, token: held.token });
+		setTxHash(held.txHash as `0x${string}`);
+		setPhase("error");
+		// TODO-OWNER: recovery copy.
+		setMessage("A fill you sent earlier is not recorded yet. Press the button to record it; it will not send a second trade.");
+	}, [holdChain, holdWallet]);
 	const [positionPath, setPositionPath] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
 	/** C5: the economics the user has been shown and clicked through. */
@@ -154,6 +190,55 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 	// are the same read; before one exists the agent's preview is all there is.
 	const displayed = displayFrom(shownQuote, trade.preview);
 
+	/**
+	 * C#3 / C#4 (lane C confirming pass, findings 3 and 4; lane D's D-C1). THE
+	 * one place a `recordTrade` answer is interpreted.
+	 *
+	 * Round 2 had two: the first submit checked `recorded.status === "failed"`,
+	 * and the retry checked only `again.ok` and then set `"done"`. The reviewer
+	 * returned `{ok:true,status:"failed"}` for a REVERTED transaction on a retry
+	 * and the card said "Confirmed on Base and recorded."
+	 * (`retry_revert {"phase":"done","confirmedText":true}`). A successful server
+	 * action is not a successful fill.
+	 *
+	 * It also awaited outside the enclosing `try`, so a rejected request left
+	 * `phase === "recording"` forever and `busy` kept the retry button disabled
+	 * (`retry_throw {"phase":"recording","button":{"disabled":true}}`). Every
+	 * caller below runs this inside a `catch`, and no failure path leaves the
+	 * phase in a busy state.
+	 */
+	const finishRecording = useCallback(
+		async (fill: { hash: `0x${string}`; token: string }) => {
+			setPhase("recording");
+			const recorded = await recordTrade({ token: fill.token, txHash: fill.hash });
+			if (!recorded.ok) {
+				// No durable row: the fill is on chain and still unrecorded, so the
+				// hold STAYS and the button keeps recording.
+				setPhase("error");
+				setMessage(`${recorded.reason} The fill is on chain; press again to record it.`);
+				return;
+			}
+			// A durable row exists — confirmed, or failed because the fill reverted.
+			// Either way there is nothing left to record.
+			holdSent(null);
+			if (recorded.status === "failed") {
+				setPhase("error");
+				setMessage("The fill reverted on Base. Nothing was bought and nothing was counted.");
+				return;
+			}
+			setPositionPath(`/p/${recorded.positionId}`);
+			setPhase("done");
+		},
+		[holdSent],
+	);
+
+	/** C#3. The message for a recording that never reached the server. */
+	const recordingThrew = useCallback((error: unknown) => {
+		setPhase("error");
+		const first = error instanceof Error ? (error.message.split("\n")[0] ?? "") : "";
+		setMessage(`${first} The fill is on chain; press again to record it.`.trim());
+	}, []);
+
 	const send = useCallback(async () => {
 		setMessage(null);
 
@@ -163,15 +248,13 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 		// with recording money that has already moved, and checking it first left
 		// a sent fill permanently unrecordable.
 		if (sent !== null) {
-			setPhase("recording");
-			const again = await recordTrade({ token: sent.token, txHash: sent.hash });
-			if (!again.ok) {
-				setPhase("error");
-				setMessage(`${again.reason} The fill is on chain; press again to record it.`);
-				return;
+			// C#3. Inside a try: a rejected promise used to escape and freeze the
+			// phase at "recording", which disabled the only button that could retry.
+			try {
+				await finishRecording(sent);
+			} catch (error) {
+				recordingThrew(error);
 			}
-			setPositionPath(`/p/${again.positionId}`);
-			setPhase("done");
 			return;
 		}
 
@@ -286,25 +369,17 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 			// C6 / C5-r2: kept before anything else can fail, so the fill is never
 			// re-sent — with the token that built THIS calldata, not the one the
 			// approval stage handed back.
-			setSent({ hash: fillHash, token: ready.token });
+			setTxHash(fillHash);
+			holdSent({ hash: fillHash, token: ready.token });
 
-			setPhase("recording");
-			// THE one recording path — the same server action the market ticket
-			// uses, so the receipt is bound to the prepared order by the same
-			// fences (C1-C3).
-			const recorded = await recordTrade({ token: ready.token, txHash: fillHash });
-			if (!recorded.ok) {
-				setPhase("error");
-				setMessage(`${recorded.reason} The fill is on chain; press again to record it.`);
-				return;
+			// C#3/#4: the SAME handler the retry uses. Its own try, so a recording
+			// failure can never be mistaken for a wallet rejection by the catch
+			// below — the money has already moved by this line.
+			try {
+				await finishRecording({ hash: fillHash, token: ready.token });
+			} catch (error) {
+				recordingThrew(error);
 			}
-			if (recorded.status === "failed") {
-				setPhase("error");
-				setMessage("The fill reverted on Base. Nothing was bought and nothing was counted.");
-				return;
-			}
-			setPositionPath(`/p/${recorded.positionId}`);
-			setPhase("done");
 		} catch (error) {
 			setPhase("error");
 			const text = error instanceof Error ? error.message : "Transaction failed.";
@@ -317,7 +392,10 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 		config,
 		expectedChainId,
 		expiresAt,
+		finishRecording,
+		holdSent,
 		isConnected,
+		recordingThrew,
 		sent,
 		shownQuote,
 		sendTransactionAsync,
@@ -398,7 +476,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 									? "Confirm trade…"
 									: phase === "recording"
 										? "Waiting for the fill…"
-										: hash !== null
+										: sent !== null
 											? "Record the fill"
 											: expired
 												? "Quote expired"

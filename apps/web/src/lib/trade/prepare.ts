@@ -30,7 +30,7 @@ import { parseTokenAmount } from "@/lib/market/units";
 import { isFeedUnavailable } from "@/lib/thetanuts/orders";
 import { strikesLabel } from "@/lib/display";
 import { instrumentMismatch } from "./attachment";
-import { findThesis } from "./store";
+import { findThesis, findUnrecordedFill, unrecordedFillReason } from "./store";
 import { simulateFill } from "./chain";
 import { encodeTradeTicket, type TradeTicketPayload } from "./ticket";
 import { rawOf, takerFor } from "./view";
@@ -74,6 +74,16 @@ export async function prepareTradeFor(
 		return fail("NO_SESSION", "Sign in with your wallet before signing a trade.", true);
 	}
 	const taker = takerFor(input.side);
+
+	// C#2. A fill this wallet has already broadcast and not recorded owns the
+	// ticket until it is settled. The browser holds the same fence in
+	// `lib/trade/held-fill.ts`; this one also covers a cleared store, a second
+	// tab and another device. A read failure is NOT treated as "no such row" —
+	// it throws, and the action's own catch turns it into a refusal.
+	const unrecorded = await findUnrecordedFill(db, session.walletAddress, new Date());
+	if (unrecorded !== null) {
+		return fail("UNRECORDED_FILL", unrecordedFillReason(unrecorded.txHash));
+	}
 
 	let budget: bigint;
 	const found = await findStructure(input.structureId, { force: true });

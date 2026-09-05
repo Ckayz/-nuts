@@ -5,60 +5,13 @@
  * injected, because both bugs live in the wiring rather than in any extracted
  * function.
  */
-import { beforeAll, describe, expect, mock, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { deferred, mount } from "@/test/hook-runner";
-import type { PrepareResult, QuoteRaw, RecordResult, TicketQuoteView, TradePanelContext } from "@/lib/trade/types";
+import { calls, HASH, replies, resetTradeMocks, storage, WALLET } from "@/test/trade-mocks";
+import type { PrepareResult, QuoteRaw, TicketQuoteView, TradePanelContext } from "@/lib/trade/types";
 import type { Ticket } from "@/lib/display-types";
 
-// ---------------------------------------------------------------- injections
-
-interface Calls {
-	quotes: Array<{ side: string; budgetInput: string }>;
-	prepares: Array<{ side: string; budgetInput: string }>;
-	sends: Array<{ to: string; data: string }>;
-	records: Array<{ token: string; txHash: string }>;
-}
-
-const calls: Calls = { quotes: [], prepares: [], sends: [], records: [] };
-let quoteReply: (input: { side: string; budgetInput: string }) => Promise<TicketQuoteView>;
-let prepareReply: (input: { side: string; budgetInput: string }) => Promise<PrepareResult>;
-let recordReply: (input: { token: string; txHash: string }) => Promise<RecordResult>;
-let sendReply: (input: { to: string; data: string }) => Promise<string>;
-
-mock.module("wagmi", () => ({
-	useConfig: () => ({}),
-	useConnection: () => ({ address: WALLET, isConnected: true, chainId: 8453 }),
-	useSendTransaction: () => ({
-		mutateAsync: (input: { to: string; data: string }) => {
-			calls.sends.push({ to: input.to, data: input.data });
-			return sendReply(input);
-		},
-	}),
-	useSwitchChain: () => ({ switchChain: () => {}, isPending: false }),
-}));
-
-mock.module("wagmi/actions", () => ({
-	waitForTransactionReceipt: async () => ({ status: "success" }),
-}));
-
-mock.module("@/lib/trade/actions", () => ({
-	quoteTicket: (input: { side: string; budgetInput: string }) => {
-		calls.quotes.push(input);
-		return quoteReply(input);
-	},
-	prepareTrade: (input: { side: string; budgetInput: string }) => {
-		calls.prepares.push({ side: input.side, budgetInput: input.budgetInput });
-		return prepareReply(input);
-	},
-	recordTrade: (input: { token: string; txHash: string }) => {
-		calls.records.push(input);
-		return recordReply(input);
-	},
-}));
-
 // ------------------------------------------------------------------ fixtures
-
-const WALLET = "0x00000000000000000000000000000000000000a1";
 
 const RAW_BUY: QuoteRaw = {
 	budget: "5000000",
@@ -152,14 +105,16 @@ beforeAll(async () => {
 });
 
 function reset(): void {
-	calls.quotes = [];
-	calls.prepares = [];
-	calls.sends = [];
-	calls.records = [];
-	quoteReply = async () => quoteView("bull", RAW_BUY, "BUY-A");
-	prepareReply = async () => fill("0xBUY_A", RAW_BUY);
-	recordReply = async () => ({ ok: true, status: "confirmed", positionId: "p1", thesisId: null, txHash: "0xh", card: null, settled: null });
-	sendReply = async () => "0xhash1";
+	resetTradeMocks();
+	replies.quote = async () => quoteView("bull", RAW_BUY, "BUY-A");
+	replies.prepare = async () => fill("0xBUY_A", RAW_BUY);
+}
+
+/** The ticket's one primary button (`className` "btn acc big block go"). */
+function primary(h: ReturnType<typeof mount>) {
+	const hit = h.find((e) => e.type === "button" && String(e.props.className ?? "").includes("go"))[0];
+	if (hit === undefined) throw new Error("no primary button");
+	return hit;
 }
 
 function mountTicket(trade: TradePanelContext = context()) {
@@ -172,11 +127,11 @@ describe("C#1: a preparation started for one side must never send after the side
 	test("SENT_AFTER_SIDE_CHANGE — switching to Bear mid-preparation sends nothing", async () => {
 		reset();
 		const held = deferred<PrepareResult>();
-		prepareReply = () => held.promise;
-		quoteReply = async () => quoteView("bear", RAW_SELL, "SELL-A");
+		replies.prepare = () => held.promise;
+		replies.quote = async () => quoteView("bear", RAW_SELL, "SELL-A");
 
 		const h = mountTicket();
-		h.click(h.button(/Trade/) ?? (() => { throw new Error("no Trade button"); })());
+		h.click(primary(h));
 
 		// The preparation is in flight. The side controls must not be usable.
 		const bear = h.button(/Bear/);
@@ -198,10 +153,10 @@ describe("C#1: a preparation started for one side must never send after the side
 	test("the amount field and the presets are also locked while a preparation is pending", async () => {
 		reset();
 		const held = deferred<PrepareResult>();
-		prepareReply = () => held.promise;
+		replies.prepare = () => held.promise;
 
 		const h = mountTicket();
-		h.click(h.button(/Trade/) as NonNullable<ReturnType<typeof h.button>>);
+		h.click(primary(h));
 
 		const amount = h.find((e) => e.type === "input")[0];
 		expect(amount?.props.disabled).toBe(true);
@@ -214,7 +169,7 @@ describe("C#1: a preparation started for one side must never send after the side
 	test("a preparation that resolves with the side unchanged still sends", async () => {
 		reset();
 		const h = mountTicket();
-		h.click(h.button(/Trade/) as NonNullable<ReturnType<typeof h.button>>);
+		h.click(primary(h));
 		await h.settle();
 		expect(calls.sends.map((s) => s.data)).toEqual(["0xBUY_A"]);
 	});
@@ -224,11 +179,11 @@ describe("C#1: the fence, not just the disabled control", () => {
 	test("a structure change arriving as a PROP mid-preparation sends nothing", async () => {
 		reset();
 		const held = deferred<PrepareResult>();
-		prepareReply = () => held.promise;
+		replies.prepare = () => held.promise;
 
 		const trade = context();
 		const h = mountTicket(trade);
-		h.click(h.button(/Trade/) as NonNullable<ReturnType<typeof h.button>>);
+		h.click(primary(h));
 
 		// "Select" on the market table is a client-side navigation: the panel keeps
 		// its state and only its props change. No control can be disabled for that.
@@ -245,11 +200,11 @@ describe("C#1: the fence, not just the disabled control", () => {
 	test("an approval is fenced too: a structure change before the approval send stops it", async () => {
 		reset();
 		const held = deferred<PrepareResult>();
-		prepareReply = () => held.promise;
+		replies.prepare = () => held.promise;
 
 		const trade = context();
 		const h = mountTicket(trade);
-		h.click(h.button(/Trade/) as NonNullable<ReturnType<typeof h.button>>);
+		h.click(primary(h));
 		const moved: TradePanelContext = { ...trade, structureId: "s3", quote: { ...trade.quote, structureId: "s3" } };
 		h.setProps({ ticket: moved.quote.ticket, structureLabel: moved.structureLabel, expiryLabel: moved.expiryLabel, trade: moved });
 		await h.settle();
@@ -257,5 +212,91 @@ describe("C#1: the fence, not just the disabled control", () => {
 		await h.settle();
 
 		expect(calls.sends.map((s) => s.data)).toEqual([]);
+	});
+});
+
+// ------------------------------------------------------- finding 2: REMOUNT
+
+describe("C#2: a remount must not put a second fill in front of the user", () => {
+	test("MOUNT / SAME_MOUNT_RETRY / REMOUNT — sends stay 1", async () => {
+		reset();
+		replies.record = async () => {
+			throw new Error("response lost");
+		};
+
+		const trade = context();
+		const first = mountTicket(trade);
+		first.click(first.button(/Trade/) as NonNullable<ReturnType<typeof first.button>>);
+		await first.settle();
+		const mount1 = { sends: calls.sends.length, records: calls.records.length, label: primary(first).text };
+
+		// Same mount: the button records, it does not trade.
+		first.click(primary(first));
+		await first.settle();
+		const sameMount = { sends: calls.sends.length, records: calls.records.length };
+
+		// The user reloads the page. A fresh component, same wallet, same chain.
+		first.unmount();
+		const second = mountTicket(trade);
+		await second.settle();
+		const label = primary(second).text;
+		if (label !== "Record the fill") {
+			second.click(primary(second));
+			await second.settle();
+		}
+		const remount = { sends: calls.sends.length, label };
+
+		expect({ mount1, sameMount, remount }).toEqual({
+			mount1: { sends: 1, records: 1, label: "Record the fill" },
+			sameMount: { sends: 1, records: 2 },
+			remount: { sends: 1, label: "Record the fill" },
+		});
+	});
+
+	test("a durable recording answer releases the hold, so the next mount trades again", async () => {
+		reset();
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+		expect(storage.size).toBe(0);
+
+		const again = mountTicket();
+		await again.settle();
+		expect(primary(again).text).toBe("Trade");
+	});
+
+	test("a refusal keeps the hold across the remount — money moved either way", async () => {
+		reset();
+		replies.record = async () => ({ ok: false, code: "X", reason: "not yet" });
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+		expect(storage.size).toBe(1);
+
+		const again = mountTicket();
+		await again.settle();
+		expect(primary(again).text).toBe("Record the fill");
+		again.click(primary(again));
+		await again.settle();
+		expect(calls.sends.length).toBe(1);
+		expect(calls.records.length).toBe(2);
+	});
+
+	test("another wallet does not inherit the held fill", async () => {
+		reset();
+		replies.record = async () => ({ ok: false, code: "X", reason: "not yet" });
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+
+		const other = { ...context(), sessionWallet: "0x00000000000000000000000000000000000000b2" };
+		const again = mount(TakeASide, {
+			ticket: other.quote.ticket,
+			structureLabel: other.structureLabel,
+			expiryLabel: other.expiryLabel,
+			trade: other,
+		});
+		await again.settle();
+		expect(primary(again).text).toBe("Trade");
 	});
 });

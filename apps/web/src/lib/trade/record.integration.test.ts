@@ -9,6 +9,7 @@ import { createOrFetchUser } from "@/lib/auth/store";
 import { formatBaseUnits } from "@/lib/market/units";
 import { structureIdOf } from "@/lib/market/structures";
 import { prepareTradeFor } from "./prepare";
+import { findUnrecordedFill, UNRECORDED_FILL_WINDOW_MS } from "./store";
 import { recordTradeFor, type ChainReader } from "./record";
 import { encodeTradeTicket, decodeTradeTicket, type TradeTicketPayload } from "./ticket";
 import { loadProductionFill, PRODUCTION_FILLS, type LoadedFill } from "./production-fills";
@@ -1065,6 +1066,102 @@ async function failure(run: () => Promise<unknown>): Promise<{ message: string; 
 	}
 	throw new Error("expected the database to refuse this write");
 }
+
+describeLive("C#2: an unrecorded fill owns the ticket (server fence)", () => {
+	/** The minimum a `pending` row needs; nothing here depends on the numbers. */
+	async function pendingRow(userId: string, wallet: string, createdAt: Date): Promise<string> {
+		const txHash = `0x${randomBytes(32).toString("hex")}`;
+		await db.insert(positions).values({
+			thesisId: null,
+			userId,
+			role: "standalone",
+			side: "back",
+			status: "pending",
+			chainId: 8453,
+			walletAddress: wallet,
+			orderId: "0".repeat(16),
+			orderSnapshot: {
+				version: 1 as const,
+				order: {
+					maker: `0x${"1".repeat(40)}`,
+					taker: `0x${"0".repeat(40)}`,
+					option: `0x${"2".repeat(40)}`,
+					isBuyer: false,
+					numContracts: "10000",
+					price: "50000000",
+					expiry: "1893456000",
+					nonce: "1",
+				},
+				signature: "0x00",
+				availableAmount: "1000000",
+				makerAddress: `0x${"1".repeat(40)}`,
+			},
+			txHash,
+			referrer: null,
+			budget: "1",
+			budgetDecimals: 6,
+			contracts: "1",
+			contractDecimals: 6,
+			premium: "0",
+			premiumDecimals: 6,
+			fees: "0",
+			feeDecimals: 6,
+			collateral: "0",
+			collateralDecimals: 6,
+			breakEvenPrices: [],
+			breakEvenPriceDecimals: 8,
+			breakEvenPricesUsd: [],
+			createdAt,
+		});
+		return txHash;
+	}
+
+	test("findUnrecordedFill sees a fresh pending row and refuses prepareTrade", async () => {
+		const wallet = `0x${randomBytes(20).toString("hex")}`;
+		const user = await seedUser(wallet);
+		const txHash = await pendingRow(user.id, wallet, new Date());
+
+		const found = await findUnrecordedFill(db, wallet, new Date());
+		expect(found?.txHash).toBe(txHash);
+
+		const result = await prepareTradeFor(
+			{ userId: user.id, walletAddress: wallet },
+			{ structureId: "deadbeefdeadbeef", side: "bull", budgetInput: "10" },
+		);
+		// It refuses BEFORE the structure is even looked up: no calldata path runs.
+		expect(result).toMatchObject({ ok: false, code: "UNRECORDED_FILL" });
+		if (result.ok) throw new Error("unreachable");
+		expect(result.reason).toContain(txHash.slice(0, 10));
+	});
+
+	test("a row older than the window self-heals, and another wallet is unaffected", async () => {
+		const wallet = `0x${randomBytes(20).toString("hex")}`;
+		const user = await seedUser(wallet);
+		await pendingRow(user.id, wallet, new Date(Date.now() - UNRECORDED_FILL_WINDOW_MS - 60_000));
+		expect(await findUnrecordedFill(db, wallet, new Date())).toBeNull();
+
+		const other = `0x${randomBytes(20).toString("hex")}`;
+		const otherUser = await seedUser(other);
+		await pendingRow(otherUser.id, other, new Date());
+		expect(await findUnrecordedFill(db, wallet, new Date())).toBeNull();
+		expect((await findUnrecordedFill(db, other, new Date()))?.txHash).toBeTruthy();
+	});
+
+	test("a confirmed or failed row does not block anything", async () => {
+		const wallet = `0x${randomBytes(20).toString("hex")}`;
+		const user = await seedUser(wallet);
+		const txHash = await pendingRow(user.id, wallet, new Date());
+		await db.update(positions).set({ status: "failed", failureReason: "transaction_reverted" }).where(eq(positions.txHash, txHash));
+		expect(await findUnrecordedFill(db, wallet, new Date())).toBeNull();
+	});
+
+	test("the wallet is matched lowercase, as the column is stored", async () => {
+		const wallet = `0x${randomBytes(20).toString("hex")}`;
+		const user = await seedUser(wallet);
+		await pendingRow(user.id, wallet, new Date());
+		expect(await findUnrecordedFill(db, wallet.toUpperCase().replace("0X", "0x"), new Date())).not.toBeNull();
+	});
+});
 
 describeLive("migration 0007 fences", () => {
 	test("thesis_id and role must agree, in both directions", async () => {

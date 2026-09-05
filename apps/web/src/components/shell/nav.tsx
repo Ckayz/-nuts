@@ -14,16 +14,17 @@ import { usePathname } from "next/navigation";
  * (docs/mockups/thesis-fun-mockup.html line 417; the view itself is line 741).
  * There is no markets index in the mockup and no `/markets` route in the app.
  *
- * WHICH market, measured rather than assumed: `firstMarketSlug` is
- * `marketSummariesData().markets[0].slug`, and `lib/market/live.ts:172` sorts
- * the book's assets by TICKER, ascending. So the rule today is "the
- * alphabetically first asset the OptionBook has liquidity for" — AVAX on the
- * live book of 2026-09-06, which is an accident of the sort, not a choice.
+ * WHICH market, owner decision 8 (2026-09-06): the one with the MOST OPEN
+ * ORDERS on the live book, ties breaking on the earlier ticker. Before that
+ * ruling it was `markets[0]`, and `lib/market/live.ts:172` sorts the book's
+ * assets by TICKER ascending, so the shipped rule was "the alphabetically first
+ * asset the OptionBook has liquidity for" — AVAX, an accident of that sort.
  *
- * TODO-OWNER: which market "Markets" should open — the alphabetically first
- * (today), the deepest book, the most traded, the last one the visitor looked
- * at, or a markets index page of its own. Changing it is a product decision and
- * an index would be a new route, so nothing here picks one.
+ * The rule lives in `lib/market/summaries.ts` `busiestMarketSlug`, which carries
+ * its own TODO-OWNER: the owner ratified this default over the other candidates
+ * (alphabetically first, most traded, last visited, or a markets index route),
+ * and the ranking is `lib/farcaster/assets.ts` `rankAssets`, reused so the rail
+ * and this item cannot disagree about which market is busiest.
  *
  * TODO-OWNER: there is no `/leaderboard` route. The top-traders card on the
  * feed IS the leaderboard today, so the item is a real in-page anchor to it —
@@ -36,7 +37,7 @@ import { usePathname } from "next/navigation";
  * `/new`, so the Create button takes that slot — without it the composer would
  * be unreachable.
  */
-export function Nav({ firstMarketSlug, unavailable = false }: { firstMarketSlug?: string; unavailable?: boolean }) {
+export function Nav({ marketSlug, unavailable = false }: { marketSlug?: string; unavailable?: boolean }) {
 	const pathname = usePathname();
 	// TODO-OWNER: markets-unavailable navigation copy.
 	return (
@@ -44,9 +45,9 @@ export function Nav({ firstMarketSlug, unavailable = false }: { firstMarketSlug?
 			<Link href="/" aria-current={pathname === "/" ? "page" : undefined}>
 				Feed
 			</Link>
-			{firstMarketSlug ? (
+			{marketSlug ? (
 				<Link
-					href={`/m/${firstMarketSlug}`}
+					href={`/m/${marketSlug}`}
 					aria-current={pathname.startsWith("/m/") ? "page" : undefined}
 				>
 					Markets

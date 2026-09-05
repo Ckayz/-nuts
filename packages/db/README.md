@@ -59,8 +59,9 @@ The chain is rebased onto the AI track's migration, which is already applied to 
 - `0004_unbacked_wallet_fence` — hand-written replacement of the public creator-wallet function, excluding NULL links from its existing validation. Non-NULL link predicates and lock order are preserved. This hand-written migration has no snapshot.
 - `0005_slugs_and_handles` — adds required unique thesis slugs with deterministic backfill and optional unique user handles.
 - `0006_follow_activity` — adds nullable target-user FK and target/time index; drops and recreates `activity_domain_reference_required` with the same name to accept target-only events.
+- `0007_standalone_positions` — a trade is independent of a post (owner 2026-09-05): `positions.thesis_id` becomes nullable, `position_role` gains `standalone`, and CHECK `positions_thesis_role_consistent` ties the two (`thesis_id IS NULL` exactly when `role = 'standalone'`; compared as `role::text` because an enum value added in the same transaction cannot be used there). The frozen 0002 trigger still requires `role = 'creator'` for `theses.creator_position_id`, so a standalone position can never be linked as a creator position.
 
-`0000`–`0005` are frozen. Apply the full migration chain before using the post model.
+`0000`–`0007` are frozen. Apply the full migration chain before using the post model.
 
 Why the chain was rebased: drizzle-orm's migrator reads only the single most recently applied row (`order by created_at desc limit 1`) and applies a journal entry when `lastDbMigration.created_at < migration.folderMillis` (`drizzle-orm/pg-core/dialect.js`). It never compares tags or hashes. Our original chain carried `when` timestamps *earlier* than the already-applied `0000_agent_tables`, so every one of our migrations would have been skipped silently against production — reporting success while changing nothing. Any migration added from here must carry a `when` greater than every applied entry. `bunx drizzle-kit generate` does this automatically; a hand-written journal entry must be given a fresh `Date.now()`.
 
@@ -142,7 +143,7 @@ never run the statements piecemeal. Its generated snapshot models the final sche
 
 `users.handle` is nullable, unique when set, and accepts lowercase ASCII letters,
 digits and underscores. TODO-OWNER: the enforced 1–32 character bounds are
-placeholders for the owner. There is no handle writer or profile-edit UI yet;
+placeholders for the owner. The handle is written by the profile editor on the user's own page (`apps/web/src/lib/profile/writes.ts`: session-scoped UPDATE, lowercased and pattern-checked before the query, unique violation → `handle_taken`);
 wallet identity creation continues to insert the address only, leaving handle NULL.
 Golden normalization tests run offline; the integration suite executes the actual
 0005 backfill block and compares its results with TypeScript across Unicode,

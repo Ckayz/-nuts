@@ -31,6 +31,13 @@ if (url) {
       !("database" in parameters) || typeof parameters.database !== "string") {
     throw new Error("Invalid drizzle-kit destination parameters");
   }
+  // `pg` also reads PGOPTIONS (and other PG* variables) from the environment;
+  // `-c search_path=…` there would relocate every migration's unqualified DDL
+  // while the printed target still looks right (Astra review 2026-09-05). The
+  // effective driver options must be empty.
+  if ("options" in parameters && parameters.options !== undefined && parameters.options !== null && String(parameters.options) !== "") {
+    throw new Error("Drizzle-kit destination carries driver options (PGOPTIONS or ?options=); refusing");
+  }
   const { host, port, database } = parameters;
   // Never print credentials or query parameters.
   console.error(`drizzle-kit target: ${host}:${port}/${database}`);

@@ -47,6 +47,19 @@ describe("drizzle target fence", () => {
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("destination query overrides");
   });
+  test("PGOPTIONS in the environment is refused (driver-level options bypass the URL check)", () => {
+    const previous = process.env.PGOPTIONS;
+    process.env.PGOPTIONS = "-c search_path=evil,public";
+    try {
+      const result = readConfig(local);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("driver options");
+    } finally {
+      if (previous === undefined) delete process.env.PGOPTIONS;
+      else process.env.PGOPTIONS = previous;
+    }
+  });
+
   test("driver-decoded database is printed", () => {
     expect(readConfig(local.replace("local_test", "local%5Ftest")).exitCode).toBe(0);
   });

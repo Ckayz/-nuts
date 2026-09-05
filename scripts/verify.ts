@@ -20,7 +20,9 @@ const steps = [
   { cwd: "packages/env", cmd: ["bun", "test"] },
   { cwd: "apps/web", cmd: ["bunx", "tsc", "--noEmit"] },
   { cwd: "apps/web", cmd: ["bun", "test"] },
-  { cwd: "apps/web", cmd: ["bunx", "next", "build"], build: true },
+  // Production builds are DB builds: `next build` sets NODE_ENV=production and the
+  // data-source guard refuses fixtures there (no build-phase exemption). Mock mode
+  // is `next dev` only, so the build is verified once, in db mode.
   { cwd: "apps/web", cmd: ["bunx", "next", "build"], build: true, db: true },
 ];
 const results: { directory: string; command: string; result: string }[] = [];

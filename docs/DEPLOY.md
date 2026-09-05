@@ -44,6 +44,16 @@ bun run verify --offline
 
 Offline mode sets both database URLs to empty and `SKIP_ENV_VALIDATION=1`, preventing env-file fallback. The runner prints and excludes integration and concurrency test files (including live RPC suites); both builds skip because they are outside the offline writer's authorization. This is partial verification, not deployment clearance. Each command streams output; the first failure stops execution and the final table includes unrun steps.
 
+## Production builds are database builds
+
+`next build` runs with `NODE_ENV=production`, and in production the app refuses fixture data (`DATA_SOURCE` must be `db`) — during the build as well, because a page prerendered from fixtures would later be served from the response cache without any runtime check. So every production build sets `DATA_SOURCE=db`:
+
+```sh
+cd apps/web && DATA_SOURCE=db bunx next build
+```
+
+A plain `bunx next build` (mock) fails at the first prerender with "Production requires DATA_SOURCE=db". `bun run verify` builds in db mode for that reason. Mock mode is for `bun run dev:web` only.
+
 ## Smoke-testing a production build locally
 
 `next start` runs as production, and in production the app refuses to serve

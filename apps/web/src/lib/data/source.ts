@@ -12,19 +12,17 @@ import { env } from "@nuts/env/server";
 export type DataSource = "mock" | "db";
 
 /**
- * `next build` runs with NODE_ENV=production while it prerenders the mock
- * pages, and marks that with NEXT_PHASE=phase-production-build (Next's own
- * constant, `next/dist/build/index.js`). The refusal below is a RUNTIME fence
- * for a deployed server, so the build phase is exempt; a production server
- * that serves fixtures still throws at first use.
+ * Production means production for the BUILD too: `next build` runs with
+ * NODE_ENV=production and prerenders static pages; a page prerendered from
+ * fixtures is later served from the response cache without ever calling this
+ * function again (Astra review 2026-09-05: `next/dist/server/response-cache`
+ * returns cached HTML without rendering). So a build-phase exemption would let
+ * a misconfigured deploy ship fixture HTML. There is none: every production
+ * build must set DATA_SOURCE=db. Mock mode is for `next dev` only.
  */
-function inProductionBuildPhase(): boolean {
-	return process.env.NEXT_PHASE === "phase-production-build";
-}
-
 export function dataSource(): DataSource {
 	const source = env.DATA_SOURCE;
-	if (env.NODE_ENV === "production" && source !== "db" && !inProductionBuildPhase()) {
+	if (env.NODE_ENV === "production" && source !== "db") {
 		// TODO-OWNER: whether mock production previews should ever be allowed.
 		throw new Error("Production requires DATA_SOURCE=db; fixture data cannot be served in production.");
 	}

@@ -66,3 +66,4 @@ temp
 
 # Browser-tool artifacts written by agents
 .playwright-mcp/
+.env*

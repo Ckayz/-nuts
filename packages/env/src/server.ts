@@ -37,8 +37,20 @@ export const env = createEnv({
 		DATA_SOURCE: z.enum(["mock", "db"]).default("mock"),
 		NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 
+		/**
+		 * Vercel AI Gateway credential. When present the agent routes through the
+		 * gateway and OPENROUTER_API_KEY is unused. Optional so a local checkout
+		 * without it still runs on OpenRouter.
+		 */
+		AI_GATEWAY_API_KEY: z.string().min(1).optional(),
 		/** OpenRouter key for the agent's model calls. Server-only, never exposed. */
-		OPENROUTER_API_KEY: z.string().min(1),
+		/**
+		 * OpenRouter credential. Optional: it is the fallback when
+		 * AI_GATEWAY_API_KEY is absent. `model.ts` refuses at startup if neither
+		 * is set, which is a clearer failure than a schema error naming only one
+		 * of two acceptable credentials.
+		 */
+		OPENROUTER_API_KEY: z.string().min(1).optional(),
 		/** Primary model for agent turns. */
 		AGENT_MODEL: z.string().min(1).default("anthropic/claude-sonnet-4.5"),
 		/**

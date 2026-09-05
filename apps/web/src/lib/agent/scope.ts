@@ -14,12 +14,27 @@ import { gateModel } from "./model";
  * its own; this is what actually holds.
  */
 
+/**
+ * `reason` is deliberately unbounded.
+ *
+ * It was `.max(160)`, which took the agent down in production. The gate model
+ * reliably writes about 200 characters — measured 202 on five consecutive runs,
+ * valid JSON, `finish_reason: "stop"`. `generateObject` rejected the object, the
+ * gate reported itself degraded, and the route's fail-closed rule turned that
+ * into a 503 on every message, while the model was answering correctly.
+ *
+ * The earlier note was right that the reason is never shown to a user, and that
+ * is exactly why it must not be validated: bounding a cosmetic string with a
+ * schema makes its length a liveness condition. It is trimmed for storage below
+ * instead. `maxOutputTokens` already bounds what the model may spend.
+ */
 const decisionSchema = z.object({
 	inScope: z.boolean(),
-	// TODO-OWNER: the gate's reason is never shown to a user; 160 only bounds
-	// what the small model may spend on it.
-	reason: z.string().max(160),
+	reason: z.string(),
 });
+
+/** Longest reason worth keeping. Trimming is cosmetic and cannot fail. */
+const MAX_REASON_LENGTH = 300;
 
 export interface ScopeDecision {
 	inScope: boolean;
@@ -71,7 +86,11 @@ export async function checkScope(message: string): Promise<ScopeDecision> {
 			// The gate emits one boolean and a short reason; anything more is waste.
 			maxOutputTokens: 120,
 		});
-		return { ...object, degraded: false };
+		return {
+			inScope: object.inScope,
+			reason: object.reason.slice(0, MAX_REASON_LENGTH),
+			degraded: false,
+		};
 	} catch (error) {
 		// This function still returns `inScope: true` so a caller that only wants
 		// a classification is not forced to invent one. `degraded` is the whole

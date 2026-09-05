@@ -227,3 +227,65 @@ sides of the floor to one ten-millionth, the exact-cap case, the UTC day rollove
 and five malformed-rule shapes. Unmerged on purpose: an unused table in the production migration
 chain is a liability during review with no upside.
 
+---
+
+## 10. Production is migrated and the site is up (2026-09-05 ~23:0x)
+
+Two things were blocking the deploy. Both are fixed and verified; the owner
+authorised each.
+
+### The Vercel build was failing on variables that were set
+
+The log said `Invalid environment variables: DATABASE_URL, OPENROUTER_API_KEY ...
+received undefined` while all four were correctly configured on the project. The
+cause was printed at the bottom as a **warning**, not an error:
+
+> the following environment variables are set on your Vercel project, but missing
+> from "turbo.json". These variables WILL NOT be available to your application
+
+Turborepo filters the environment strictly. Fixed in `turbo.json` by declaring
+every variable `@nuts/env` validates, cross-checked against
+`packages/env/src/server.ts` so the two cannot drift (11 validated, 11 declared,
+plus `NODE_ENV`). Detail in `docs/TEAM-HOSTING.md` §4b.
+
+**The trap worth knowing:** `bunx next build` passes even when Vercel fails,
+because calling next directly bypasses turbo's filter. Only `bun run build`
+reproduces it. **Adding a variable to `server.ts` now means adding it to
+`turbo.json` too.**
+
+### The production migration is done — this is off your open-items list
+
+Ran from a laptop against `db.<ref>.supabase.co:5432` with
+`DRIZZLE_ALLOW_REMOTE=1 bunx drizzle-kit migrate`, never `push`.
+
+Before: 6 tables, migration `0000` only. After: **14 tables, 9 of 9 applied, none
+pending.** Nothing was dropped — the chain only adds, and the `agent_*` tables
+were untouched.
+
+```
+activity · agent_conversations · agent_messages · agent_proposals
+agent_receipts · agent_rfq_keys · agent_usage · auth_challenges
+comments · follows · likes · positions · theses · users
+```
+
+Verified live afterwards: `/` 200 and rendering "Thesis.fun" with the Markets
+panel, `/agent` 200, `/portfolio` 200, `/m/eth` 200. Before the migration the
+site returned a server error, because the pages were querying tables that did not
+exist.
+
+Migration `0009` (`agent_hedge_rules`) is **not** in this chain. It stays parked
+on `origin/agent-auto-r1` with the autonomous groundwork; see §9.
+
+### Still open on the deploy
+
+`DATABASE_URL` and `SESSION_SECRET` are set for **Production only**. Preview
+deployments therefore still fail env validation. Production is unaffected. Your
+own `TEAM-HOSTING.md` §2 says to set every variable for both, with the caveat that
+previews would then read production data.
+
+### Worth checking
+
+Devfolio was submitted at 22:50, which is **before** both fixes landed. Anyone who
+opened the live link between then and now saw the server error above. It works
+now; the submitted URL is worth re-opening once to confirm what a judge sees.
+

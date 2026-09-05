@@ -26,7 +26,7 @@ From `apps/web/.env.example` and `packages/env/src/server.ts`:
 The owner's laptop can push its gitignored `apps/web/.env` to Vercel with `bun run env:production -- --yes` (`scripts/sync-vercel-env.ts`), but the dashboard is the simpler path for the team. That script is fail-closed: it pushes only keys in the validated env schemas (so the owner's `PROD_*`/`SUPABASE_*` keys are skipped by name), refuses the whole run when a value it would push is local (any loopback host — `localhost`, the whole `127.0.0.0/8` block, `::1`, `0.0.0.0` — or `file:`) or empty in `production`, and refuses to overwrite without `--yes` (`-- --dry-run` prints the plan instead). Never commit any of these values.
 
 ## 3. Production database — migrate BEFORE the first deploy
-The app needs tables `users`, `theses`, `positions`, … Production held `0000`–`0008` — 9 rows in `drizzle.__drizzle_migrations`, 14 tables — measured 2026-09-06 01:31 through the session pooler, read-only. (It held only `0000_agent_tables` on 2026-09-05 18:0x; that line is superseded.) The command below is therefore expected to be a no-op; run it anyway and read what it prints. From a laptop with the repo:
+The app needs tables `users`, `theses`, `positions`, … Production holds `0000`–`0009` — 10 rows in `drizzle.__drizzle_migrations`, index `theses_tagged_asset_created_at_idx` present — measured 2026-09-06 06:57 through the session pooler. That matches the checked-in journal's ten entries, so the command below is expected to be a no-op; run it anyway and read what it prints — the count must read 10. (It held `0000`–`0008` at 01:31 the same day, and only `0000_agent_tables` on 2026-09-05 18:0x; both lines are history.) **Because a push to `main` deploys itself (below), apply every NEW migration to production right after its code merges.** From a laptop with the repo:
 ```
 # session pooler (port 5432 on the pooler host — the only IPv4 route; the direct host is IPv6-only)
 cd packages/db
@@ -35,8 +35,10 @@ DIRECT_DATABASE_URL='postgresql://postgres.<ref>:<url-encoded password>@aws-0-ap
 Never `drizzle-kit push` against the shared project (it can DROP the other developer's tables — `CLAUDE.md` § Commands). Details and recovery: `docs/DEPLOY.md`.
 
 ## 4. Deploy and verify
-1. Trigger the production deploy (push to `main`, or "Redeploy" in the dashboard). Watch the build log for the `DATA_SOURCE` error above — it means step 2 was missed.
-2. Open `/`, `/m/btc`, `/new`, `/portfolio`, sign in with a wallet on Base, post, like. Every route should answer 200; the Markets panel must show the live book (6–8 assets), not "unavailable".
+**Vercel is connected to the GitHub repository and builds every push to `main` as the production deployment (measured 2026-09-06 via `gh api repos/<owner>/-nuts/deployments`: every entry is a `vercel[bot]` Production deployment for a `main` commit). Treat a merge to `main` as a deploy: verify first, then smoke `/` and `/api/agent/health`.** Nothing unverified goes to `main`. The manual `bun run deploy` / dashboard "Redeploy" path is secondary.
+
+1. The push to `main` IS the trigger (or "Redeploy" in the dashboard). Watch the build log for the `DATA_SOURCE` error above — it means step 2 was missed.
+2. Smoke `/` and `/api/agent/health` on every merge. Before the first deploy, and after any substantial change, also open `/m/btc`, `/new`, `/portfolio`, sign in with a wallet on Base, post, like. Every route should answer 200; the Markets panel must show the live book (6–8 assets), not "unavailable".
 3. **Custom domain**: assign it in Vercel → Domains. A pasted `https://<domain>/p/<id>` link unfurls into a trade card as soon as the page is served on that domain: `lib/site-origin.ts` accepts BOTH the deployment URL (`VERCEL_PROJECT_PRODUCTION_URL` / `VERCEL_URL`) and the origin the request actually arrived on, so a branch alias and a custom domain both work without waiting for either to become the production domain. (Measured 2026-09-05 on a db-mode production build: with the deployment URL set to one name, a link written on a second name unfurled when the page was served on that second name.) A link written on a THIRD origin the deployment never answers on stays plain text, which is the intended fence.
 4. Then the owner's tiny real fill (`packages/thetanuts/scripts/README.md`) is the final proof of the money path.
 

@@ -65,7 +65,9 @@ import { getSession } from "@/lib/auth/session";
 import { ascendingStrikes, riskKindFor } from "@/lib/market/structures";
 import { formatBaseUnits, formatUsd8 } from "@/lib/market/units";
 import { pnlCard } from "@/lib/display";
-import { mapCreator } from "@/lib/data/map";
+import { resolvePnl } from "@/lib/position/lifecycle";
+import type { LivePriceBook } from "@/lib/position/types";
+import { mapCreator, mapPosition } from "@/lib/data/map";
 import { creatorHandle, creatorInitials } from "@/lib/data/identity";
 import type * as Domain from "@/types";
 import { collateralUsdPrice } from "@/lib/thetanuts/orders";
@@ -358,20 +360,91 @@ export async function recordTradeFor(
 
 /**
  * The post-fill share card — the SAME `View.PnlCard` every other surface draws
- * (round-1 fold item 16), built by the one builder in `lib/position/view.ts`.
+ * (round-1 fold item 16).
  *
- * The big number is an em dash on purpose, and the builder says so in its own
- * sentence: a live P&L needs a mark for the option, and this app has none at the
- * moment a fill confirms (`positions.status` only reaches `indexed` later, and
- * the SDK publishes no option price here). A freshly confirmed row is
- * `confirmed`, whose resolution is exactly "no recorded estimate yet", so the
- * card states that rather than asserting "+$0.00".
+ * MAJOR-1 (Opus user-flow re-walk, pass 2). The big number used to be a
+ * hardcoded em dash with the sentence "No P&L yet: a live figure needs a mark
+ * for this option and nothing published one at the moment this fill confirmed."
+ * That sentence stopped being true when fold D wired `livePriceBook` into
+ * `page-data.ts`: the same position printed `−$1.00 (−100.0% of max loss)` on
+ * `/p/<id>`, on the feed, on the profile row and in the composer preview, from
+ * the same cached order snapshot, at the same instant. The dialog is the one
+ * moment the share card was designed for, and it was the only surface still
+ * saying the figure did not exist.
  *
- * The USD figures are the ones the fill itself recorded, converted from raw
+ * It is now priced through the SAME two functions every other surface uses —
+ * `livePriceBook` (`lib/position/spot.ts`, one read of the cached snapshot) and
+ * `listRowPnl` + `resolvePnl` (`lib/position/view.ts`, `lifecycle.ts`) — so the
+ * dialog and `/p/<id>` cannot disagree by construction. When the feed has no
+ * spot, no instrument could be decoded, or anything at all throws, the card
+ * keeps the honest "not available yet" sentence: `resolvePnl` owns that
+ * vocabulary too, and `pricedPnl` below never lets a pricing failure lose the
+ * card (a null card makes the browser offer the trade again — see C6).
+ *
+ * The USD tiles are still the ones the fill itself recorded, converted from raw
  * collateral base units by the same peg `usd8Of` uses above; a token this code
  * cannot price yields null, which the card renders as "\u2014".
  */
-async function fillCard(ticket: TradeTicketPayload, row: Position): Promise<FillCard> {
+
+/** The card's P&L when nothing could be priced. TODO-OWNER: the wording. */
+const UNPRICED_PNL = {
+	usd: null,
+	basis: "unavailable" as const,
+	detail:
+		"No P&L yet: a live figure needs a mark for this option and nothing published one at the moment this fill confirmed. TODO-OWNER: the mark source.",
+};
+
+/**
+ * MAJOR-1. The live P&L of the row that was just recorded, resolved exactly as
+ * a list row is.
+ *
+ * `prices` is a seam so a test can pin a spot; the default resolves one book for
+ * this single position, which costs one read of the snapshot the fill path has
+ * already cached (`lib/thetanuts/orders.ts`).
+ *
+ * Fails CLOSED to the honest sentence, never to a number and never by throwing:
+ * this runs after the money has moved.
+ */
+export async function pricedPnl(
+	row: Position,
+	prices?: LivePriceBook,
+): Promise<{ usd: string | null; basis: "settled" | "estimate" | "derived" | "unavailable"; detail: string }> {
+	try {
+		const domain = mapPosition({ position: row, thesis: null });
+		const { listRowPnl } = await import("@/lib/position/view");
+		const book =
+			prices ??
+			(await (async () => {
+				const { livePriceBook } = await import("@/lib/position/spot");
+				// The same two keys `rowPriceKeys` collects for a list row.
+				return await livePriceBook(
+					[domain.instrument?.asset ?? domain.underlyingAsset],
+					[domain.instrument?.collateralSymbol ?? null],
+				);
+			})());
+		const live = listRowPnl(domain, book);
+		const resolved = resolvePnl({
+			status: domain.status,
+			failureReason: domain.failureReason,
+			finalPnlUsd: domain.economics.finalPnlUsd,
+			estimatedPnlUsd: domain.economics.estimatedPnlUsd,
+			settlementPriceUsd: domain.economics.settlementPriceUsd,
+			derivable: live.derivable,
+			derivedPnlUsd: live.derivedPnlUsd,
+			spotUsd8: live.spotUsd8,
+			// The same sentence the card used to hardcode, now only the FALLBACK.
+			unavailableReason: UNPRICED_PNL.detail,
+			expiryAt: domain.expiryAt ?? null,
+			asOf: new Date().toISOString(),
+		});
+		return { usd: resolved.pnlUsd, basis: resolved.basis, detail: resolved.detail };
+	} catch (error) {
+		console.error(`[trade/record] could not price the share card for position ${row.id}:`, error);
+		return UNPRICED_PNL;
+	}
+}
+
+export async function fillCard(ticket: TradeTicketPayload, row: Position, prices?: LivePriceBook): Promise<FillCard> {
 	const [user] = await db
 		.select()
 		.from(users)
@@ -422,12 +495,9 @@ async function fillCard(ticket: TradeTicketPayload, row: Position): Promise<Fill
 		expiryLabel: null,
 		expiryFullLabel: null,
 		side: ticket.positionSide,
-		pnl: {
-			usd: null,
-			basis: "unavailable",
-			detail:
-				"No P&L yet: a live figure needs a mark for this option and nothing published one at the moment this fill confirmed. TODO-OWNER: the mark source.",
-		},
+		// MAJOR-1: the same live figure `/p/<id>` prints, or the same honest
+		// sentence it prints when there is none.
+		pnl: await pricedPnl(row, prices),
 		// TODO-OWNER: tile labels. The mockup names "Max loss" and "Max payout"; it
 		// has no label for what a fill cost.
 		entryLabel: ticket.taker === "buy" ? "Premium paid" : "Collateral locked",

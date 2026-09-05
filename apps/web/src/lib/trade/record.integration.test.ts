@@ -13,7 +13,9 @@ import { resolvePnl } from "@/lib/position/pnl";
 import { positionStatusDisplay } from "@/lib/display";
 import { prepareTradeFor } from "./prepare";
 import { findUnrecordedFill, UNRECORDED_FILL_WINDOW_MS } from "./store";
-import { recordTradeFor, type ChainReader } from "./record";
+import { fillCard, pricedPnl, recordTradeFor, type ChainReader } from "./record";
+import { listRowPnl } from "@/lib/position/view";
+import type { LivePriceBook } from "@/lib/position/types";
 import { encodeTradeTicket, decodeTradeTicket, type TradeTicketPayload } from "./ticket";
 import { loadProductionFill, PRODUCTION_FILLS, type LoadedFill } from "./production-fills";
 import { publicClient } from "./chain";
@@ -1365,4 +1367,117 @@ describeLive("migration 0007 fences", () => {
 test("teardown", () => {
 	expect(typeof publicClient().getBlockNumber).toBe("function");
 	expect(typeof users).toBe("object");
+});
+
+
+/**
+ * MAJOR-1 (Opus user-flow re-walk, pass 2). The post-fill dialog is the one
+ * moment the share card was designed for, and it printed
+ *
+ *   HERO  <b class=" num none">—</b>
+ *   BASIS "No P&L yet: a live figure needs a mark for this option and nothing
+ *          published one at the moment this fill confirmed."
+ *
+ * while `/p/<id>` printed `−$1.00 (−100.0% of max loss)` for the SAME position
+ * from the SAME snapshot at the same instant. `fillCard` hardcoded
+ * `basis: "unavailable"`.
+ *
+ * The spot is INJECTED here, so the assertion is arithmetic rather than a
+ * reading of whatever BTC costs while the suite runs.
+ */
+describeLive("MAJOR-1: the post-fill card is priced like every other surface", () => {
+	/** Far above any strike on the book: a long put there expires worthless. */
+	const WORTHLESS_SPOT = "10000000000000000"; // $100,000,000 at 8 decimals
+	const book = (spotUsd8: string | null): LivePriceBook => ({
+		spotUsd8: () => spotUsd8,
+		collateralUsdPrice8: () => "100000000",
+		feedError: null,
+	});
+
+	async function buyRow() {
+		const expectation = PRODUCTION_FILLS.find((f) => f.takerSide === "buy");
+		if (expectation === undefined) throw new Error("no buy fixture");
+		const fill = await loadProductionFill(expectation.hash);
+		const user = await seedUser(fill.taker);
+		const ticket = ticketFor({
+			fill,
+			userId: user.id,
+			thesisId: null,
+			role: "standalone",
+			collateralSymbol: expectation.collateralSymbol,
+			collateralDecimals: expectation.collateralDecimals,
+			contractSizeDecimals: expectation.contractSizeDecimals,
+			contracts: expectation.numContracts,
+			premium: expectation.premium,
+			fee: expectation.fee,
+			collateral: expectation.takerCollateral,
+		});
+		return { expectation, fill, user, ticket };
+	}
+
+	test("the dialog's card carries the DERIVED figure, not an em dash", async () => {
+		const { expectation, fill, user, ticket } = await buyRow();
+		const recorded = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(ticket), txHash: fill.hash },
+			publicClient(),
+			(t, r) => fillCard(t, r, book(WORTHLESS_SPOT)),
+		);
+		expect(recorded.ok).toBe(true);
+		if (!recorded.ok) throw new Error("unreachable");
+		const card = recorded.card;
+		if (card === null) throw new Error("no card");
+
+		const [row] = await db.select().from(positions).where(eq(positions.id, recorded.positionId));
+		if (!row) throw new Error("no stored position");
+		const domain = mapPosition({ position: row, thesis: null });
+		// The SAME builder `/p/<id>` and every list row use.
+		const live = listRowPnl(domain, book(WORTHLESS_SPOT));
+
+		// Independent arithmetic: a long put above its strike pays nothing, so the
+		// result is exactly the premium that was paid — 999,998 USDC base units.
+		const premiumUsd = `-${formatBaseUnits(expectation.premium, 6)}`;
+
+		expect({
+			basis: card.basis,
+			derived: live.derivedPnlUsd,
+			sentence: card.pnlBasisLabel.startsWith("Estimate: what this position would pay"),
+			emDash: card.pnl.usd === "\u2014" || card.pnl.signed === "\u2014",
+			// The rendered hero, which used to be the em dash the tester measured.
+			signed: card.pnl.signed,
+			pct: card.pnlPctLabel,
+		}).toEqual({
+			basis: "derived",
+			derived: premiumUsd,
+			sentence: true,
+			emDash: false,
+			signed: "\u2212$1",
+			pct: "\u2212100.0% of max loss",
+		});
+		/**
+		 * The tester's own second measurement: the DIALOG renders this card, and
+		 * its hero used to be `<b class=" num none">—</b>`.
+		 */
+		const { createElement } = await import("react");
+		const { renderToStaticMarkup } = await import("react-dom/server");
+		const { PnlCard } = await import("@/components/position/pnl-card");
+		// `createElement` rather than JSX so this stays a `.ts` file: two docs and
+		// `packages/db/src/test-fence.ts` name it by path.
+		const html = renderToStaticMarkup(createElement(PnlCard, { card }));
+		expect(html).not.toContain('num none">\u2014');
+		expect(html).toContain("\u2212$1");
+
+		console.log(`[MAJOR-1] ${JSON.stringify({ basis: card.basis, pnl: card.pnl, derived: live.derivedPnlUsd, label: card.pnlBasisLabel.slice(0, 60) })}`);
+	}, 60_000);
+
+	test("no spot keeps the honest sentence and never invents a zero", async () => {
+		const [row] = await db.select().from(positions).limit(1);
+		if (!row) throw new Error("no stored position");
+		const answer = await pricedPnl(row, book(null));
+		expect({ usd: answer.usd, basis: answer.basis, honest: answer.detail.includes("No P&L") || answer.detail.includes("Settlement pending") || answer.detail.includes("price feed") }).toEqual({
+			usd: null,
+			basis: "unavailable",
+			honest: true,
+		});
+	});
 });

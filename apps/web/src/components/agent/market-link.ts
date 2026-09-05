@@ -12,7 +12,25 @@
  * re-exports it, because `agent-fold-r2.test.ts` imports it from there and that
  * import is the contract.
  */
-const MARKET_URL = /\/m\/[a-z0-9]{1,12}(?:\?thesis=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?/gi;
+const MARKET_URL_SOURCE = String.raw`\/m\/[a-z0-9]{1,12}(?:\?thesis=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?`;
+const MARKET_URL = new RegExp(MARKET_URL_SOURCE, "gi");
+
+/**
+ * The SAME grammar, anchored: does this string consist of nothing but a market
+ * URL?
+ *
+ * D-n1 (lane D confirming pass). `agent-markdown.tsx` used to accept any
+ * markdown destination that merely STARTED with `/m/`, so a model could write
+ * `[Trade](/m/../portfolio)` or `[Trade](/m/btc?thesis=not-a-uuid)` and get a
+ * live anchor to something this app never offers. One grammar, two entry
+ * points: text nodes go through `marketLinkParts`, authored destinations go
+ * through this.
+ */
+const MARKET_URL_EXACT = new RegExp(`^${MARKET_URL_SOURCE}$`, "i");
+
+export function isMarketPath(href: string): boolean {
+	return MARKET_URL_EXACT.test(href);
+}
 
 export function marketLinkParts(text: string): { text: string; href: string | null }[] {
 	const pieces: { text: string; href: string | null }[] = [];

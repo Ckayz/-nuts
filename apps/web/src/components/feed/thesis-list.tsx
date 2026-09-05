@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Avatar } from "@/components/primitives";
+import { Avatar, StatusChip } from "@/components/primitives";
 import { pnlClass, signedUsd, usd } from "@/lib/format";
 import { PNL_BASIS_SHORT } from "@/lib/display";
 import type { MarketSummary, Position } from "@/lib/display-types";
@@ -25,7 +25,7 @@ export function PositionRow({ position }: { position: Position }) {
 				<b>{position.thesisHeadline ?? `${position.asset} position`}</b>
 				<i>
 					{position.side === "bull" ? "Bull" : "Bear"} · {usd(position.riskedUsd)} risked ·{" "}
-					<span className={`chip ${position.statusTone}`}>{position.statusLabel}</span>
+					<StatusChip status={position.statusTone} label={position.statusLabel} />
 				</i>
 			</span>
 			<span className="v">

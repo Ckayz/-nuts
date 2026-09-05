@@ -112,9 +112,18 @@ export function Chip({
 }
 
 /**
- * The lifecycle chip. The mockup gives an open position the accent chip and a
- * settled one the flat chip; `ending` reads as still open, so it keeps the
- * accent. Signature unchanged — `pnl-card.tsx` and the post header both use it.
+ * The lifecycle chip, and the ONE place a status becomes a chip class.
+ *
+ * The mockup gives an open position the accent chip and a settled one the flat
+ * chip; `ending` reads as still open, so it keeps the accent.
+ *
+ * D-n2 (lane D confirming pass). Three list rows used to build the class by
+ * hand as `chip ${statusTone}`, which emits `chip settled` / `chip live` /
+ * `chip ending` — none of which `index.css` defines, so every one of them fell
+ * back to the plain ACCENT chip while `PnlCard` drew the same settled position
+ * with `chip flat`. The reviewer measured `ROW ["<span class=\"chip settled\">"]`
+ * against `CARD ["<span class=\"chip flat\">"]`. Every caller goes through this
+ * component now, so a status has exactly one look.
  */
 export function StatusChip({
 	status,

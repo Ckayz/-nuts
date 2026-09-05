@@ -239,7 +239,18 @@ export function AgentChat({
 			}
 		>
 			<header className="border-b py-4">
-				<h1 className="font-medium text-lg">Agent</h1>
+				{/*
+				 * m3/m4 (Opus user-flow tester). `/m/<asset>` renders this component as a
+				 * PANEL beside its own `<h1>{market.name}</h1>` (app/m/[asset]/page.tsx:256),
+				 * so an `h1` here gave that page two — measured in a browser:
+				 * `{"h1":["ETH","Agent"]}`. The embedded panel is a section of someone
+				 * else's page and takes an `h2`; the full-page variant at `/agent` is the
+				 * page, and keeps the only `h1` that route has (grepped: nothing else on
+				 * `/agent` renders one).
+				 */}
+				{variant === "panel"
+					? <h2 className="font-medium text-lg">Agent</h2>
+					: <h1 className="font-medium text-lg">Agent</h1>}
 				<p className="text-muted-foreground text-sm">
 					{COPY.headerDescription} <TodoOwner />
 				</p>

@@ -140,6 +140,17 @@ function ticketFor(input: {
 	};
 }
 
+/**
+ * Removes a position and anything referencing it. A confirmed position has an
+ * `activity` row (`activity_position_id_positions_id_fk`), so deleting the
+ * position alone fails.
+ */
+async function dropPosition(positionId: string | undefined): Promise<void> {
+	if (!positionId) return;
+	await db.delete(activity).where(eq(activity.positionId, positionId));
+	await db.delete(positions).where(eq(positions.id, positionId));
+}
+
 describeLive("recordTrade cross-checks every number against the chain", () => {
 	test("a contract count that does not reproduce the emitted premium is not confirmed", async () => {
 		const expectation = PRODUCTION_FILLS.find((f) => f.takerSide === "buy");
@@ -161,18 +172,57 @@ describeLive("recordTrade cross-checks every number against the chain", () => {
 			fee: expectation.fee,
 			collateral: expectation.takerCollateral,
 		});
+
+		// C-m5. This test used to point the ticket at OptionBook 0x…01, so the
+		// fill was never found and RECONCILIATION WAS NEVER EXERCISED. The real
+		// OptionBook is used now, so the wrong contract count reaches
+		// `contractsFrom` and the decoded calldata is what refuses it.
 		const result = await recordTradeFor(
 			{ userId: user.id, walletAddress: fill.taker },
-			{ token: encodeTradeTicket({ ...ticket, optionBook: "0x0000000000000000000000000000000000000001" }), txHash: fill.hash },
+			{ token: encodeTradeTicket(ticket), txHash: fill.hash },
 		);
-		// A wrong OptionBook means no fill is found for this wallet at all.
-		expect(result).toMatchObject({ ok: false, code: "FILL_NOT_FOUND" });
+		// The transaction IS a direct `fillOrder`, so the decoded count (which is
+		// correct) is used and reproduces the premium — the wrong ticket count is
+		// simply never consulted, and the stored count is the chain's.
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("unreachable");
+		const [confirmed] = await db.select().from(positions).where(eq(positions.id, result.positionId));
+		expect(confirmed?.contracts).toBe(expectation.numContracts.toString());
+		expect(confirmed?.contracts).not.toBe((expectation.numContracts + 1n).toString());
+		await dropPosition(result.positionId);
+
+		// And when the calldata CANNOT be read as a direct fill (a smart wallet's
+		// batch), the ticket's count is used — and a count that does not
+		// reproduce the emitted premium is refused rather than stored.
+		const indirect: ChainReader = {
+			waitForTransactionReceipt: async () => ({ status: "success", logs: fill.logs }),
+			getTransaction: async () => ({ to: "0x00000000000000000000000000000000000000ff", input: "0x" }),
+		};
+		const refused = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(ticket), txHash: fill.hash },
+			indirect,
+		);
+		expect(refused).toMatchObject({ ok: false, code: "FILL_DOES_NOT_MATCH" });
 		const [row] = await db
 			.select()
 			.from(positions)
 			.where(and(eq(positions.chainId, 8453), eq(positions.txHash, fill.hash)));
-		expect(row?.status).toBe("pending");
-		await db.delete(positions).where(eq(positions.id, row?.id ?? ""));
+		expect(row?.status).toBe("failed");
+		expect(row?.failureReason).toBe("filled_order_differs_from_prepared");
+		await dropPosition(row?.id);
+
+		// The same indirect route with the RIGHT count is accepted, so the
+		// refusal above is the count and not the route.
+		const good = { ...ticket, expectedContracts: expectation.numContracts.toString() };
+		const accepted = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(good), txHash: fill.hash },
+			indirect,
+		);
+		expect(accepted.ok).toBe(true);
+		if (!accepted.ok) throw new Error("unreachable");
+		await dropPosition(accepted.positionId);
 	}, 60_000);
 
 	test("a collateral that does not match the debit measured on chain is not confirmed", async () => {
@@ -205,9 +255,11 @@ describeLive("recordTrade cross-checks every number against the chain", () => {
 			.select()
 			.from(positions)
 			.where(and(eq(positions.chainId, 8453), eq(positions.txHash, fill.hash)));
-		expect(row?.status).toBe("pending");
+		// C2: refused rows are `failed`, not `pending`.
+		expect(row?.status).toBe("failed");
+		expect(row?.failureReason).toBe("debit_differs_from_prepared");
 		expect(row?.confirmedAt).toBeNull();
-		await db.delete(positions).where(eq(positions.id, row?.id ?? ""));
+		await dropPosition(row?.id);
 	}, 60_000);
 
 	test("a fill that belongs to another wallet is refused", async () => {
@@ -399,6 +451,399 @@ describeLive("recordTrade against decoded Base production fills", () => {
 	}, 60_000);
 });
 
+/**
+ * C1, C2, C3 — the money-path fences the one-shot review found open. Every case
+ * replays a REAL decoded Base fill and changes exactly one thing.
+ */
+describeLive("money-path fences (C1 receipt binding, C2 hash squatting, C3 ticket binding)", () => {
+	/**
+	 * Every case here replays the REAL logs and the REAL `fillOrder` calldata of
+	 * a decoded mainnet fill, but under its OWN synthetic transaction hash.
+	 *
+	 * That matters: the suite above stores a permanent row for the production
+	 * hash (its idempotency case depends on it), and nothing in `record.ts`
+	 * derives economics from the hash itself — the receipt's logs and the
+	 * transaction's calldata are the evidence. Synthetic hashes therefore make
+	 * these cases independent of each other and of that stored row, without
+	 * weakening a single check.
+	 */
+	async function loadFixture(side: "buy" | "sell", hash?: `0x${string}`) {
+		const expectation = hash
+			? PRODUCTION_FILLS.find((f) => f.hash === hash)
+			: PRODUCTION_FILLS.find((f) => f.takerSide === side);
+		if (expectation === undefined) throw new Error(`no ${side} fixture`);
+		const fill = await loadProductionFill(expectation.hash);
+		const input = (await publicClient().getTransaction({ hash: expectation.hash })).input;
+		const user = await seedUser(fill.taker);
+		const ticket = ticketFor({
+			fill,
+			userId: user.id,
+			thesisId: null,
+			role: "standalone",
+			collateralSymbol: expectation.collateralSymbol,
+			collateralDecimals: expectation.collateralDecimals,
+			contractSizeDecimals: expectation.contractSizeDecimals,
+			contracts: expectation.numContracts,
+			premium: expectation.premium,
+			fee: expectation.fee,
+			collateral: expectation.takerCollateral,
+		});
+		return { expectation, fill, user, ticket, input, txHash: `0x${randomBytes(32).toString("hex")}` };
+	}
+
+	const buyFixture = () => loadFixture("buy");
+
+	/** The real receipt AND the real direct `fillOrder` calldata. */
+	function directReader(fill: LoadedFill, input: `0x${string}`): ChainReader {
+		return {
+			waitForTransactionReceipt: async () => ({ status: "success", logs: fill.logs }),
+			getTransaction: async () => ({ to: "0x1bDff855d6811728acaDC00989e79143a2bdfDed", input }),
+		};
+	}
+
+	/** The real receipt, with the top-level call hidden (a smart wallet's batch). */
+	function indirectReader(fill: LoadedFill): ChainReader {
+		return {
+			waitForTransactionReceipt: async () => ({ status: "success", logs: fill.logs }),
+			getTransaction: async () => ({ to: "0x00000000000000000000000000000000000000ff", input: "0x" }),
+		};
+	}
+
+	test("C1: a snapshot naming a DIFFERENT maker is refused even though the premium reproduces", async () => {
+		const { fill, user, ticket, txHash } = await buyFixture();
+		// Only the maker changes. The premium, the contract count and the wallet
+		// are the real ones, so the pre-fold code would have accepted this: the
+		// event was bound to our wallet alone and the ticket count reproduced the
+		// emitted premium.
+		const impostor = "0x00000000000000000000000000000000deadbeef";
+		const snapshot = {
+			...ticket.orderSnapshot,
+			makerAddress: impostor,
+			order: { ...ticket.orderSnapshot.order, maker: impostor },
+		} as typeof ticket.orderSnapshot;
+		const result = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket({ ...ticket, orderSnapshot: snapshot }), txHash },
+			indirectReader(fill),
+		);
+		expect(result).toMatchObject({ ok: false, code: "FILL_NOT_FOUND" });
+		const [row] = await db.select().from(positions).where(eq(positions.txHash, txHash));
+		expect(row?.status).toBe("failed");
+		await dropPosition(row?.id);
+	}, 60_000);
+
+	test("C1: a snapshot with a DIFFERENT nonce is refused", async () => {
+		const { fill, user, ticket, txHash } = await buyFixture();
+		const snapshot = {
+			...ticket.orderSnapshot,
+			order: { ...ticket.orderSnapshot.order, nonce: (BigInt(ticket.orderSnapshot.order.nonce) + 1n).toString() },
+		} as typeof ticket.orderSnapshot;
+		const result = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket({ ...ticket, orderSnapshot: snapshot }), txHash },
+			indirectReader(fill),
+		);
+		expect(result).toMatchObject({ ok: false, code: "FILL_NOT_FOUND" });
+		const [row] = await db.select().from(positions).where(eq(positions.txHash, txHash));
+		await dropPosition(row?.id);
+	}, 60_000);
+
+	test("C1: a DIFFERENT strike in the snapshot is refused by the decoded calldata", async () => {
+		const { fill, user, ticket, input, txHash } = await buyFixture();
+		const raw = ticket.orderSnapshot.rawApiData;
+		if (!raw) throw new Error("fixture snapshot has no rawApiData");
+		const snapshot = {
+			...ticket.orderSnapshot,
+			rawApiData: { ...raw, strikes: raw.strikes.map((strike) => (BigInt(strike) + 100_000_000n).toString()) },
+		} as typeof ticket.orderSnapshot;
+		// The transaction IS a direct `fillOrder`, so the decoded order is
+		// compared field by field; the premium still reproduces, which is exactly
+		// the case that used to fall through and be accepted.
+		const result = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket({ ...ticket, orderSnapshot: snapshot }), txHash },
+			directReader(fill, input),
+		);
+		expect(result).toMatchObject({ ok: false, code: "FILL_DOES_NOT_MATCH" });
+		const [row] = await db.select().from(positions).where(eq(positions.txHash, txHash));
+		expect(row?.status).toBe("failed");
+		expect(row?.failureReason).toBe("filled_order_differs_from_prepared");
+		await dropPosition(row?.id);
+	}, 60_000);
+
+	test("C1: a DIFFERENT extraOptionData is refused (the third fixture carries a real one)", async () => {
+		const { expectation, fill, user, ticket, input, txHash } = await loadFixture(
+			"sell",
+			"0x3e7417c5c676109e737f540debe95d0aec9477c9797c19f37e626d0c611cff04",
+		);
+		const raw = fill.snapshot.rawApiData;
+		if (!raw) throw new Error("no rawApiData");
+		// Proves the field is load-bearing on this order rather than always "0x".
+		expect(raw.extraOptionData).not.toBe("0x");
+		const tampered = {
+			...ticket.orderSnapshot,
+			rawApiData: { ...raw, extraOptionData: `0x${"0".repeat(64)}` },
+		} as typeof ticket.orderSnapshot;
+		const result = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket({ ...ticket, orderSnapshot: tampered }), txHash },
+			directReader(fill, input),
+		);
+		expect(result).toMatchObject({ ok: false, code: "FILL_DOES_NOT_MATCH" });
+		const [row] = await db.select().from(positions).where(eq(positions.txHash, txHash));
+		await dropPosition(row?.id);
+
+		// The untampered ticket confirms, so the refusal above is that one field.
+		const clean = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(ticket), txHash },
+			directReader(fill, input),
+		);
+		expect(clean.ok).toBe(true);
+		if (!clean.ok) throw new Error("unreachable");
+		const [stored] = await db.select().from(positions).where(eq(positions.id, clean.positionId));
+		// The third fixture's own economics, measured from chain.
+		expect(stored?.premium).toBe(expectation.premium.toString());
+		expect(stored?.fees).toBe(expectation.fee.toString());
+		expect(stored?.collateral).toBe(expectation.takerCollateral.toString());
+		expect(stored?.contracts).toBe(expectation.numContracts.toString());
+		expect(stored?.premium).toBe("9009");
+		expect(stored?.fees).toBe("737");
+		expect(stored?.collateral).toBe("1150000");
+		await dropPosition(clean.positionId);
+	}, 60_000);
+
+	test("C1: a chain read that FAILS is reported unavailable, never downgraded to the ticket's numbers", async () => {
+		const { fill, user, ticket, txHash } = await buyFixture();
+		const broken: ChainReader = {
+			waitForTransactionReceipt: async () => ({ status: "success", logs: fill.logs }),
+			getTransaction: async () => {
+				throw new Error("RPC timeout");
+			},
+		};
+		const result = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(ticket), txHash },
+			broken,
+		);
+		expect(result).toMatchObject({ ok: false, code: "CHAIN_UNAVAILABLE" });
+		const [row] = await db.select().from(positions).where(eq(positions.txHash, txHash));
+		// The fill is fine; only our reading of it failed, so the row stays
+		// pending and a retry still finds it.
+		expect(row?.status).toBe("pending");
+		await dropPosition(row?.id);
+	}, 60_000);
+
+	test("C2: an attacker who reserves a hash cannot stop the true taker recording it", async () => {
+		const { fill, user, ticket, input, txHash } = await buyFixture();
+
+		// The attacker holds a perfectly valid ticket of their OWN and simply
+		// submits the victim's transaction hash. The pre-fold code inserted their
+		// pending row against the globally unique key and the victim's later
+		// attempt threw "already belongs to another wallet" for ever.
+		const attackerWallet = `0x${randomBytes(20).toString("hex")}`;
+		const attacker = await seedUser(attackerWallet);
+		const attackerTicket = { ...ticket, userId: attacker.id, wallet: attackerWallet };
+		const stall: ChainReader = {
+			waitForTransactionReceipt: async () => ({ status: "success", logs: [] }),
+			getTransaction: async () => ({ to: null, input: "0x" }),
+		};
+		const grab = await recordTradeFor(
+			{ userId: attacker.id, walletAddress: attackerWallet },
+			{ token: encodeTradeTicket(attackerTicket), txHash },
+			stall,
+		);
+		expect(grab).toMatchObject({ ok: false, code: "FILL_NOT_FOUND" });
+
+		// The victim — the wallet the chain shows as the taker — records normally.
+		const victim = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(ticket), txHash },
+			directReader(fill, input),
+		);
+		expect(victim.ok).toBe(true);
+		if (!victim.ok) throw new Error("unreachable");
+		const [stored] = await db.select().from(positions).where(eq(positions.id, victim.positionId));
+		expect(stored?.walletAddress).toBe(fill.taker);
+		expect(stored?.status).toBe("confirmed");
+
+		const live = await db.select().from(positions).where(eq(positions.txHash, txHash));
+		// Exactly one non-failed row, and it is the true taker's.
+		expect(live.filter((row) => row.status !== "failed")).toHaveLength(1);
+		for (const row of live) await dropPosition(row.id);
+	}, 60_000);
+
+	test("C2: a squatter's ABANDONED pending row is superseded by the on-chain taker", async () => {
+		const { fill, user, ticket, input, txHash } = await buyFixture();
+		const squatterWallet = `0x${randomBytes(20).toString("hex")}`;
+		const squatter = await seedUser(squatterWallet);
+
+		// The squatter's row is left `pending` — they never came back to finish.
+		const [held] = await db
+			.insert(positions)
+			.values({
+				thesisId: null,
+				userId: squatter.id,
+				role: "standalone",
+				side: "back",
+				status: "pending",
+				chainId: 8453,
+				walletAddress: squatterWallet,
+				orderId: ticket.structureId,
+				orderSnapshot: ticket.orderSnapshot,
+				txHash,
+				referrer: null,
+				budget: "1",
+				budgetDecimals: 6,
+				contracts: "1",
+				contractDecimals: 6,
+				premium: "0",
+				premiumDecimals: 6,
+				fees: "0",
+				feeDecimals: 6,
+				collateral: "0",
+				collateralDecimals: 6,
+				breakEvenPrices: [],
+				breakEvenPriceDecimals: 8,
+				breakEvenPricesUsd: [],
+			})
+			.returning();
+		expect(held?.status).toBe("pending");
+
+		const result = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(ticket), txHash },
+			directReader(fill, input),
+		);
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("unreachable");
+		const [squatted] = await db.select().from(positions).where(eq(positions.id, held?.id ?? ""));
+		expect(squatted?.status).toBe("failed");
+		expect(squatted?.failureReason).toBe("superseded_by_onchain_taker");
+		const [mine] = await db.select().from(positions).where(eq(positions.id, result.positionId));
+		expect(mine?.walletAddress).toBe(fill.taker);
+		await dropPosition(result.positionId);
+		await dropPosition(held?.id);
+	}, 60_000);
+
+	test("C2: a wallet that is NOT the on-chain taker cannot supersede a pending row", async () => {
+		const { fill, ticket, txHash } = await buyFixture();
+		const holderWallet = `0x${randomBytes(20).toString("hex")}`;
+		const holder = await seedUser(holderWallet);
+		const outsiderWallet = `0x${randomBytes(20).toString("hex")}`;
+		const outsider = await seedUser(outsiderWallet);
+
+		// A pending row held by someone else, exactly as `claimPending` sees one.
+		const [held] = await db
+			.insert(positions)
+			.values({
+				thesisId: null,
+				userId: holder.id,
+				role: "standalone",
+				side: "back",
+				status: "pending",
+				chainId: 8453,
+				walletAddress: holderWallet,
+				orderId: ticket.structureId,
+				orderSnapshot: ticket.orderSnapshot,
+				txHash,
+				referrer: null,
+				budget: "1",
+				budgetDecimals: 6,
+				contracts: "1",
+				contractDecimals: 6,
+				premium: "0",
+				premiumDecimals: 6,
+				fees: "0",
+				feeDecimals: 6,
+				collateral: "0",
+				collateralDecimals: 6,
+				breakEvenPrices: [],
+				breakEvenPriceDecimals: 8,
+				breakEvenPricesUsd: [],
+			})
+			.returning();
+		expect(held?.status).toBe("pending");
+
+		// The outsider is on neither side of this fill's `OrderFilled` log, so
+		// their claim is refused and the holder's row is left exactly as it was.
+		const steal = await recordTradeFor(
+			{ userId: outsider.id, walletAddress: outsiderWallet },
+			{ token: encodeTradeTicket({ ...ticket, userId: outsider.id, wallet: outsiderWallet }), txHash },
+			{
+				waitForTransactionReceipt: async () => ({ status: "success", logs: fill.logs }),
+				getTransaction: async () => ({ to: null, input: "0x" }),
+			},
+		);
+		expect(steal).toMatchObject({ ok: false, code: "TX_HASH_TAKEN" });
+		const rows = await db.select().from(positions).where(eq(positions.txHash, txHash));
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.id).toBe(held?.id ?? "");
+		expect(rows[0]?.walletAddress).toBe(holderWallet);
+		expect(rows[0]?.status).toBe("pending");
+		expect(rows[0]?.failureReason).toBeNull();
+		for (const row of rows) await dropPosition(row.id);
+	}, 60_000);
+
+	test("C3: a pending row cannot be confirmed with a DIFFERENT ticket's economics", async () => {
+		const { expectation, fill, user, ticket, input, txHash } = await buyFixture();
+		// First attempt leaves a pending row (the chain read fails).
+		const stalled = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(ticket), txHash },
+			{
+				waitForTransactionReceipt: async () => ({ status: "success", logs: fill.logs }),
+				getTransaction: async () => {
+					throw new Error("RPC timeout");
+				},
+			},
+		);
+		expect(stalled).toMatchObject({ ok: false, code: "CHAIN_UNAVAILABLE" });
+
+		// A DIFFERENT ticket for the same hash: same wallet, different budget.
+		const other = { ...ticket, budget: (BigInt(ticket.budget) + 1n).toString() };
+		const mismatch = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(other), txHash },
+			directReader(fill, input),
+		);
+		expect(mismatch).toMatchObject({ ok: false, code: "TICKET_MISMATCH" });
+
+		// The ORIGINAL ticket still confirms the row it created; only `issuedAt`
+		// differs, which is deliberately outside the identity.
+		const retry = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket({ ...ticket, issuedAt: ticket.issuedAt + 60 }), txHash },
+			directReader(fill, input),
+		);
+		expect(retry.ok).toBe(true);
+		if (!retry.ok) throw new Error("unreachable");
+		const [row] = await db.select().from(positions).where(eq(positions.id, retry.positionId));
+		expect(row?.status).toBe("confirmed");
+		expect(row?.premium).toBe(expectation.premium.toString());
+		await dropPosition(retry.positionId);
+	}, 60_000);
+
+	test("C3: two concurrent confirmations write ONE row and ONE activity entry", async () => {
+		const { fill, user, ticket, input, txHash } = await buyFixture();
+		const token = encodeTradeTicket(ticket);
+		const reader = directReader(fill, input);
+		const [a, b] = await Promise.all([
+			recordTradeFor({ userId: user.id, walletAddress: fill.taker }, { token, txHash }, reader),
+			recordTradeFor({ userId: user.id, walletAddress: fill.taker }, { token, txHash }, reader),
+		]);
+		expect(a.ok).toBe(true);
+		expect(b.ok).toBe(true);
+		if (!a.ok || !b.ok) throw new Error("unreachable");
+		expect(a.positionId).toBe(b.positionId);
+		const rows = await db.select().from(positions).where(eq(positions.txHash, txHash));
+		expect(rows.filter((row) => row.status !== "failed")).toHaveLength(1);
+		const events = await db.select().from(activity).where(eq(activity.positionId, a.positionId));
+		expect(events).toHaveLength(1);
+		for (const row of rows) await dropPosition(row.id);
+	}, 60_000);
+});
+
 describeLive("refusals: nothing is stored when the chain does not agree", () => {
 	const reader = (status: string, logs: readonly Log<bigint, number, false>[] = []): ChainReader => ({
 		waitForTransactionReceipt: async () => ({ status, logs }),
@@ -459,11 +904,17 @@ describeLive("refusals: nothing is stored when the chain does not agree", () => 
 		expect(result.ok).toBe(false);
 		if (result.ok) throw new Error("unreachable");
 		expect(result.code).toBe("FILL_NOT_FOUND");
+		// C2. A refusal must NOT leave a `pending` row squatting the transaction
+		// hash: the uniqueness is partial over non-failed rows since 0008, so the
+		// row is marked `failed` with the reason and the hash is free again.
 		const [row] = await db
 			.select()
 			.from(positions)
 			.where(and(eq(positions.chainId, 8453), eq(positions.txHash, setup.txHash)));
-		expect(row?.status).toBe("pending");
+		expect(row?.status).toBe("failed");
+		expect(row?.failureReason).toBe("no_matching_order_filled");
+		expect(row?.confirmedAt).toBeNull();
+		expect(row?.fillEvent).toBeNull();
 	});
 
 	test("no session, a wallet that is not the session's, and a tampered token are all refused", async () => {

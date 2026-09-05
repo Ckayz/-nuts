@@ -57,6 +57,13 @@
       "when": 1788590467695,
       "tag": "0007_standalone_positions",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788605684012,
+      "tag": "0008_trade_recording_fences",
+      "breakpoints": true
     }
   ]
 }

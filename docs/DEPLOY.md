@@ -104,6 +104,14 @@ loop over all pending migrations — read at drizzle-orm 0.45.2 on 2026-09-05), 
 a failure anywhere rolls the whole batch back. There is no half-applied state to
 repair:
 
+0. **`drizzle-kit migrate` can fail SILENTLY.** Measured 2026-09-05: a
+   migration rejected by Postgres (`functions in index predicate must be marked
+   IMMUTABLE`) printed only `applying migrations...` and exited **1** with no
+   error text. Never read the spinner as success. Check the exit code, and then
+   the applied count:
+   `SELECT count(*) FROM drizzle.__drizzle_migrations;`. To see the real error,
+   replay the migration's SQL through `psql -v ON_ERROR_STOP=1` inside a
+   `BEGIN; ... ROLLBACK;`.
 1. Re-read the error. A connection or authentication failure never touched the
    schema at all.
 2. Confirm nothing landed:

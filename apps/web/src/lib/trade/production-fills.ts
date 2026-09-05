@@ -62,6 +62,33 @@ export const PRODUCTION_FILLS: readonly ProductionFillExpectation[] = [
 		takerDebit: 22000000n,
 		takerCollateral: 22000000n,
 	},
+	{
+		/**
+		 * Second taker-SELL, added by the one-shot review fold. Two things it
+		 * pins that the fixture above cannot:
+		 *
+		 *  - the fee is 737 on a premium of 9009 (8.18 %), NOT the 12.5 % cap, so
+		 *    `feeEstimate` is an UPPER BOUND and both fee branches fire on Base;
+		 *  - `extraOptionData` is non-empty on this order
+		 *    (0x000…d4a0e0b9149bcee3c920d2e00b5de09138fd8bb7), which is why
+		 *    `sameOrder` in record.ts must compare it (C1).
+		 *
+		 * Every value below was read back over RPC on 2026-09-05 rather than
+		 * copied from a note: collateral 1,150,000 aBasUSDC base units =
+		 * strike 230000000000 x 500 contracts / 1e8, the chain rule for a
+		 * PHYSICAL_PUT taker sell.
+		 */
+		hash: "0x3e7417c5c676109e737f540debe95d0aec9477c9797c19f37e626d0c611cff04",
+		takerSide: "sell",
+		collateralSymbol: "aBasUSDC",
+		collateralDecimals: 6,
+		contractSizeDecimals: 6,
+		numContracts: 500n,
+		premium: 9009n,
+		fee: 737n,
+		takerDebit: 1150000n,
+		takerCollateral: 1150000n,
+	},
 ];
 
 export interface LoadedFill {

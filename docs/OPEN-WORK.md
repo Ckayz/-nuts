@@ -1,0 +1,120 @@
+# Open work — handover to the team (2026-09-05 18:4x +08, main after `c2d6044`)
+
+The owner (2026-09-05 18:3x): "some work here my team continue better. list them all out … and push everything." This file is that list. It is the tracked, self-contained version of the review findings that live in the gitignored `.research/` folder on the orchestrator's machine. Everything below was re-measured at the bytes by Claude unless marked *reviewer claim*. Nothing below reaches production before the one-shot review is GREEN (owner rule: review → production `drizzle-kit migrate` → Vercel → the owner's tiny real fill). Product numbers and copy are the owner's: keep every `TODO-OWNER`, never invent a value.
+
+## 0. State of the tree
+
+- Everything in `CLAUDE.md` § "Build status" is merged on main, including the UI fold (`ce558e2`) and the taker-side fix (`a3bedd2`). Verified at `c2d6044`: `bun run verify` all steps PASS (typecheck 3/3; thetanuts 50; DB 349 live; env 10; web 377 live / 277 offline + 23 skipped; `next build` in db mode).
+- The one-shot review ran once (Astra `gpt-6-astra` MEDIUM in pinned worktrees + Claude hands-on) on lanes A (db/env/thetanuts/deploy), B (server/socials/identity/profile), C (trade/position/links/agent/0007) and D (UI). **B, C and D are RED.** Lane A's confirming pass is RED on the same fixture-markets major plus four minors (§4b). Nothing from these reviews has been folded yet — the fold below is the next step.
+- A hands-on user-flow walkthrough (Claude, database mode, fake wallet) found the F-items in §4; an Opus tester was re-walking every journey when this file was written; its report lands in `.research/thetanuts/review-oneshot/userflow-opus-report.md` on the orchestrator's machine and will be merged into this file.
+- The teammate's `origin/agent-exec-r1` (approval-gated OptionBook execution, 2 commits, 5 files, +560) merges onto main with zero conflicts; typecheck clean; offline suite 277/23/0 (trial merge, not on main). Owner 18:2x: it joins the fold ("go on all").
+
+## 1. How to work here (short)
+
+- Bun only. `bun run verify` (or `--offline`). Every live run uses its OWN migrated throwaway database (`createdb x && cd packages/db && DATABASE_URL=… bunx drizzle-kit migrate`); the shared local `postgres` lags behind migrations.
+- `next build`/`next start` REQUIRE `DATA_SOURCE=db`; mock fixtures are `next dev` only.
+- Writers and reviewers get their own git worktrees. Never `git checkout <file>` in a tree with someone's unstaged edits. Never push without the owner's word (standing rule: push main when done and GREEN).
+- Chain facts that gate the code: raw `isLong` is the MAKER's long flag (`true` → taker SELLS); taker-buy pays `contracts × price / 1e8`; taker-sell PHYSICAL_PUT + aBasUSDC posts `strike × contracts / 1e8`; contract units 1e6 for 6-decimal collateral; both fee branches fire (fee 8.2 % measured on `0x3e7417c5…`, so `feeEstimate` is an upper bound). Everything unverified by a decoded fill stays gated.
+
+## 2. Lane B findings (server, socials, identity, profile) — all confirmed
+
+| # | Defect | Where | Fix |
+|---|---|---|---|
+| B1 MAJOR | Anyone can burn another wallet's live sign-in challenge: `completeSignIn` consumes the row before the signature is even syntax-checked; `issueChallenge` hands the live row to any caller. | `apps/web/src/lib/auth/sign-in.ts:69` vs `:76`; `auth/store.ts:66-79` | Peek the live row → rebuild the message → verify the signature → THEN the atomic consume; the consume loser gets `challenge_invalid`. Caps/rate limits stay `TODO-OWNER`. Test: a junk-signature attempt leaves the row unconsumed. |
+| B2 MAJOR | Feed "Markets · N live" panel and composer tag pills are FIXTURES in db mode ("Bitcoin $79,607.32 +1.65%", 3 assets) — invented prices on a production page and a hardcoded asset list. | `lib/view-data.ts:20`, `app/page.tsx:53-55`, `lib/thesis/composer-data.ts:53-59`, `components/shell/nav.tsx:28` | Db mode: assets + spot from the live book (`lib/market/live.ts`); no change % (no source); honest "unavailable" state on feed failure. |
+| B3 MAJOR | An `expired` thesis crashes the feed: rankings admit `expired` (`SOCIAL_PUBLIC_STATUSES` = open/expired/settled) but `thesisWithOrigin` throws for anything but open/settled. Two public-status lists exist. | `lib/social/guards.ts:3`, `lib/data/constants.ts:30`, `lib/display.ts:138`, `lib/social/ranking.ts:36` | ONE public-status list; render `expired` with the settlement-pending presentation (`POSITION_STATUS_DISPLAY.expired`, `TODO-OWNER`) instead of throwing; thread page consistent. Test: an expired row through `discoverData`. |
+| B4 MAJOR | Leaderboard inner-joins `theses` → standalone trades excluded from the 1W P&L. | `lib/data/reads.ts:443` | Left join + `thesis_id is null OR status in public` (pattern at `reads.ts:373`). |
+| B5 MAJOR | Null `entry_premium_usd` counted in `fills` but neither in the sum nor in `unusable` → partial totals shown as whole. | `lib/data/reads.ts:106`, `lib/data/map.ts:257` | `unusable` counts nulls; a null premium marks the side unavailable. Tests `[known,null]`, `[null]`. |
+| B6 MAJOR | Position reads join `theses` without a status fence → `/p/[id]` renders a draft's headline. | `lib/data/reads.ts:503`, `lib/position/read.ts:129`, `components/position/position-page.tsx:79` | Null out `thesis` when its status is not public, in both readers and `getPortfolio`. |
+| B7 MAJOR (tag) | `railTheses(limit = 5)` and the "Sign in using the wallet control" copy lack `TODO-OWNER`. | `lib/page-data.ts:242`, `components/shell/feed-rail.tsx:14`, Like/Follow buttons | Tag. |
+| B-m1 | UUID-shaped slug resolves through the id column. | `lib/data/reads.ts:232` | Slug first, then id. |
+| B-m2 | No session revocation on sign-out (cookie only). | `lib/auth/session.ts:68` | Owner acceptance or server-side sessions. |
+| B-m3 | Wallet switch hides the old identity but actions use the old session. | `components/auth/wallet-bar.tsx:88` | Refuse actions when connected account ≠ session wallet, or clear the session on switch. |
+| B-m4 | Repeated unbounded reads (5 cohort paths; follow counts per leaderboard row); no pagination. | `lib/page-data.ts:191`, `lib/data/reads.ts:398` | Request-scoped snapshot; pagination is an owner number. |
+| B-m5 | Handle change orphans `/u/<old>`; bio not on the public profile; control chars accepted in names. | `lib/profile/writes.ts:12`, `lib/data/map.ts:97` | Owner policy; carry bio through. |
+| B-m6 | Integration tests run against whatever `DATABASE_URL` `.env` provides. | `apps/web/test/setup.ts` | Refuse a non-local URL unless `TEST_DATABASE_OK=1`. |
+| B-m7 | Three `REPORT.md` handoffs under `src/`. | `lib/{social,data,profile}/REPORT.md` | Move to `docs/handover/`. |
+| B-m8 | `market/quote.integration.test.ts:19` calls the network at module level → the "offline" suite fails without network. | | Gate on an explicit opt-in. |
+
+## 3. Lane C findings (trade wiring, position page, links, agent, 0007) — all confirmed
+
+| # | Defect | Where | Fix |
+|---|---|---|---|
+| C1 MAJOR | Receipt/order matching fails OPEN: after a decoded-order mismatch, an undecodable tx (smart wallet) or an RPC error, `contractsFrom` accepts the TICKET's contract count whenever `expected × price / 1e8 === event.premiumAmount`; the event is not bound to the maker/nonce; `sameOrder` omits `extraOptionData`. | `lib/trade/record.ts:384-415`, `:145` | Bind the `OrderFilled` counterparty to `snapshot.makerAddress`; any decoded mismatch → refuse; include `extraOptionData`; for a non-direct tx accept only with maker binding + premium equality (and the emitted option's terms if readable). Tests: wrong maker / wrong strike with equal premium → refused. |
+| C2 MAJOR | The `pending` row is inserted before any ownership check → a caller with a valid ticket can reserve another wallet's tx hash under the global unique key; a refusal leaves the row. | `lib/trade/record.ts:117`, `:330-372`; test `record.integration.test.ts:452` pins the pending row after `FILL_NOT_FOUND` | Mark refused rows `failed` with the reason and make the uniqueness partial (`where status <> 'failed'`, migration 0008), or verify tx ownership before inserting. Test: attacker reserves → victim records. |
+| C3 MAJOR | Retries are not bound to the original ticket (a pending row from ticket A confirms with ticket B's economics); no conditional status transition; activity can double-write; terminal states can regress. | `lib/trade/record.ts:118, 189-213, 330-372` | Persist a ticket identity on the pending row; mismatch → `TICKET_MISMATCH`; confirm `where status = 'pending'`; activity once, same transaction. |
+| C4 MAJOR | `sendTransactionAsync` without `account`/`chainId` → wagmi does not assert the chain; the chain check runs before async preparation; preparation continues on the approval HASH, not a mined receipt. | `components/market/take-a-side.tsx:122-198` | Pass `chainId: 8453` + the session account on both sends; `waitForTransactionReceipt` (success) on the approval before re-preparing. |
+| C5 MAJOR | The wallet signs a fill built from a FRESH server quote that the browser never shows; quote state is not keyed to the structure (D1 reproduces: display A, submit B). | `lib/trade/prepare.ts:78-113`, `take-a-side.tsx:69-100, 145-198`, `market-rail.tsx` unkeyed instance | Compare `ready.expected` with the displayed quote before sending; any difference → show and require a second click; key state to structure/side/budget; drop out-of-order requotes. Tolerances `TODO-OWNER`. |
+| C6 MAJOR | `fillCard` reads `users` AFTER the confirming transaction commits; a failed read rejects the action; the client returns to idle and the next Trade sends a NEW fill. | `lib/trade/record.ts:221-244, 313`, `take-a-side.tsx:114-118, 201-220` | Card non-fatal; return `positionId` regardless; keep the hash and offer "Sync", never re-send while a hash exists. |
+| C7 MAJOR | No expiry/settlement reconciliation (`markIndexed` referenced at `record.ts:220` does not exist); a position past expiry stays "Open · syncing" and derives P&L at today's spot forever. | `lib/position/view.ts:161-176` | `expiryAt <= asOf` and not settled → "Settlement pending", no spot derivation; indexer reconciliation stays a documented follow-up. |
+| C8 MAJOR | Linked/backing cards pass `instrument: null` → the builder's buyer branch → a SELLER's card says "Premium paid" with the net premium RECEIVED. Walkthrough: the card and the position page disagree (BTC vs ETH put; "not available" vs −$1.00). | `lib/position/view.ts:191-200, 291-302`; `record.ts:510-512` | Batch readers decode the stored order snapshot through `positionInstrument` (same as `/p/[id]`); asset from the instrument, not the thesis tag. |
+| C9 MAJOR | Copied links are ABSOLUTE (`location.origin`) but enrichment/rendering pass no origin → `extractTradeLinks` returns `[]`: the core share flow yields a plain link, no card. Only `rationale` is scanned; a link in the headline is ignored. | `fill-dialog.tsx:82-87`, `copy-link.tsx:33-37`, `lib/thesis/enrich.ts:27-28`, `lib/display.ts:167-170`, `composer-data.ts:73` | Pass a trusted origin (`vercelOrigin`/request host) everywhere; scan headline + rationale; one deduplicated cap (`TODO-OWNER`). |
+| C10 MAJOR | Db-mode market page renders the FIXTURE market on a feed error (six fixture structures + fixture ticket). | `app/m/[asset]/page.tsx:79-86` | Unavailable state without fixture prices/structures. |
+| C11 MAJOR | Token liquidity shown as USD without valuation: 1 cbBTC → "$1". | `lib/market/live.ts:230-244`, `structures-list.tsx:63` | Value through the collateral USD map or print `1.00 cbBTC`; same for per-contract premium and the ticket. |
+| C12 | OG image prints the "Live P&L" number without the basis sentence and without strikes/expiry. | `app/p/[id]/opengraph-image.tsx:123-134` | Add both. |
+| C13 | `market-rail.tsx:49-51`, `app/new/page.tsx:35`, `app/m/[asset]/page.tsx:137` promise "the verified badge only once your own fill confirms" — unsupported today (frozen 0002 trigger requires `role='creator'`; standalone trades cannot be linked) and untagged. | | Honest copy + `TODO-OWNER`; schema change is the owner's call. |
+| C-m1 | `feed_unusable` misses a null response and HTTP rejections. | `lib/thetanuts/orders.ts:148-153` | Catch transport errors into `feed_unusable`. |
+| C-m2 | Fill dialog copy-link has no clipboard fallback (`copy-link.tsx` has one). | `fill-dialog.tsx:82-89` | Reuse `CopyLink`. |
+| C-m3 | Seller fee sentence presents the upper bound as the fee. | `lib/market/live.ts:291` | "up to" wording. |
+| C-m4 | OG images render the default font, not Manrope. | both `opengraph-image.tsx` | Load Manrope in `ImageResponse`. |
+| C-m5 | `record.integration.test.ts:144` changes the OptionBook and asserts `FILL_NOT_FOUND`, so contract reconciliation is never tested. | | Real reconciliation test with C1. |
+
+## 4. Lane D findings (UI) + the user-flow walkthrough — confirmed unless marked
+
+| # | Defect | Where | Fix |
+|---|---|---|---|
+| D1 MAJOR | = C5 (ticket state not keyed to the structure; fresh economics bypass the displayed quote). | | see C5 |
+| D2 MAJOR | = B2 + C10, plus the "9 new theses" banner is a fixture constant (`mock/data.ts:1030`) rendered in db mode with three fixture avatars. | `components/feed/new-callouts-bar.tsx:2,22` | Derive from real unseen posts or omit until implemented. |
+| D3 MAJOR | = C9. | | |
+| D4 MAJOR | The market page's "Backed" filter is always empty: market posts go through `display.thesis` which never builds `backingCard`; the tab filters on it. | `lib/market/page.ts:145-150`, `components/market/tagged-posts-tabs.tsx:31` | Use the shared `withCards` enrichment for market posts. |
+| D5 MAJOR | Portfolio/profile/rail position rows collapse every non-settled status into one look and carry no P&L basis (an expired position renders identically to an open one). | `lib/display.ts:322`, `components/thesis/position-rows.tsx:10` | Carry the status vocabulary + basis into list models (PRD §8.5). |
+| D6 MAJOR | Post → market navigation drops the thesis: tag chips and the thread's "Open the market" link go to `/m/<asset>` with no `?thesis=` → the ticket prepares a STANDALONE trade, the participant journey is unreachable from a post. | `components/primitives.tsx:128,133`, `app/t/[slug]/page.tsx:55`, `lib/market/page.ts:122` | Carry the thesis id + its exact structure on contextual navigation; generic market navigation stays separate. |
+| D7 MAJOR | "Share" and "Explain" on every post are `<button>`s with no handler. | `components/feed/callout-post.tsx:91-101`, `app/t/[slug]/page.tsx:69`, `app/u/[handle]/page.tsx` | Share copies the canonical post URL (reuse `CopyLink`); Explain opens `/agent` with the thesis preloaded (§5). |
+| D8 MAJOR | The POST share image still uses the rejected gold design (`#F5C542`) and old palette; `packages/ui` `--font-sans` is `'Inter Variable'`; neither image route loads Manrope. | `app/t/[slug]/opengraph-image.tsx:18,26`, `packages/ui/src/styles/globals.css:79` | Approved palette + Manrope font data in both image routes; align `--font-sans`. |
+| D9 | = C13. | | |
+| D-m1 | Ranking pills reference non-existent tab panels (`${id}-panel`). | `components/feed/tabs.tsx:43`, `callout-tabs.tsx` | Filter buttons with `aria-pressed`, or valid targets. |
+| D-m2 | Mobile Leaderboard nav points to `/#top-traders`, which is inside the rail hidden ≤900 px. | `components/shell/nav.tsx:42`, `index.css:427` | Owner: a leaderboard destination on mobile. |
+| D-m3 | Chart remnants: `mock/data.ts:1105+` still generates 168 synthetic hourly prices (`series`), `Market.series` + mapper + a test survive with no consumer. | | Delete. |
+| D-m4 | Composer differs from the mockup (two fields vs one textarea + character count + Save draft); profile lacks Share and open/settled counts; position page lacks the mockup's Follow. | | Owner calls; keep `TODO-OWNER`. |
+| D-m5 | Dead CSS: `.hr .av-30 .av-44 .av-80 .act .sp .linkline .dim .acts`. | `apps/web/src/index.css` | Delete. |
+| D-m6 | `/p/[id]`: the backing post's HEADLINE is rendered inside a fixed-height `.btn` (38 px) and clips on two lines. | `components/position/position-page.tsx:74-80`, `index.css:141` | Headline as text + a button. |
+| D-m7 | The Ranger "C" suffix survives on the LIVE market page (`live.ts:241` calls `strikesLabel` directly, bypassing the fold's `strikeSide`). | `lib/market/live.ts:241` | Use `strikeSide`. |
+| D-m8 | Colour literals outside tokens (`#33333f`, `#343442`, `#20202a`, `#fff`, `#c9c9d4`, avatar palette) — inherited from the mockup, which itself contradicts the "one accent / no shadows" prose (coloured avatars, green wallet dot, two non-dialog shadows). | `index.css` | Owner: resolve the mockup-vs-rules contradiction explicitly. |
+| F1 | (= D2) fixture banner in production. | | |
+| F2 | (= B2) fixture markets in production. | | |
+| F4/F5/F6 MAJOR (UX) | A person with no display name shows "—" as the name (also the page `<title>` and every avatar link's accessible name) next to a 42-character `@0x…` handle; the "Latest theses" rail renders that raw address in a flex row with no wrap and OVERFLOWS into the main column on every page (owner screenshot 18:1x: "rmb to fix this"). | `lib/display.ts:89` (`displayName ?? "—"`), `components/shell/feed-rail.tsx:27-32`, `index.css:360` | Shortened address (`truncateAddress`, `lib/auth/address.ts`) as the default name/handle text everywhere a person has none; `min-width:0; overflow-wrap:anywhere` on the rail name. Copy is `TODO-OWNER`. |
+| F7 | Signed-out comment box is `disabled` with no hint to sign in; the button looks active. | `components/thesis/comment-form.tsx` | Hint copy `TODO-OWNER`. |
+| F8 | "since Sep 26" reads like a day (`sinceLabel`). | | Format `TODO-OWNER`. |
+| F9 MAJOR (UX) | Signed in but wallet not connected (auto-reconnect failed): Trade → "Connect your wallet first." and the top-bar chip menu offers only "Base · Sign out" — no connect control anywhere; the user must sign out and in again. | `components/auth/wallet-bar.tsx` | Offer connect when `!isConnected` while a session exists. |
+| F10 MAJOR (UX) | No link to your own profile/editor: the chip menu has no "Profile"/"Edit profile", the portfolio page has none, the nav has no Profile item; the editor lives only on `/u/<own-address>`. | `wallet-bar.tsx`, `app/portfolio/page.tsx` | Link to `/u/<self>` from the chip and the portfolio. |
+| F11 | `/new` nests `<main class="compose">` inside `<main class="wrap">` (two `main` landmarks). | `app/new/page.tsx` | One `main`. |
+| F12 | Enter in the comment textarea does not submit and nothing says so; the author's own creator card shows a "Follow" button on their own thread (self-follow is refused server-side). | `comment-form.tsx`, `creator-stats.tsx` | Hint / hide for self (`TODO-OWNER` copy). |
+| F13 | A URL pasted into the headline leaks into the slug (`sharing-this-trade-http-localhost-3132-2d49`) and the `<title>`. | `packages/db/src/slug.ts` (rule is the owner's) | Strip URLs from the slug source at least. |
+| F14 | The market header shows a "24h —" cell (no price history exists — owner's "no chart" ruling). | `app/m/[asset]/page.tsx` | Remove. |
+| F15 | The ticket defaults to the first structure by expiry (a nearly worthless spread expiring in hours: max payout 0×). | `lib/market/page.ts` | Default-selection rule `TODO-OWNER`. |
+| F16 | A "Positions" label floats outside any card on `/portfolio`. | `app/portfolio/page.tsx` | Layout. |
+| Smooth (measured) | Sign-in (SIWE-shaped message, profile row created, no manual refresh), post, like (instant, `aria-pressed`), comment, follow (header + rail flip together), the approval prompt carries exactly the quoted premium (`approve(OptionBook, 249.99975 USDC)`), rejection recovers cleanly. | | |
+
+## 4b. Lane A confirming pass (db, env, thetanuts, deploy) — RED on B2 + four minors
+
+- The r2 fixes are confirmed at the bytes and by mutation (production data-source guard, `PGOPTIONS` fence, README). Remaining: the fixture-markets MAJOR (= B2, also reachable from `nav.tsx:28`).
+- A-m1 `scripts/verify.ts:12` reports the DB step PASS when `DATABASE_URL` is unset (live suites skip, exit 0) and does not require an explicitly selected migrated test database; children can load a different `.env` database. Fix: require and validate the test database; fail when a mandatory live suite skips.
+- A-m2 `packages/env` fails `tsc` (`src/web.ts:2` unused `z`; `test/env-example.test.ts` lacks `bun:test` types) and env + db are not in the root `check-types` task set. Fix: clean + add `check-types` scripts and include them.
+- A-m3 `packages/thetanuts/test/core.test.ts:114` never decodes the buy approval amount (mutant approving the whole budget survives). Fix: assert token, spender and amount incl. a capped-budget case.
+- A-m4 `docs/DEPLOY.md:36` still says `bunx next build && DATA_SOURCE=db bunx next build` ("both builds"); reality is one db-mode build. Fix the wording; add failed-migration recovery (drizzle wraps ALL pending migrations in one transaction, `drizzle-orm/pg-core/dialect.js:60`).
+- Fence coverage gaps to pin with tests: empty `PGOPTIONS`, `PGSERVICE`, hostless URL + `PGHOST`, `PGPORT`/`PGDATABASE` fallbacks, IPv6 loopback, `postgres://`.
+
+## 5. AI hookup (owner 18:2x: "did u forget to hook up the ai part … ask what this thesis is about then potentially trade on it?" → "go on all")
+
+1. "Explain" on a post → `/agent?thesis=<id>`: the agent page takes no parameter today (`apps/web/src/app/agent`, `components/agent/agent-chat.tsx`); the agent already has a `getThesisContext` tool (`lib/agent/tools.ts`, PRD v2.0 §10.3 `ThesisAiContext` from `packages/db/src/ai-context.ts`). Preload the thesis into the first message/context.
+2. The agent's answer links the market page with that structure selected (`/m/<asset>?structure=<id>&thesis=<id>` — the ticket already accepts `?thesis=`; a structure param may need adding). The AI never signs; the wallet approves every transaction.
+3. `origin/agent-exec-r1` (teammate; `lib/agent/execute.ts` on `buildFillTransactions`, `components/agent/trade-approval.tsx`, `trade-execution.tsx`, `api/agent/chat/route.ts`): merge onto main (zero conflicts measured) and give it a Lane C confirming review — the same money-path lenses as §3 (receipt binding, chain/account pinning, PRD §10.2 `MAX_LOSS_USD = 10`).
+
+## 6. The fold (how to run it)
+
+- ONE fold of everything above: writers = one Opus HIGH + one Astra LOW (`codex exec -s workspace-write -m gpt-6-astra -c model_reasoning_effort="low"`), each in its own worktree, briefs carrying the no-product-decisions block; split by area (money path C1–C8 + B1 to one writer; UI/links/fixtures/identity to the other). Then Claude verification (typecheck, suites live on a fresh throwaway, db build, browser pass), then confirming Astra passes on every lane + a tester re-walk, until GREEN.
+- Then, in order: push main (owner rule) → production migration via the session pooler (`docs/DEPLOY.md`; `DRIZZLE_ALLOW_REMOTE=1 bunx drizzle-kit migrate`; production currently holds exactly `0000_agent_tables`, hash-identical to ours, so `0001`–`0007` apply) → Vercel env (`SESSION_SECRET`, `DATA_SOURCE=db`, the 6543 pooler `DATABASE_URL`, `OPENROUTER_API_KEY`) → the owner's tiny real fill (`packages/thetanuts/scripts/README.md`).
+
+## 7. Owner decisions still open
+
+Referrer wallet whitelist by Thetanuts + gas on `0xd5E6…47dd`; the tiny real fill; verified badge for a post linking a standalone trade (schema cannot link it); Bull/Bear naming on a post-less position; `tiny-fill.ts` fee check strict vs upper bound; mobile ticket hidden ≤1180 px by the mockup; accented-letter slugs; session revocation; pagination; handle-change policy; the mockup-vs-rules contradictions (D-m8); every `TODO-OWNER` (presets `$50/$100/$500/$1,000` vs the mockup's `$10/…`, rankings, limits, copy, card width, percent basis, default structure, rail limit 5).

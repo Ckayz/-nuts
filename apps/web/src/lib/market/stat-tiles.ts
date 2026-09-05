@@ -1,5 +1,6 @@
 import { usd } from "@/lib/format";
 import type { Market } from "@/lib/display-types";
+import { impliedVolLabel } from "./implied-vol";
 
 /**
  * The market header's stat tiles.
@@ -27,6 +28,11 @@ import type { Market } from "@/lib/display-types";
  *               OptionBook publishes none of the three, so there is nothing to
  *               put in the tile.
  *
+ * PRESENT INSTEAD, and better for an option book: IMPLIED VOL, from the makers'
+ * own `greeks.iv` on the live orders (see `./implied-vol.ts` for why that field
+ * and not `market_weather.curVol`, which is a different quantity). Where fomo
+ * puts 24H volume, an options page wants the volatility being quoted.
+ *
  * Kept pure so the row can be asserted without rendering the page.
  */
 export interface MarketStatTile {
@@ -39,11 +45,18 @@ export interface MarketStatTile {
 export function marketStatTiles(
 	market: Pick<Market, "spotUsd" | "structureCount" | "expiryCount">,
 	taggedPostCount: number,
+	book: { readonly impliedVol?: number | null; readonly calls?: number | null; readonly puts?: number | null } = {},
 ): readonly MarketStatTile[] {
-	return [
-		{ label: "Spot", value: usd(market.spotUsd) },
-		{ label: "Structures", value: String(market.structureCount) },
-		{ label: "Expiries", value: String(market.expiryCount) },
-		{ label: "Tagged posts", value: String(taggedPostCount) },
-	];
+	const tiles: MarketStatTile[] = [{ label: "Spot", value: usd(market.spotUsd) }];
+	// Omitted rather than zeroed when no maker quotes one: "0.0%" would read as
+	// "this market has no volatility", which is a claim the book does not make.
+	const iv = impliedVolLabel(book.impliedVol ?? null);
+	if (iv !== null) tiles.push({ label: "Implied vol", value: iv });
+	tiles.push({ label: "Structures", value: String(market.structureCount) });
+	tiles.push({ label: "Expiries", value: String(market.expiryCount) });
+	if (typeof book.calls === "number" && typeof book.puts === "number") {
+		tiles.push({ label: "Calls / Puts", value: `${book.calls} / ${book.puts}` });
+	}
+	tiles.push({ label: "Theses", value: String(taggedPostCount) });
+	return tiles;
 }

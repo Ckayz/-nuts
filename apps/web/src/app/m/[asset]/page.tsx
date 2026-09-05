@@ -14,6 +14,7 @@ import { StructuresList } from "@/components/market/structures-list";
 import { TakeASide } from "@/components/market/take-a-side";
 import { usd2 } from "@/lib/format";
 import { marketStatTiles } from "@/lib/market/stat-tiles";
+import { marketBookStats } from "@/lib/market/summaries";
 import { usingDatabase } from "@/lib/data/source";
 import { marketBySlug, marketSummaries, thesesByMarket } from "@/lib/view-data";
 import { railTheses } from "@/lib/page-data";
@@ -269,7 +270,7 @@ export default async function MarketPage({
 					    deliberately absent because nothing honest can fill them, is
 					    `lib/market/stat-tiles.ts`. */}
 					<div className="stats">
-						{marketStatTiles(market, tagged.length).map((tile) => (
+						{marketStatTiles(market, tagged.length, await marketBookStats(market.asset)).map((tile) => (
 							<span className="tile" key={tile.label}>
 								<i>{tile.label}</i>
 								<b className="num">{tile.value}</b>

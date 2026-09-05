@@ -20,10 +20,17 @@ Table derived from `packages/env/src/server.ts` and `packages/env/src/web.ts` at
 
 ## Local verify
 
-From the repository root, after configuring a migrated local test database:
+From the repository root. `bun run verify` REQUIRES `DATABASE_URL` in the real
+environment, refuses any host that is not a loopback literal (unless
+`TEST_DATABASE_OK=1`), and refuses a database whose applied migration hashes do
+not cover the checked-in journal. A value that only an env file supplies is not
+an explicit selection, and a green table with the live suites silently skipped
+is no longer possible.
 
 ```sh
-bun run verify
+PGPASSWORD=postgres psql -h 127.0.0.1 -p 54322 -U postgres -qc "create database verify_run"
+(cd packages/db && DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/verify_run bunx drizzle-kit migrate)
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/verify_run bun run verify
 ```
 
 The full command sequence is:
@@ -33,7 +40,7 @@ bun run check-types --force
 (cd packages/db && bunx drizzle-kit check && bun test)
 (cd packages/thetanuts && bun test)
 (cd packages/env && bun test)
-(cd apps/web && bunx tsc --noEmit && bun test && bunx next build && DATA_SOURCE=db bunx next build)
+(cd apps/web && bunx tsc --noEmit && bun test && DATA_SOURCE=db bunx next build)
 ```
 
 For a writer without network or a database:
@@ -42,7 +49,7 @@ For a writer without network or a database:
 bun run verify --offline
 ```
 
-Offline mode sets both database URLs to empty and `SKIP_ENV_VALIDATION=1`, preventing env-file fallback. The runner prints and excludes integration and concurrency test files (including live RPC suites); both builds skip because they are outside the offline writer's authorization. This is partial verification, not deployment clearance. Each command streams output; the first failure stops execution and the final table includes unrun steps.
+Offline mode sets both database URLs to empty and `SKIP_ENV_VALIDATION=1`, preventing env-file fallback. The runner prints and excludes integration and concurrency test files (including live RPC suites); the db-mode build skips because it is outside the offline writer's authorization. This is partial verification, not deployment clearance. Each command streams output; the first failure stops execution and the final table includes unrun steps.
 
 ## Production builds are database builds
 
@@ -89,6 +96,34 @@ From the repository root:
 
 The fence prints `drizzle-kit target: <host>:<port>/<database>` without credentials or query parameters. It rejects destination query overrides (`host`, `hostaddr`, `port`, `dbname`, `database`) and requires `DRIZZLE_ALLOW_REMOTE=1` except for `localhost` and `127.0.0.1`. Confirm the intended session-pooler destination before running; the printed line is informational, not an interactive confirmation prompt. The fence does not itself reject transaction-pooler port 6543.
 
+### If the migration fails
+
+`drizzle-kit migrate` wraps EVERY pending migration in ONE transaction
+(`drizzle-orm/pg-core/dialect.js:60`, `await session.transaction(...)` around the
+loop over all pending migrations — read at drizzle-orm 0.45.2 on 2026-09-05), so
+a failure anywhere rolls the whole batch back. There is no half-applied state to
+repair:
+
+1. Re-read the error. A connection or authentication failure never touched the
+   schema at all.
+2. Confirm nothing landed:
+   `SELECT count(*) FROM drizzle.__drizzle_migrations;` must still equal the
+   pre-run baseline.
+3. Fix the cause locally, prove it on a fresh throwaway
+   (`create database x` + `bunx drizzle-kit migrate` from an EMPTY database, so
+   the whole chain `0000`-`0007` is exercised, not just the tail), then re-run
+   the production command. Re-running after a rollback is safe: the batch is
+   applied from the same starting point.
+4. NEVER `drizzle-kit push` to "repair" the difference, and never hand-edit
+   `drizzle.__drizzle_migrations` — a hand-inserted row makes drizzle skip a
+   migration that never ran.
+
+Note on ordering: drizzle selects only the LAST applied row
+(`order by created_at desc limit 1`, same file line 57) and applies every
+migration whose folder timestamp is newer. A migration file added with an OLDER
+timestamp than one already applied is silently skipped. Generate migrations in
+order and never back-date a folder.
+
 After migration, run in the Supabase SQL editor:
 
 ```sql
@@ -129,7 +164,7 @@ Repeat those same smoke checks on the production URL. Do not place a trade as pa
 
 ## Owner gates
 
-The one-shot two-leg review must be **GREEN** before production migrations, Vercel deployment, or real-money fills. Full live checks and both builds belong to the orchestrator; an offline pass is insufficient.
+The one-shot two-leg review must be **GREEN** before production migrations, Vercel deployment, or real-money fills. Full live checks and the db-mode build belong to the orchestrator; an offline pass is insufficient.
 
 The OptionBook owner must whitelist the platform referrer wallet and set its fee split. The referrer wallet needs Base ETH gas to claim fees. Amounts and granted split are `TODO-OWNER`; do not invent them.
 

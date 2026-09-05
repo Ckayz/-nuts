@@ -93,6 +93,37 @@ function fail(message: string): never {
   process.exit(2);
 }
 
+/**
+ * A2-1 (one-shot review pass 2). The DESTINATION only — never a credential.
+ *
+ * The previous line printed `databaseUrl.replace(/:\/\/[^@]*@/, "://***@")`,
+ * which redacts the authority and leaves the query intact. `pg` reads a password
+ * out of the query too: measured 2026-09-06 against the installed `pg`,
+ * `new pg.Client({ connectionString: "postgresql://user@127.0.0.1:54322/x?password=S" })`
+ * returned `{"host":"127.0.0.1","database":"x","queryPasswordUsed":true}`. So the
+ * query string is dropped whole rather than redacted key by key, and only the
+ * three fields an operator needs to identify the database are printed.
+ *
+ * An unparseable URL prints nothing about itself: the fences above have already
+ * refused it, and guessing at its shape is how credentials leak.
+ */
+function describeDatabaseUrl(rawUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return "the selected database (URL not printed: it does not parse)";
+  }
+  const database = url.pathname.replace(/^\//, "");
+  return [
+    `host ${url.hostname === "" ? "(none)" : url.hostname}`,
+    url.port === "" ? null : `port ${url.port}`,
+    `database ${database === "" ? "(none)" : database}`,
+  ]
+    .filter((part) => part !== null)
+    .join(" ");
+}
+
 const databaseUrl = (process.env.DATABASE_URL ?? "").trim();
 
 if (!offline) {
@@ -128,7 +159,7 @@ if (!offline) {
         "Apply the migrations first: cd packages/db && DATABASE_URL=<url> bunx drizzle-kit migrate",
     );
   }
-  console.log(`Verifying against ${databaseUrl.replace(/:\/\/[^@]*@/, "://***@")} — ${probeOut.trim()}`);
+  console.log(`Verifying against ${describeDatabaseUrl(databaseUrl)} — ${probeOut.trim()}`);
 }
 
 // Offline: empty values prevent Bun/dotenv from restoring credentials from env

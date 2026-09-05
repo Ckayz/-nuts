@@ -34,18 +34,20 @@ export function TradeApproval({
 	const asset = instrument?.split("|")[0] ?? null;
 
 	return (
-		<div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+		// Design rule (CLAUDE.md): ONE accent, and colour on money only — the amber
+		// tint and the mono figures below were neither.
+		<div className="rounded-lg border p-4">
 			<p className="font-medium text-sm">Prepare this trade?</p>
 
 			<dl className="mt-3 space-y-1 text-sm">
 				<div className="flex justify-between gap-4">
 					<dt className="text-muted-foreground">Spend up to</dt>
-					<dd className="font-mono">{budget ?? "—"}</dd>
+					<dd className="num">{budget ?? "—"}</dd>
 				</div>
 				{asset && (
 					<div className="flex justify-between gap-4">
 						<dt className="text-muted-foreground">Market</dt>
-						<dd className="font-mono">{asset}</dd>
+						<dd className="num">{asset}</dd>
 					</div>
 				)}
 			</dl>

@@ -3,6 +3,7 @@ import "server-only";
 import { tool } from "ai";
 import { z } from "zod";
 import { getThesisContext as loadThesisContext } from "@/lib/thesis-context";
+import { getPublicPostContext } from "@/lib/post-context";
 
 import { instrumentKey, findByInstrumentKey } from "@/lib/thetanuts/instrument";
 import {
@@ -34,7 +35,11 @@ import type { TradeableOrder } from "@/lib/thetanuts/types";
  *    never estimated (PRD 10.1).
  */
 
-/** Ceiling on agent-prepared trades (PRD 10.2). */
+/**
+ * Ceiling on agent-prepared trades. PRD 10.2, verbatim: "`maximumLossUsd <= 10`
+ * and `requiredCollateralUsd <= 10` for agent-prepared trades."
+ * TODO-OWNER: the PRD's number is the owner's.
+ */
 const MAX_LOSS_USD = 10;
 
 function describe(order: TradeableOrder) {
@@ -89,9 +94,12 @@ export const searchOptionBookOrders = tool({
 			.number()
 			.int()
 			.positive()
+			// TODO-OWNER: the longest expiry a search may ask for.
 			.max(400)
 			.optional()
 			.describe("Only instruments expiring within this many days."),
+		// TODO-OWNER: how many orders one answer may carry. These bound model
+		// context, not what is tradeable.
 		limit: z.number().int().min(1).max(12).default(6),
 	}),
 	execute: async ({ asset, side, direction, kind, maxDaysToExpiry, limit }) => {
@@ -234,6 +242,29 @@ export const getThesisContext = tool({
 	execute: async ({ thesisId }) => {
 		const result = await loadThesisContext(thesisId);
 		if (!result.available) {
+			/**
+			 * C8-r2 (lane C confirming pass, finding 8). A post with no structure is
+			 * the NORMAL post: `publishPost` writes headline + rationale + tag and
+			 * nothing else, and the frozen `ThesisAiContext` (PRD 10.3) requires a
+			 * structure, so "Explain this post" answered `no_structure` for every
+			 * post the composer produces. The text is read from a separate public
+			 * context instead — no financial fields, and the same public-status
+			 * list the rest of the site uses.
+			 */
+			if (result.reason === "no_structure" || result.reason === "no_creator_position") {
+				const post = await getPublicPostContext(thesisId);
+				if (post.available) {
+					return {
+						found: true as const,
+						kind: "text_post" as const,
+						post: post.post,
+						// No market page: this post names no instrument, and pointing at
+						// one would be inventing the trade it deliberately does not make.
+						marketUrl: null,
+						note: "This post is text: it names no option structure and carries no position, so it has no economics to report. Say what it argues and, if it tags a market, offer to look at what is tradeable there.",
+					};
+				}
+			}
 			return { found: false as const, reason: result.reason, thesisId };
 		}
 		/**
@@ -250,6 +281,7 @@ export const getThesisContext = tool({
 		const asset = result.context.market.underlyingAsset;
 		return {
 			found: true as const,
+			kind: "structured" as const,
 			context: result.context,
 			marketUrl: `/m/${asset.toLowerCase()}?thesis=${result.context.thesis.id}`,
 		};

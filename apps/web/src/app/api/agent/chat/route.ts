@@ -5,7 +5,6 @@ import {
 	streamText,
 	type UIMessage,
 } from "ai";
-import { z } from "zod";
 
 import { getSession } from "@/lib/auth/session";
 import { readTools } from "@/lib/agent/tools";
@@ -13,29 +12,13 @@ import { createExecutionTools } from "@/lib/agent/execute";
 import { agentModel } from "@/lib/agent/model";
 import { SYSTEM_PROMPT } from "@/lib/agent/prompt";
 import { OUT_OF_SCOPE_REPLY, checkScope } from "@/lib/agent/scope";
+import { chargeTurn, subjectFor } from "@/lib/agent/usage";
+// The request shape lives outside this file: a Next route handler may only
+// export its verbs and its route config, so a schema exported here would fail
+// the build, and it has to be importable by a test.
+import { agentChatBodySchema } from "@/lib/agent/request";
 
 export const maxDuration = 60;
-
-const bodySchema = z.object({
-	messages: z.array(z.unknown()).min(1).max(80),
-	/**
-	 * The connected wallet. Bound into the write tool so the model cannot name a
-	 * different address, and used only as the transaction sender.
-	 */
-	walletAddress: z
-		.string()
-		.regex(/^0x[0-9a-fA-F]{40}$/)
-		.optional(),
-	/**
-	 * The post this conversation is about (`/agent?thesis=<uuid>`). It only ever
-	 * decides which post a prepared fill attaches to; every economic value is
-	 * still re-read server-side.
-	 */
-	thesisId: z
-		.string()
-		.regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
-		.optional(),
-});
 
 /** Plain text of the newest user message, for the scope gate. */
 function latestUserText(messages: UIMessage[]): string {
@@ -59,12 +42,12 @@ export async function POST(request: Request) {
 		return Response.json({ error: "Malformed request body." }, { status: 400 });
 	}
 
-	const body = bodySchema.safeParse(parsed);
+	const body = agentChatBodySchema.safeParse(parsed);
 	if (!body.success) {
 		return Response.json({ error: "Expected a messages array." }, { status: 400 });
 	}
 
-	const messages = body.data.messages as UIMessage[];
+	const messages = body.data.messages as unknown as UIMessage[];
 	const account = (body.data.walletAddress as `0x${string}` | undefined) ?? null;
 	// Read from the cookie, NEVER from the body: the ticket `prepareTradeFor`
 	// issues is bound to this session, so it decides which wallet may ever
@@ -72,9 +55,34 @@ export async function POST(request: Request) {
 	const session = await getSession();
 	const thesisId = body.data.thesisId?.toLowerCase() ?? null;
 
+	/**
+	 * C6-r2. PRD 10.2's daily model limits, charged BEFORE any model is called —
+	 * including the small scope model, which is also a paid call. The turn is
+	 * charged to the signed-in wallet when there is one, so the connected address
+	 * in the body cannot buy a bigger allowance than the session it belongs to.
+	 */
+	const turn = await chargeTurn(subjectFor(session?.walletAddress ?? null, request.headers));
+	if (!turn.allowed) {
+		return Response.json({ error: turn.reason }, { status: 429 });
+	}
+
 	// PRD 10.8 layer 1. Runs before the primary model, so an out-of-scope
 	// request costs one small model call rather than a full agent turn.
 	const scope = await checkScope(latestUserText(messages));
+
+	/**
+	 * Residual (lane C confirming pass): the gate's `degraded` result was ignored
+	 * — a scope check that could not run returned `inScope: true` and the turn
+	 * proceeded as if it had passed. PRD 10.8 makes this layer 1 of the defence,
+	 * so a layer that did not run is a refusal, not a pass.
+	 * TODO-OWNER: the wording, and whether a degraded gate should serve at all.
+	 */
+	if (scope.degraded) {
+		return Response.json(
+			{ error: "The agent's safety check could not run, so this message was not sent. Try again shortly." },
+			{ status: 503 },
+		);
+	}
 
 	if (!scope.inScope) {
 		const stream = createUIMessageStream({
@@ -102,11 +110,13 @@ export async function POST(request: Request) {
 		toolApproval: { requestOptionBookExecution: "user-approval" },
 		// Search, preview, then prepare is the deepest real path, and an approval
 		// suspends and resumes the loop. Without a ceiling a confused turn can spin.
+		// TODO-OWNER: the step ceiling and the sampling temperature.
 		stopWhen: ({ steps }) => steps.length >= 10,
 		temperature: 0.3,
 		// Bounds cost per turn and keeps answers short enough to read. Without an
 		// explicit cap the provider reserves its full context window against the
 		// account balance, which fails outright on a small balance.
+		// TODO-OWNER: the per-turn output ceiling.
 		maxOutputTokens: 1200,
 	});
 

@@ -16,6 +16,8 @@ import { gateModel } from "./model";
 
 const decisionSchema = z.object({
 	inScope: z.boolean(),
+	// TODO-OWNER: the gate's reason is never shown to a user; 160 only bounds
+	// what the small model may spend on it.
 	reason: z.string().max(160),
 });
 
@@ -64,15 +66,24 @@ export async function checkScope(message: string): Promise<ScopeDecision> {
 			// Delimited and labelled as data, so injected instructions inside it
 			// read as content being classified rather than as orders to follow.
 			prompt: `Classify this user message:\n\n<message>\n${trimmed.slice(0, 2000)}\n</message>`,
+			// A classifier, so no sampling at all. TODO-OWNER: both values.
 			temperature: 0,
 			// The gate emits one boolean and a short reason; anything more is waste.
 			maxOutputTokens: 120,
 		});
 		return { ...object, degraded: false };
-	} catch {
-		// Fail open, and say so. A gate outage must not take the product down, but
-		// it must be visible rather than silently disabled: the primary model still
-		// has the system instruction and tool grounding behind it.
+	} catch (error) {
+		// This function still returns `inScope: true` so a caller that only wants
+		// a classification is not forced to invent one. `degraded` is the whole
+		// answer: the gate did not run.
+		//
+		// Residual (lane C confirming pass): the chat route USED to drop that flag
+		// on the floor, which turned "layer 1 did not run" into "layer 1 passed" —
+		// a guard that fails open is an amplifier, not a guard. The route now
+		// refuses the turn. TODO-OWNER: refuse (current) vs serve with the
+		// remaining guardrails; this file previously documented the latter, and
+		// the choice between them is a product call, not this file's.
+		console.error("[agent/scope] gate unavailable:", error);
 		return {
 			inScope: true,
 			reason: "Scope gate unavailable; allowed with the remaining guardrails.",

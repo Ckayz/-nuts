@@ -389,8 +389,26 @@ export function backingCard(value: Domain.Thesis, asOf: Date = new Date()): View
 			});
 			return { usd: resolved.pnlUsd, detail: resolved.detail, basis: resolved.basis };
 		})(),
-		// A post stores no taker side, so the money that went in is named by the
-		// column that holds it rather than by a side this record cannot prove.
+		/**
+		 * C8-r2 (lane C confirming pass, residual) — STOPPED, deliberately
+		 * unchanged, reported instead of guessed.
+		 *
+		 * The reviewer asks for "the same taker-side mapper as C8" here. The only
+		 * candidate input is `theses.is_long`, and its meaning is not written down
+		 * anywhere: `packages/db/src/ai-context.ts` passes it straight through the
+		 * FROZEN PRD 10.3 contract without defining it, PRD line 470 uses `isLong`
+		 * in the MAKER-order sense, and NOTHING in production writes the column —
+		 * `publishPost` leaves the whole structure block null and the market
+		 * ticket never creates a post, so this branch is reachable only by mock
+		 * fixtures and by rows written before migration 0007. Deriving a taker
+		 * side from an undefined column is exactly the mistake that inverted the
+		 * taker side once already (CLAUDE.md, core round 9), and the invariant
+		 * `trade-card.test.ts` pins — that this card and the same fill's linked
+		 * card agree — would break either way.
+		 *
+		 * TODO-OWNER: what `theses.is_long` means, and whether this label should
+		 * name the column ("Entry premium") instead of asserting a side.
+		 */
 		entryLabel: "Premium paid",
 		entryUsd: decimalOrNull(economics.entryPremiumUsd),
 		maxLossUsd: decimalOrNull(economics.maximumLossUsd),

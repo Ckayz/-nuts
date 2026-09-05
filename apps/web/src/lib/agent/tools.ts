@@ -70,10 +70,40 @@ function describe(order: TradeableOrder) {
 	};
 }
 
+/**
+ * Strike prices compared the way a person writes them.
+ *
+ * The book's own strings come from `decimalString(strike, 1e8)`, so a strike can
+ * arrive as "2450.00000000" while the user types "2450"; both name one strike.
+ * Sorted before joining because a spread is identified by the SET of its legs,
+ * not by the order the feed happens to list them in — and equality of two lists
+ * is preserved under any deterministic sort applied to both sides.
+ *
+ * Not a product decision: no threshold, no tolerance, no rounding. Two strings
+ * are the same strike only when they denote the same exact decimal.
+ */
+export function normalizeStrikes(strikes: readonly string[]): string {
+	return strikes
+		.map((raw) => {
+			const trimmed = raw.trim();
+			const [whole = "", fraction = ""] = trimmed.split(".");
+			const w = whole.replace(/^0+(?=\d)/, "") || "0";
+			const f = fraction.replace(/0+$/, "");
+			return f === "" ? w : `${w}.${f}`;
+		})
+		.slice()
+		.sort()
+		.join("/");
+}
+
 export const searchOptionBookOrders = tool({
 	description:
 		"Search live Thetanuts OptionBook liquidity on Base mainnet. Returns buy and sell orders, labelled by taker side and collateral token. " +
 		"Use this before discussing any specific trade: never describe an option that is not in these results. " +
+		// TODO-OWNER: the wording of the truncation warning below.
+		"Results are ONE PAGE of the matching set: `totalMatched` is how many matched, `returned` is how many are in this answer, and `truncated: true` " +
+		"means the rest were not shown. A truncated page proves nothing about absence — never say an instrument is not on the book on the strength of one. " +
+		"To check one specific structure, pass its exact `strikesUsd` (with `asset` and `direction`) and read `totalMatched`. " +
 		"Binary filtering is unavailable because SDK 0.3.0 exposes no binary discriminator. Product kinds: " +
 		"'vanilla' is a single call or put; 'multi_leg' is a spread or butterfly.",
 	inputSchema: z.object({
@@ -98,11 +128,18 @@ export const searchOptionBookOrders = tool({
 			.max(400)
 			.optional()
 			.describe("Only instruments expiring within this many days."),
+		strikesUsd: z
+			.array(z.string())
+			.min(1)
+			.optional()
+			.describe(
+				"Exact strike prices in USD, as decimal strings, for looking ONE named structure up directly: [\"2450\",\"2500\"] for a 2450/2500 spread, [\"2450\"] for a single strike. Leg order does not matter; trailing zeros do not matter. Use this whenever the user names strikes, instead of paging through a search.",
+			),
 		// TODO-OWNER: how many orders one answer may carry. These bound model
 		// context, not what is tradeable.
 		limit: z.number().int().min(1).max(12).default(6),
 	}),
-	execute: async ({ asset, side, direction, kind, maxDaysToExpiry, limit }) => {
+	execute: async ({ asset, side, direction, kind, maxDaysToExpiry, strikesUsd, limit }) => {
 		const expiryBefore = maxDaysToExpiry
 			? new Date(Date.now() + maxDaysToExpiry * 86_400_000)
 			: undefined;
@@ -121,21 +158,51 @@ export const searchOptionBookOrders = tool({
 		if (isFeedUnavailable(result)) return result;
 		const { orders, fetchedAt, totalMatched, droppedEntries } = result;
 
+		// The adapter's own page cap (200 above) bit before this code ran whenever the
+		// matching set is larger than it. Everything below that is filtered HERE therefore
+		// searched a partial book, and a miss may not be reported as absence.
+		const adapterPartial = orders.length < totalMatched;
+		// The strike filter cannot live in `searchOrders` (another writer's file), so it runs
+		// on the adapter page — hence `adapterPartial` above, which is folded into `truncated`.
+		const wanted = strikesUsd === undefined ? null : normalizeStrikes(strikesUsd);
+		const matched = wanted === null ? orders : orders.filter((o) => normalizeStrikes(o.strikesUsd) === wanted);
+		// With no strike filter this is the adapter's count of the WHOLE matching set; with
+		// one it is the count within the page actually searched, which `truncated` qualifies.
+		const matchedTotal = wanted === null ? totalMatched : matched.length;
+		const page = matched.slice(0, limit);
+		/**
+		 * The measured m6 failure: `limit` defaulted to 6, the model was handed the first
+		 * six of 26 matching ETH call spreads, and it told a user the 2450/2500 spread — at
+		 * index 9, live on `/m/eth` at that moment — "is not on the orderbook". `totalMatched`
+		 * was already returned; what was missing was any statement that a page proves nothing
+		 * about absence. This flag and the note below are that statement, and `strikesUsd`
+		 * above is the way to answer the question without paging at all.
+		 */
+		const truncated = page.length < matchedTotal || (wanted !== null && adapterPartial);
+
 		return {
 			asOf: fetchedAt.toISOString(),
-			totalMatched,
-			returned: Math.min(orders.length, limit),
+			totalMatched: matchedTotal,
+			returned: page.length,
+			truncated,
 			// Feed rows dropped for failing validation. Non-zero means this view of the
 			// book is partial; say so rather than implying it is complete. Rows parsed, so
 			// this is a partial book, never a lost one: losing every row is `feed_unusable`.
 			droppedEntries,
-			orders: orders.slice(0, limit).map(describe),
-			// Only reachable once rows parsed: the caller's own filters excluded them, or the
-			// book really is empty. A feed that returned nothing readable never gets here.
+			orders: page.map(describe),
+			// TODO-OWNER: all three sentences below.
 			note:
-				totalMatched === 0
-					? "Nothing on the book matches those constraints right now. Say so plainly and offer to widen them; do not invent an alternative."
-					: undefined,
+				matchedTotal === 0
+					? adapterPartial
+						// Nothing matched, but the set searched was itself a page. Fail closed:
+						// this is an unknown, never a "no".
+						? "Nothing in the page searched matches those constraints, but the page did not cover the whole matching set, so this is NOT evidence that the book has nothing. Narrow the search (asset, direction, kind, expiry) and try again before saying anything is unavailable."
+						// Only reachable once rows parsed: the caller's own filters excluded them, or the
+						// book really is empty. A feed that returned nothing readable never gets here.
+						: "Nothing on the book matches those constraints right now. Say so plainly and offer to widen them; do not invent an alternative."
+					: truncated
+						? `Showing ${page.length} of ${matchedTotal} matching orders. This is one page, not the whole book: an instrument missing from it may still be quoted. Never conclude an option is unavailable from a truncated page — narrow the filters, or pass the exact strikesUsd, and search again.`
+						: undefined,
 		};
 	},
 });

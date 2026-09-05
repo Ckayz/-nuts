@@ -432,7 +432,7 @@ function armed<T, S extends object>(result: T, shape: keyof S, label: string): E
  }
  return result as Extract<T, S>;
 }
-const searched = <T,>(result: T) => armed<T, { totalMatched: number; returned: number; droppedEntries: number; note?: string; orders: Array<{ kind: string | null }> }>(result, "totalMatched", "search");
+const searched = <T,>(result: T) => armed<T, { totalMatched: number; returned: number; truncated: boolean; droppedEntries: number; note?: string; orders: Array<{ kind: string | null }> }>(result, "totalMatched", "search");
 const previewed = <T,>(result: T) => armed<T, { found: boolean; asOf: string }>(result, "found", "preview");
 
 test("MAJOR1: the spot map is keyed by asset, so no collateral symbol can ever be looked up in it", async () => {
@@ -619,7 +619,11 @@ test("MAJOR3: kind is filtered before the page cap, so totalMatched counts the w
    // The whole filtered set, not the 200-row page it was once counted from.
    expect(result.totalMatched).toBe(truth[kind]!);
    expect(result.returned).toBe(6);
-   expect(result.note).toBeUndefined();
+   // m6: a page of a bigger set now SAYS it is a page. What this assertion has always
+   // been about is that the empty-book note did not fire, which it still does not.
+   expect(result.truncated).toBe(true);
+   expect(String(result.note)).toContain(`Showing 6 of ${truth[kind]!}`);
+   expect(String(result.note)).not.toContain("Nothing on the book");
    expect(result.orders.every(o => o.kind === kind)).toBe(true);
   }
   // Unfiltered still counts the whole book.

@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 
 import { TodoOwner } from "@/components/primitives";
 import { AgentChat } from "./agent-chat";
@@ -22,10 +23,28 @@ import "@/styles/agent.css";
 
 const FOCUSABLE = 'input:not([disabled]), a[href], button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/**
+ * m3 (Opus user-flow tester). The routes that already EMBED `AgentChat`:
+ * `/agent` renders it full-page (`app/agent/page.tsx:30`) and `/m/<asset>`
+ * renders it as a panel in the right rail (`app/m/[asset]/page.tsx:183`).
+ * Opening the launcher there put a second, independent chat on top of the first
+ * — two conversations, two turn charges, and the one underneath still visible.
+ *
+ * The test belongs HERE and not in the shell: `app/layout.tsx` mounts this on
+ * every route and is a SERVER component (no "use client"), so it cannot read the
+ * pathname. Exported so the rule is testable without a router.
+ */
+export function launcherHiddenOn(pathname: string): boolean {
+	return pathname === "/agent" || pathname.startsWith("/agent/") || pathname === "/m" || pathname.startsWith("/m/");
+}
+
 export function AgentLauncher({ asset = null }: { readonly asset?: string | null }) {
 	const [open, setOpen] = useState(false);
 	const panel = useRef<HTMLDivElement>(null);
 	const opener = useRef<Element | null>(null);
+	// Read before the early return below, and every hook stays above it, so the
+	// hook order is the same on every route.
+	const pathname = usePathname();
 
 	useEffect(() => {
 		if (!open) return;
@@ -42,6 +61,9 @@ export function AgentLauncher({ asset = null }: { readonly asset?: string | null
 		event.stopPropagation();
 		setOpen(false);
 	}, []);
+
+	// After the hooks, never before them.
+	if (launcherHiddenOn(pathname ?? "")) return null;
 
 	if (!open) {
 		return (

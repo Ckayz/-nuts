@@ -44,6 +44,46 @@ if (!databaseUrl) {
   console.log("schema integration skipped: DATABASE_URL is not set");
   test.skip("migrated schema constraints require DATABASE_URL", () => {});
 } else describe("migrated schema constraints", () => {
+  for (const headline of ["", "   ", "\n\t"]) {
+    probe(`headline rejects ${JSON.stringify(headline)} on insert and update`, async (client) => {
+      await rejects(client, "INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,$2,'open')", [u1, headline], check("theses_headline_nonblank"));
+      await rejects(client, "UPDATE public.theses SET headline=$1 WHERE id=$2", [headline, t1], check("theses_headline_nonblank"));
+    });
+  }
+  probe("normal headline accepted", async (client) => {
+    const result = await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,'A normal headline','open') RETURNING headline", [u1]);
+    expect(result.rows).toEqual([{ headline: "A normal headline" }]);
+  });
+
+  async function backfillLinkedDraft(client: Client) {
+    // Recreate the pre-0003 tag state within the rolled-back test transaction.
+    await client.query('ALTER TABLE public.theses DROP CONSTRAINT theses_tagged_asset_matches_structure');
+    await client.query("UPDATE public.theses SET tagged_asset=NULL,creator_position_id=$1 WHERE id=$2", [p1, t1]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query("SET CONSTRAINTS ALL DEFERRED");
+    await client.query("UPDATE public.users SET wallet_address='0xaaa' WHERE id=$1", [u1]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query("SET CONSTRAINTS ALL DEFERRED");
+    expect((await client.query("SELECT t.status,t.tagged_asset,p.status AS position_status,p.wallet_address AS position_wallet,u.wallet_address AS creator_wallet FROM public.theses t JOIN public.positions p ON p.id=t.creator_position_id JOIN public.users u ON u.id=t.creator_user_id WHERE t.id=$1", [t1])).rows).toEqual([{ status: "draft", tagged_asset: null, position_status: "confirmed", position_wallet: "0xabc", creator_wallet: "0xaaa" }]);
+    const migration = await Bun.file(new URL("../src/migrations/0003_thesis_is_a_post.sql", import.meta.url)).text();
+    const start = migration.indexOf('ALTER TABLE "theses" DISABLE TRIGGER "theses_creator_position_invariant";');
+    const endStatement = 'ALTER TABLE "theses" ENABLE TRIGGER "theses_creator_position_invariant";';
+    const end = migration.indexOf(endStatement, start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    // Execute the exact statements from the migration, including its WHERE clause.
+    for (const statement of migration.slice(start, end + endStatement.length).split("--> statement-breakpoint")) {
+      await client.query(statement);
+    }
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    expect((await client.query("SELECT tagged_asset FROM public.theses WHERE id=$1", [t1])).rows).toEqual([{ tagged_asset: "ETH" }]);
+  }
+  probe("tag backfill preserves round-6 linked draft after creator wallet change", backfillLinkedDraft);
+  probe("tag backfill restores creator position trigger enforcement", async (client) => {
+    await backfillLinkedDraft(client);
+    await rejects(client, "UPDATE public.theses SET creator_position_id=$1 WHERE id=$2", [p1, t1], { code: "23514", message: `invalid creator position for thesis ${t1}` });
+  });
+
   const quantities = ["budget", "contracts", "premium", "fees", "collateral", "maximum_loss", "maximum_payout", "settlement_price", "payout", "estimated_pnl", "final_pnl"];
   const nullableQuantities = ["maximum_loss", "maximum_payout", "estimated_pnl", "settlement_price", "payout", "final_pnl"];
   for (const column of quantities) {

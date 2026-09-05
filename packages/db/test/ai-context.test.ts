@@ -229,3 +229,21 @@ describe("ThesisAiContext", () => {
     }
   });
 });
+
+for (const headline of ["", "   ", "\n\t"]) {
+  test(`context rejects blank headline ${JSON.stringify(headline)}`, () => {
+    const example = thesisAiContextExamples[0];
+    expect(thesisAiContextSchema.safeParse({ ...example, thesis: { ...example.thesis, headline } }).success).toBe(false);
+    const rows = rowsFromExample(example);
+    rows.thesis.headline = headline;
+    let caught: unknown;
+    try { buildThesisAiContext({ thesis: rows.thesis, creator: rows.creator, creatorPosition: rows.position, dataAsOf: example.market.dataAsOf }); }
+    catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(ThesisAiContextError);
+    expect(caught).toMatchObject({ code: "INVALID_VALUE" });
+  });
+}
+test("context accepts and trims a normal headline", () => {
+  const example = thesisAiContextExamples[0];
+  expect(thesisAiContextSchema.parse({ ...example, thesis: { ...example.thesis, headline: "  A normal headline  " } }).thesis.headline).toBe("A normal headline");
+});

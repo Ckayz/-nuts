@@ -67,7 +67,7 @@ const thesisStatusSchema = z.enum(["draft", "pending", "open", "expired", "settl
 export const thesisAiContextSchema: z.ZodType<ThesisAiContext> = z.object({
   thesis: z.object({
     id: z.string(),
-    headline: z.string(),
+    headline: z.string().trim().min(1),
     rationale: z.string().nullable(),
     direction: thesisDirectionSchema,
     status: thesisStatusSchema,

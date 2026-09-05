@@ -1670,6 +1670,10 @@
         "theses_strikes_integral_nonnegative": {
           "name": "theses_strikes_integral_nonnegative",
           "value": "\"theses\".\"strikes\" is null or case when array_ndims(\"theses\".\"strikes\") = 1 then array_position(\"theses\".\"strikes\", NULL) is null and cardinality(\"theses\".\"strikes\") > 0 and array_to_string(\"theses\".\"strikes\", ',') ~ '^[0-9]+(,[0-9]+)*$' else false end"
+        },
+        "theses_headline_nonblank": {
+          "name": "theses_headline_nonblank",
+          "value": "\"theses\".\"headline\" ~ '[^[:space:]]'"
         }
       },
       "isRLSEnabled": false

@@ -23,12 +23,16 @@ ALTER TABLE "theses" ADD COLUMN "tagged_asset" text;--> statement-breakpoint
 ALTER TABLE "likes" ADD CONSTRAINT "likes_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "likes" ADD CONSTRAINT "likes_thesis_id_theses_id_fk" FOREIGN KEY ("thesis_id") REFERENCES "public"."theses"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 -- Derived backfill for pre-existing structured theses; no invented market values.
-UPDATE "theses" SET "tagged_asset" = "underlying_asset";
+-- Preserve round-6-permitted linked drafts after a creator wallet change.
+-- Suspend only relationship validation for this tag-only UPDATE, in this transaction.
+ALTER TABLE "theses" DISABLE TRIGGER "theses_creator_position_invariant";
 --> statement-breakpoint
--- Drain the backfill deferred trigger events before further ALTER TABLE commands.
-SET CONSTRAINTS ALL IMMEDIATE;
+UPDATE "theses" SET "tagged_asset" = "underlying_asset"
+WHERE "underlying_asset" IS NOT NULL AND "tagged_asset" IS NULL;
 --> statement-breakpoint
-SET CONSTRAINTS ALL DEFERRED;
+ALTER TABLE "theses" ENABLE TRIGGER "theses_creator_position_invariant";
+--> statement-breakpoint
+ALTER TABLE "theses" ADD CONSTRAINT "theses_headline_nonblank" CHECK ("theses"."headline" ~ '[^[:space:]]');
 --> statement-breakpoint
 ALTER TABLE "theses" ADD CONSTRAINT "theses_structure_all_or_nothing" CHECK (("theses"."direction" is null and "theses"."underlying_asset" is null and "theses"."expiry_at" is null and "theses"."product_type" is null and "theses"."is_call" is null and "theses"."is_long" is null and "theses"."strikes" is null and "theses"."strike_decimals" is null and "theses"."collateral_address" is null and "theses"."collateral_symbol" is null and "theses"."collateral_decimals" is null and "theses"."creator_order_snapshot" is null) or ("theses"."direction" is not null and "theses"."underlying_asset" is not null and "theses"."expiry_at" is not null and "theses"."product_type" is not null and "theses"."is_call" is not null and "theses"."is_long" is not null and "theses"."strikes" is not null and "theses"."strike_decimals" is not null and "theses"."collateral_address" is not null and "theses"."collateral_symbol" is not null and "theses"."collateral_decimals" is not null and "theses"."creator_order_snapshot" is not null));--> statement-breakpoint
 ALTER TABLE "theses" ADD CONSTRAINT "theses_tagged_asset_uppercase" CHECK ("theses"."tagged_asset" = upper("theses"."tagged_asset"));--> statement-breakpoint

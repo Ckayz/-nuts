@@ -11,6 +11,12 @@
 .profile-identity{min-width:0}
 .position-row{padding:13px 10px}
 .profile-posts .post{background:none;border:0;padding:12px 10px}
+/* Same hairline separation the feed and the market page use
+   (docs/design/FOMO-DIGEST.md, "Feed"): a line BETWEEN siblings only, so the
+   card's own top and bottom edges stay clean. `.profile-posts .post+.post`
+   (0,3,0) outranks `.post:hover{border-color:var(--line)}` (0,2,0), so hovering
+   a row does not brighten its separator. */
+.profile-posts .post+.post{border-top:1px solid var(--line-soft)}
 .profile-posts .p-body{font-size:15px}
 .profile-posts .p-name{font-size:14px}
 .profile-editor summary{cursor:pointer;font-weight:600}

@@ -176,7 +176,7 @@ export function thesisWithOrigin(value: Domain.Thesis, siteOrigin: string | read
     // structure group null-or-complete), so no expiry means no structure chip.
     const struct = value.structure === null || value.market === null || value.market.expiryAt === null ? null : structure(value.structure, value.market.expiryAt);
     return { id: value.id, slug: value.slug, headline: value.thesis.headline, note: value.thesis.rationale,
-        asset: value.market?.underlyingAsset ?? null, creator: creator(value.creator), status, statusLabel,
+        asset: value.market?.underlyingAsset ?? null, direction: value.thesis.direction, creator: creator(value.creator), status, statusLabel,
         postedLabel: settled ? `· settled ${value.backing?.mock.settledAgoMinutes ?? "—"}m` : `· ${elapsed(value.thesis.createdAt, value.dataAsOf)}`,
         tag: value.market === null ? null : { slug: marketSlug(value.market.underlyingAsset), asset: value.market.underlyingAsset, structureLabel: struct === null ? null : `${struct.strikesLabel} · ${struct.expiryLabel}` },
         structure: struct, backing: value.backing === null ? null : backing(value, settled),

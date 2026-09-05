@@ -223,7 +223,20 @@ const COPY = {
 	connectFirst: "Connect a wallet first.",
 } as const;
 
-export function TradeExecution({ trade }: { trade: PreparedTrade }) {
+export function TradeExecution({
+	trade,
+	onDone,
+}: {
+	readonly trade: PreparedTrade;
+	/**
+	 * Called once, with the id of the position the fill created, at the moment
+	 * the server confirms it is recorded. The chat uses it to offer the two
+	 * things there are to do next (write a post, see your positions); nothing
+	 * about the fill path changes, and a caller that does not pass it sees
+	 * exactly the behaviour it had before.
+	 */
+	readonly onDone?: (positionId: string) => void;
+}) {
 	const { address, isConnected, chainId: walletChainId } = useConnection();
 	const { switchChain } = useSwitchChain();
 	const { mutateAsync: sendTransactionAsync } = useSendTransaction();
@@ -357,9 +370,10 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				return;
 			}
 			setPositionPath(`/p/${recorded.positionId}`);
+			onDone?.(recorded.positionId);
 			setPhase("done");
 		},
-		[holdSent],
+		[holdSent, onDone],
 	);
 
 	/** C#3. The message for a recording that never reached the server. */

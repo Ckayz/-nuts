@@ -143,9 +143,9 @@ export async function getLiveMarkets(force = false): Promise<LiveBook | FeedUnav
 
 	const byAsset = new Map<string, Map<string, LiveStructure>>();
 	for (const market of markets) {
-		// The MEASURED rule, not `market.makerSide`: see `./taker-side.ts`. The
-		// shared package's `makerSide` is the inverse of 40/40 decoded fills, so
-		// grouping on it would put every order under the wrong button.
+		// The MEASURED rule from `./taker-side.ts`, which the shared package's
+		// `makerSide` also follows since core round 9; grouping through the local
+		// rule keeps the cross-check in one place.
 		const side: TakerSide = takerSideOf(market.order);
 		const structure = toStructure(market, side);
 		const structures = byAsset.get(market.asset) ?? new Map<string, LiveStructure>();

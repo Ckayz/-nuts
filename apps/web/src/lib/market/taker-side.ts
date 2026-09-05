@@ -27,23 +27,12 @@
  * maker signed and the field the API publishes cannot differ.
  * ────────────────────────────────────────────────────────────────────────────
  *
- * THIS CONTRADICTS `packages/thetanuts/src/side.ts`, which returns
- * `isLong ? "buy" : "sell"` — the exact inverse. That package is another
- * writer's fence, so nothing here edits it. Instead every quote is cross-checked
- * against this measured rule and REFUSED when the two disagree, which today is
- * always. Trading therefore fails closed until the package is corrected.
- *
- * The package contradicts itself the same way, with no reference to this scan:
- * its `VERIFIED_SELL_PAIRS` entry was derived from tx 0xdf3323… (implementation
- * 0x6aD53DD0…, collateral aBasUSDC) — and feeding that very order to
- * `quoteSellFill` throws `INVALID_SIDE`, because its own `takerSide` calls that
- * order a taker BUY. A test in `taker-side.integration.test.ts` proves it.
- *
- * The correction is two flips, both in `packages/thetanuts`:
- *   src/side.ts     `return order.rawApiData.isLong ? "sell" : "buy";`
- *   src/markets.ts  `makerSide: raw.isLong ? "buyer" : "seller"`
- * Nothing else in that package branches on the side, so its premium, collateral
- * and calldata arithmetic is unaffected.
+ * HISTORY: until core round 9 (2026-09-05 15:2x) `packages/thetanuts/src/side.ts`
+ * returned the exact inverse, so every quote here was cross-checked against this
+ * measured rule and REFUSED (`TAKER_SIDE_CONTRADICTION`). The package now
+ * implements the same rule, pinned to the same transactions plus a 105-fill
+ * scan. The cross-check stays as a permanent guard: if the two ever disagree
+ * again, trading fails closed rather than building calldata on the wrong side.
  */
 import { takerSide as packageTakerSide } from "@nuts/thetanuts";
 import type { OrderWithSignature } from "@thetanuts-finance/thetanuts-client";

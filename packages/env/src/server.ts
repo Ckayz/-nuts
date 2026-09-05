@@ -112,7 +112,7 @@ export const env = createEnv({
 
 		/**
 		 * Neynar API key for the "From Farcaster" rail (sent as the `x-api-key`
-		 * header, docs.neynar.com/reference/fetch-feed-by-channel-ids).
+		 * header, docs.neynar.com/reference/search-casts).
 		 *
 		 * OPTIONAL by design: the app must run with no Farcaster account at all.
 		 * When it is absent the rail renders an honest "not configured" line and

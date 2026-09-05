@@ -7,9 +7,11 @@
 
    Everything sits in @layer components so it beats the @layer base rules
    packages/ui/src/styles/globals.css sets on html/body. */
-@layer components {
-
-/* ============================== tokens ============================== */
+/* Tokens stay UNLAYERED on purpose: packages/ui/src/styles/globals.css declares
+   an unlayered :root (shadcn's --accent, --muted, …) and unlayered rules beat
+   every @layer, so a layered token block loses --accent and --muted to shadcn's
+   greys (measured 2026-09-05: --accent computed as lab(27% 0 0) instead of
+   #6f5cff). Declared after the import, unlayered, they win by source order. */
 :root{
   /* ground + surfaces */
   --bg:#0b0b10;
@@ -36,6 +38,11 @@
   --sans:var(--font-manrope),"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
   --ease:cubic-bezier(.2,.7,.2,1);
 }
+
+@layer components {
+
+/* ============================== tokens ============================== */
+
 
 /* ============================== base ============================== */
 *{box-sizing:border-box}

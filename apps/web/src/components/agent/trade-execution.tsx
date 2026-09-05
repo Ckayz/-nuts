@@ -11,6 +11,7 @@ import { Button } from "@nuts/ui/components/button";
 import { prepareAgentTrade } from "@/lib/agent/actions";
 import { recordTrade } from "@/lib/trade/actions";
 import { clearHeldFill, readHeldFill, sessionFillStore, writeHeldFill } from "@/lib/trade/held-fill";
+import { approvalMatches } from "@/lib/trade/approval";
 import { formatBaseUnits, formatUsd8 } from "@/lib/market/units";
 import { sameEconomics, sendGuard } from "@/components/market/take-a-side";
 import type { QuoteRaw } from "@/lib/trade/types";
@@ -61,6 +62,19 @@ export interface PreparedTrade {
 	/** Present only when the server already reached the fill stage. */
 	readonly token?: string;
 	readonly expected?: QuoteRaw;
+	/**
+	 * C#5. Present at the APPROVE stage: what the approval calldata actually
+	 * does, decoded server-side from its own bytes. The card prints it and this
+	 * component re-decodes the bytes before sending, so the number on screen and
+	 * the number in the transaction are proven to be the same one.
+	 */
+	readonly allowance?: {
+		readonly amount: string;
+		readonly spender: string;
+		readonly tokenAddress: string;
+		readonly tokenSymbol: string;
+		readonly tokenDecimals: number;
+	};
 	readonly preview: {
 		readonly premium?: { readonly amount: string; readonly token: string } | null;
 		readonly contracts?: string | null;
@@ -189,6 +203,15 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 	// held it is that quote, so the numbers compared and the numbers displayed
 	// are the same read; before one exists the agent's preview is all there is.
 	const displayed = displayFrom(shownQuote, trade.preview);
+	/**
+	 * C#5. The allowance this card is asking for, printed from the SAME decoded
+	 * value the send is checked against. Absent whenever the server is already
+	 * past the approval.
+	 */
+	const allowance =
+		trade.stage === "approve" && trade.allowance !== undefined
+			? `${formatBaseUnits(BigInt(trade.allowance.amount), trade.allowance.tokenDecimals)} ${trade.allowance.tokenSymbol}`
+			: null;
 
 	/**
 	 * C#3 / C#4 (lane C confirming pass, findings 3 and 4; lane D's D-C1). THE
@@ -304,6 +327,30 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 						};
 
 			if (ready.stage === "approve") {
+				// C#5. The bytes about to be signed are decoded here and compared
+				// with the allowance this card PRINTED. An approval is a real
+				// wallet transaction granting a real allowance; round 2 sent it
+				// before any gate ran and printed the model's own preview beside it
+				// (APPROVE_BEFORE_GATE {"sends":[{"amount":"20000000"}]} under a $5
+				// card). PRD 10.2: "Allowances must be exact for the approved
+				// transaction."
+				if (trade.allowance === undefined) {
+					setPhase("error");
+					// TODO-OWNER: wording.
+					setMessage("This approval does not say what it would allow, so it was not sent. Ask the agent for a fresh quote.");
+					return;
+				}
+				const exact = approvalMatches({
+					data: ready.approve.data,
+					expectedSpender: trade.allowance.spender,
+					expectedAmount: trade.allowance.amount,
+				});
+				if (!exact.ok) {
+					setPhase("error");
+					// TODO-OWNER: wording.
+					setMessage(`${exact.reason} Nothing was sent.`);
+					return;
+				}
 				setPhase("approving");
 				const approvalHash = await sendTransactionAsync({
 					to: ready.approve.to as `0x${string}`,
@@ -436,6 +483,14 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 					This order could not absorb the full {trade.preview.requestedBudget.amount}{" "}
 					{trade.preview.requestedBudget.token} you asked for. Only the amount above will be spent.
 				</p>
+			)}
+
+			{allowance !== null && (
+				<div className="mt-3 flex justify-between gap-4 text-sm">
+					{/* C#5: read out of the approval calldata itself. TODO-OWNER: wording. */}
+					<span className="text-muted-foreground">This approval allows</span>
+					<span className="num">{allowance}</span>
+				</div>
 			)}
 
 			{trade.stage === "approve" && (

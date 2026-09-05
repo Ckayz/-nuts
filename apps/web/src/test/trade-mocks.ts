@@ -7,6 +7,7 @@
  * One registration, one `calls` object, reset per test.
  */
 import { mock } from "bun:test";
+import * as realWagmi from "wagmi";
 import type { PrepareResult, RecordResult, TicketQuoteView } from "@/lib/trade/types";
 
 export const WALLET = "0x00000000000000000000000000000000000000a1";
@@ -76,7 +77,14 @@ export function resetTradeMocks(): void {
 	});
 }
 
+/**
+ * Spread over the REAL module: other test files import components that use
+ * `useAccount`, `useConnect` and friends, and a mock that replaced wagmi with
+ * four hooks made those files fail with "Export named 'useAccount' not found"
+ * whenever they ran after this one in the same process (measured).
+ */
 mock.module("wagmi", () => ({
+	...realWagmi,
 	useConfig: () => ({}),
 	useConnection: () => replies.connection,
 	useSendTransaction: () => ({

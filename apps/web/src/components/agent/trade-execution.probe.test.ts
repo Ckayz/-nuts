@@ -167,3 +167,74 @@ describe("C#3 / C#4 (= lane D's D-C1): one recording-result handler", () => {
 		expect(primary(again).text).toBe("Sign in wallet");
 	});
 });
+
+// -------------------------------------------------- finding 5: THE APPROVAL
+
+const word = (hex: string) => hex.padStart(64, "0");
+const approveData = (spender: string, amount: bigint) =>
+	`0x095ea7b3${word(spender.slice(2).toLowerCase())}${word(amount.toString(16))}`;
+const BOOK = "0x1bdff855d6811728acadc00989e79143a2bdfded";
+
+function approveTrade(over: { calldataAmount?: bigint; printedAmount?: string; allowance?: PreparedTrade["allowance"] } = {}): PreparedTrade {
+	const printed = over.printedAmount ?? "5000000";
+	return {
+		...fillTrade(),
+		stage: "approve",
+		transactions: { approve: { to: USDC, data: approveData(BOOK, over.calldataAmount ?? BigInt(printed)) } },
+		token: undefined,
+		// C#5: the server now returns the approval leg's own economics, so the
+		// card prints and compares THEM rather than the model's preview.
+		expected: { ...RAW, debit: printed },
+		allowance:
+			"allowance" in over
+				? over.allowance
+				: { amount: printed, spender: BOOK, tokenAddress: USDC, tokenSymbol: "USDC", tokenDecimals: 6 },
+	};
+}
+
+describe("C#5: the approval card shows what the approval will allow, and cannot send more", () => {
+	test("APPROVE_BEFORE_GATE — calldata that allows 20 USDC under a 5 USDC card sends NOTHING", async () => {
+		reset();
+		const h = mount(TradeExecution, { trade: approveTrade({ calldataAmount: 20_000_000n, printedAmount: "5000000" }) });
+		press(h);
+		await h.settle();
+		expect({ sends: calls.sends, prepares: calls.agentPrepares }).toEqual({ sends: [], prepares: 0 });
+		expect(h.text()).toContain("this fill needs exactly 5000000");
+	});
+
+	test("the card prints the allowance decoded from the calldata", async () => {
+		reset();
+		const h = mount(TradeExecution, { trade: approveTrade({ printedAmount: "5000000" }) });
+		await h.settle();
+		expect(h.text()).toContain("This approval allows");
+		expect(h.text()).toContain("5 USDC");
+	});
+
+	test("an approval that does not say what it would allow is never sent", async () => {
+		reset();
+		const h = mount(TradeExecution, { trade: approveTrade({ allowance: undefined }) });
+		press(h);
+		await h.settle();
+		expect(calls.sends).toEqual([]);
+		expect(h.text()).toContain("does not say what it would allow");
+	});
+
+	test("an exact approval is sent, and the second leg is prepared", async () => {
+		reset();
+		replies.agentPrepare = async () => ({
+			ok: true,
+			stage: "fill",
+			fill: { to: BOOK as `0x${string}`, data: "0xFILL" as const, value: "0" as const },
+			token: "tok2",
+			thesisId: null,
+			expected: RAW,
+			signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+			note: "",
+		});
+		const h = mount(TradeExecution, { trade: approveTrade() });
+		press(h);
+		await h.settle();
+		expect(calls.sends.map((s) => s.to)).toEqual([USDC, BOOK]);
+		expect(calls.agentPrepares).toBe(1);
+	});
+});

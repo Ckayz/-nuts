@@ -208,7 +208,24 @@ describe("C#1: the fence, not just the disabled control", () => {
 		const moved: TradePanelContext = { ...trade, structureId: "s3", quote: { ...trade.quote, structureId: "s3" } };
 		h.setProps({ ticket: moved.quote.ticket, structureLabel: moved.structureLabel, expiryLabel: moved.expiryLabel, trade: moved });
 		await h.settle();
-		held.resolve({ ok: true, stage: "approve", approve: { to: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" as const, data: "0xAPPROVE" as const, value: "0" as const }, note: "" });
+		held.resolve({
+			ok: true,
+			stage: "approve",
+			approve: {
+				to: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" as const,
+				data: `0x095ea7b3${"0".repeat(24)}${"1".repeat(40)}${(5_000_000).toString(16).padStart(64, "0")}` as const,
+				value: "0" as const,
+			},
+			allowance: {
+				amount: "5000000",
+				spender: `0x${"1".repeat(40)}`,
+				tokenAddress: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+				tokenSymbol: "USDC",
+				tokenDecimals: 6,
+			},
+			expected: RAW_BUY,
+			note: "",
+		});
 		await h.settle();
 
 		expect(calls.sends.map((s) => s.data)).toEqual([]);

@@ -254,6 +254,14 @@ export function createExecutionTools({ account, session, thesisId }: ExecutionTo
 						: { fill: prepared.fill },
 				/** Present only at the fill stage; hand back to `recordTrade` unchanged. */
 				...(prepared.stage === "fill" ? { token: prepared.token, expected: prepared.expected } : {}),
+				/**
+				 * C#5. The approval leg's own economics and the allowance decoded
+				 * from its calldata. The browser prints these and refuses to send an
+				 * approval whose bytes disagree with them.
+				 */
+				...(prepared.stage === "approve"
+					? { allowance: prepared.allowance, expected: prepared.expected }
+					: {}),
 				preview: {
 					premium: quote.premium,
 					contracts: quote.contracts,

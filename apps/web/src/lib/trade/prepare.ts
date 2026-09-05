@@ -29,6 +29,7 @@ import { takerSideDisagreement, TAKER_SIDE_CONTRADICTION } from "@/lib/market/ta
 import { parseTokenAmount } from "@/lib/market/units";
 import { isFeedUnavailable } from "@/lib/thetanuts/orders";
 import { strikesLabel } from "@/lib/display";
+import { approvalMatches, decodeApproval } from "./approval";
 import { instrumentMismatch } from "./attachment";
 import { findThesis, findUnrecordedFill, unrecordedFillReason } from "./store";
 import { simulateFill } from "./chain";
@@ -148,10 +149,34 @@ export async function prepareTradeFor(
 	}
 
 	if (built.approve !== undefined) {
+		// C#5. The approval is read out of its OWN BYTES before it is handed over,
+		// and refused unless it grants EXACTLY the debit to EXACTLY the contract
+		// the fill calls (PRD 10.2: "Allowances must be exact for the approved
+		// transaction"). A number returned beside the calldata is a claim about
+		// it; the calldata is the thing that will be signed.
+		const approve = asTx(built.approve);
+		const approveExpected = rawOf(quote);
+		if (approveExpected === null) return fail("QUOTE_LOST", "The quote went stale while preparing. Try again.");
+		const check = approvalMatches({
+			data: approve.data,
+			expectedSpender: asTx(built.fill).to,
+			expectedAmount: approveExpected.debit,
+		});
+		if (!check.ok) return fail("APPROVAL_NOT_EXACT", check.reason);
+		const decoded = decodeApproval(approve.data);
+		if (decoded === null) return fail("APPROVAL_NOT_EXACT", "The approval calldata could not be read.");
 		return {
 			ok: true,
 			stage: "approve",
-			approve: asTx(built.approve),
+			approve,
+			allowance: {
+				amount: decoded.amount,
+				spender: decoded.spender,
+				tokenAddress: approve.to,
+				tokenSymbol: quote.collateralSymbol,
+				tokenDecimals: quote.collateralDecimals,
+			},
+			expected: approveExpected,
 			note: `Approve ${quote.collateralSymbol} for exactly this fill. Nothing is spent until you sign the fill itself.`,
 		};
 	}

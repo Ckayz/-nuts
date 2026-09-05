@@ -17,7 +17,8 @@ import "server-only";
 import { activity as activityRows } from "@nuts/db/schema/index";
 import { SOCIAL_PUBLIC_STATUSES } from "../social/guards";
 import { rankCreators, rankTheses } from "../social/ranking";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db as defaultDb } from "@nuts/db";
 import { comments, follows, likes, positions, theses, users } from "@nuts/db/schema/index";
 import type { Position as PositionRow, Thesis as ThesisRow, User as UserRow } from "@nuts/db/schema/index";
@@ -211,15 +212,14 @@ export interface Thread {
 	activityCount: number;
 }
 
-/** Thesis + creator + every filled position on it + comments. Null when the id is unknown. */
+/** Thesis + creator + every filled position on it + comments. Null when the id or slug is unknown. */
 export async function getThread(
-	thesisId: string,
+	idOrSlug: string,
 	options: ReadOptions = {},
 ): Promise<Thread | null> {
 	const database = options.database ?? defaultDb;
-	// `theses.id` is a uuid column: a non-uuid slug would make Postgres raise
-	// `invalid input syntax for type uuid` and turn a 404 into a 500.
-	if (!UUID.test(thesisId)) return null;
+	const identity = idOrSlug.toLowerCase();
+	if (!UUID.test(identity) && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(identity)) return null;
 	const dataAsOf = new Date();
 
 	const head = await database
@@ -227,10 +227,11 @@ export async function getThread(
 		.from(theses)
 		.innerJoin(users, eq(users.id, theses.creatorUserId))
 		.leftJoin(positions, eq(positions.id, theses.creatorPositionId))
-		.where(eq(theses.id, thesisId))
+		.where(UUID.test(identity) ? eq(theses.id, identity) : eq(theses.slug, identity))
 		.limit(1);
 	const row = head[0];
 	if (row === undefined) return null;
+	const thesisId = row.thesis.id;
 
 	const positionRows = await database
 		.select({ position: positions, user: users })
@@ -307,21 +308,16 @@ export interface CreatorProfile {
 	positions: Domain.Participant[];
 }
 
-/**
- * `handleOrAddress` is a wallet address today. `users` has no `handle` column
- * (verified in packages/db/src/schema/users.ts), so `/u/[handle]` addresses a
- * creator by their lowercase address. Adding a handle column is a schema
- * follow-up for the owner.
- */
+/** Resolve a stored handle, or a wallet address for existing links and handle-less users. */
 export async function getCreator(
 	handleOrAddress: string,
 	options: ReadOptions = {},
 ): Promise<CreatorProfile | null> {
 	const database = options.database ?? defaultDb;
 	const address = handleOrAddress.trim().toLowerCase();
-	if (!/^0x[0-9a-f]{40}$/.test(address)) return null;
+	const isAddress = /^0x[0-9a-f]{40}$/.test(address);
 
-	const found = await database.select().from(users).where(eq(users.walletAddress, address)).limit(1);
+	const found = await database.select().from(users).where(isAddress ? eq(users.walletAddress, address) : eq(users.handle, address)).limit(1);
 	const user: UserRow | undefined = found[0];
 	if (user === undefined) return null;
 
@@ -412,16 +408,24 @@ export async function getFollowState(viewerUserId: string | null, userId: string
 export async function listActivity(userId: string, options: ReadOptions & { thesisId?: string } = {}): Promise<Domain.ActivityItem[]> {
 	if (!UUID.test(userId) || (options.thesisId !== undefined && !UUID.test(options.thesisId))) return [];
 	const database = options.database ?? defaultDb;
-	const rows = await database.select({ event: activityRows, user: users, thesis: theses, position: positions })
+	const target = alias(users, "activity_target_user");
+	const rows = await database.select({ event: activityRows, user: users, target, thesis: theses, position: positions })
 		.from(activityRows).innerJoin(users, eq(users.id, activityRows.userId))
 		.leftJoin(positions, eq(positions.id, activityRows.positionId))
-		.innerJoin(theses, eq(theses.id, sql`coalesce(${activityRows.thesisId}, ${positions.thesisId})`))
-		.where(and(options.thesisId ? eq(theses.id, options.thesisId) : eq(activityRows.userId, userId), inArray(theses.status, [...SOCIAL_PUBLIC_STATUSES])))
+		.leftJoin(target, eq(target.id, activityRows.targetUserId))
+		.leftJoin(theses, eq(theses.id, sql`coalesce(${activityRows.thesisId}, ${positions.thesisId})`))
+		.where(and(options.thesisId ? eq(theses.id, options.thesisId) : eq(activityRows.userId, userId), or(
+			inArray(theses.status, [...SOCIAL_PUBLIC_STATUSES]),
+			and(eq(activityRows.eventType, "follow"), isNull(activityRows.thesisId), isNull(activityRows.positionId), sql`${target.id} is not null`),
+		)))
 		.orderBy(desc(activityRows.createdAt), activityRows.id);
 	return rows.filter(row => row.event.eventType !== "position_confirmed" || (row.position !== null && FILLED_POSITION_STATUSES.some(s => s === row.position!.status) && row.position.confirmedAt !== null))
-		.filter(row => ["like", "comment", "thesis_published", "position_confirmed"].includes(row.event.eventType))
+		.filter(row => ["like", "comment", "follow", "thesis_published", "position_confirmed"].includes(row.event.eventType))
 		.map(row => ({
-			id: row.event.id, createdAt: row.event.createdAt.toISOString(), socialDetail: row.thesis.headline,
+			id: row.event.id, createdAt: row.event.createdAt.toISOString(),
+			// TODO-OWNER: minimum follow activity label; final copy remains owner-defined.
+			socialDetail: row.event.eventType === "follow" && row.target ? mapCreator(row.target).handle : row.thesis?.headline ?? "",
+			thesisSlug: row.event.eventType === "follow" ? undefined : row.thesis?.slug,
 			creator: mapCreator(row.user), action: row.event.eventType === "thesis_published" ? "launched" : row.event.eventType === "position_confirmed" ? "joined" : row.event.eventType,
 			// Legacy required money field is not displayed: socialDetail selects
 			// the event presentation with no fabricated amount or contracts.

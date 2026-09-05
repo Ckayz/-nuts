@@ -1,23 +1,4 @@
-/**
- * Route identifiers and monograms derived from what the schema actually stores.
- *
- * SCHEMA FOLLOW-UPS (both verified absent on 2026-09-05):
- *  - `theses` has no `slug` column (packages/db/src/schema/theses.ts). `/t/[slug]`
- *    therefore routes on the thesis uuid. A real slug column, or a
- *    slug-generation rule, is an owner/schema decision.
- *  - `users` has no `handle` column (packages/db/src/schema/users.ts). `/u/[handle]`
- *    therefore routes on the lowercase wallet address, which is the identity per
- *    the owner's "wallet address is the identity" decision. Nothing is invented.
- *
- * Pure; no database import, so these are unit-testable.
- */
-
-/** `theses.id`, until a slug column exists. */
-export function thesisSlug(thesisId: string): string {
-	return thesisId;
-}
-
-/** Lowercase wallet address, until a handle column exists. */
+/** Lowercase wallet-address route fallback for a user whose handle is null. */
 export function creatorHandle(walletAddress: string): string {
 	return walletAddress.toLowerCase();
 }

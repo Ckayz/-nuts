@@ -188,6 +188,7 @@ export interface ActivityItem {
     id?: string;
     createdAt?: string;
     socialDetail?: string;
+    thesisSlug?: string;
     creator: Creator;
     action: string;
     side: PositionSide | null;

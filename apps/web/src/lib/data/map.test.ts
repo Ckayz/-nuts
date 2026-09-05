@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { Position as PositionRow, Thesis as ThesisRow, User as UserRow } from "@nuts/db/schema/index";
-import { emptyAggregates, mapPosition, mapThesis, sideAmountOrNull, type ThesisAggregates } from "./map";
+import { emptyAggregates, mapCreator, mapParticipant, mapPosition, mapThesis, sideAmountOrNull, type ThesisAggregates } from "./map";
 
 const AS_OF = new Date("2026-09-05T12:00:00.000Z");
 const CREATED = new Date("2026-09-05T10:00:00.000Z");
@@ -143,6 +143,7 @@ describe("post states", () => {
 			aggregates: aggregates(),
 			dataAsOf: AS_OF,
 		});
+		expect(mapped.slug).toBe("text-only-post-2000");
 		expect(mapped.market).toBeNull();
 		expect(mapped.structure).toBeNull();
 		expect(mapped.backing).toBeNull();
@@ -293,11 +294,11 @@ describe("mapPosition", () => {
 	test("keeps the Back/Counter side the row carries", () => {
 		const back = mapPosition({
 			position: positionRow({ side: "back" }),
-			thesis: { id: "20000000-0000-4000-8000-000000000001", headline: "h", underlyingAsset: "BTC", taggedAsset: "BTC" },
+			thesis: { id: "20000000-0000-4000-8000-000000000001", slug: "h-2000", headline: "h", underlyingAsset: "BTC", taggedAsset: "BTC" },
 		});
 		const counter = mapPosition({
 			position: positionRow({ side: "counter" }),
-			thesis: { id: "20000000-0000-4000-8000-000000000001", headline: "h", underlyingAsset: "BTC", taggedAsset: "BTC" },
+			thesis: { id: "20000000-0000-4000-8000-000000000001", slug: "h-2000", headline: "h", underlyingAsset: "BTC", taggedAsset: "BTC" },
 		});
 		expect(back.side).toBe("back");
 		expect(counter.side).toBe("counter");
@@ -307,7 +308,7 @@ describe("mapPosition", () => {
 		expect(() =>
 			mapPosition({
 				position: positionRow({ chainId: 1 }),
-				thesis: { id: "20000000-0000-4000-8000-000000000001", headline: "h", underlyingAsset: "BTC", taggedAsset: "BTC" },
+				thesis: { id: "20000000-0000-4000-8000-000000000001", slug: "h-2000", headline: "h", underlyingAsset: "BTC", taggedAsset: "BTC" },
 			}),
 		).toThrow(/not on Base mainnet/);
 	});
@@ -315,9 +316,18 @@ describe("mapPosition", () => {
 	test("a NaN USD column becomes null, not a thrown render", () => {
 		const mapped = mapPosition({
 			position: positionRow({ estimatedPnlUsd: "NaN", maximumLossUsd: "NaN" }),
-			thesis: { id: "20000000-0000-4000-8000-000000000001", headline: "h", underlyingAsset: "BTC", taggedAsset: "BTC" },
+			thesis: { id: "20000000-0000-4000-8000-000000000001", slug: "h-2000", headline: "h", underlyingAsset: "BTC", taggedAsset: "BTC" },
 		});
 		expect(mapped.economics.estimatedPnlUsd).toBeNull();
 		expect(mapped.economics.maximumLossUsd).toBeNull();
 	});
+});
+
+test("stored handles and slugs flow through creators and participants", () => {
+	const named = { ...user, handle: "alice_probe" };
+	expect(mapCreator(named).handle).toBe("alice_probe");
+	expect(mapCreator({ ...user, walletAddress: user.walletAddress.toUpperCase() }).handle).toBe(user.walletAddress);
+	const participant = mapParticipant({ user: named, position: positionRow(), thesis: thesisRow() });
+	expect(participant.creator.handle).toBe("alice_probe");
+	expect(participant.thesisSlug).toBe("text-only-post-2000");
 });

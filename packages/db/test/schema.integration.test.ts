@@ -399,8 +399,11 @@ if (!databaseUrl) {
   probe("activity requires an underlying reference", async (client) => {
     await rejects(client, "INSERT INTO public.activity(user_id,event_type) VALUES ($1,'test')", [u1], check("activity_domain_reference_required"));
   });
-  for (const column of ["thesis_id", "position_id"]) probe(`activity accepts ${column} reference`, async (client) => {
-    await client.query(`INSERT INTO public.activity(user_id,event_type,${column}) VALUES ($1,'test',$2)`, [u1,column === "thesis_id" ? t1 : p1]);
+  for (const column of ["thesis_id", "position_id", "target_user_id"]) probe(`activity accepts ${column} reference`, async (client) => {
+    await client.query(`INSERT INTO public.activity(user_id,event_type,${column}) VALUES ($1,'test',$2)`, [u1,column === "thesis_id" ? t1 : column === "position_id" ? p1 : u2]);
+  });
+  probe("activity target user must exist", async client => {
+    await rejects(client, "INSERT INTO public.activity(user_id,event_type,target_user_id) VALUES ($1,'follow',$2)", [u1,"ffffffff-ffff-ffff-ffff-ffffffffffff"], { code: "23503", constraint: "activity_target_user_id_users_id_fk" });
   });
   probe("trigger functions pin search_path", async (client) => {
     const result = await client.query("SELECT proname,proconfig FROM pg_catalog.pg_proc WHERE oid IN ('public.enforce_thesis_creator_position()'::regprocedure,'public.enforce_public_creator_wallet_unchanged()'::regprocedure,'public.enforce_order_snapshot_immutable()'::regprocedure)");

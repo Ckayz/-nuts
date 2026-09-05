@@ -11,7 +11,7 @@ The database is the application index and social layer for Thesis.fun. Onchain s
 - `comments`: user comments on theses.
 - `follows`: directed user-to-user follows.
 - `likes`: user/thesis foreign keys, composite primary key `(user_id, thesis_id)`, and `created_at` defaulting to now().
-- `activity`: references to confirmed domain events and their underlying thesis or position records.
+- `activity`: references to confirmed domain events and their underlying thesis, position, or followed-user records.
 
 ## Post model
 
@@ -46,7 +46,7 @@ Strikes and base-unit break-even arrays reject null elements, multidimensional a
 
 `BEFORE UPDATE` triggers reject changes to `theses.creator_order_snapshot` and `positions.order_snapshot` using `IS DISTINCT FROM`; identical JSON values and updates to other columns are allowed. New trigger functions use qualified `public` table references and pin `search_path = pg_catalog, public`.
 
-Activity must reference a thesis or position. Follow-up: activity lifecycle validation against confirmed domain events remains the application writer's responsibility; lifecycle triggers are outside round 3's scope.
+Activity must reference a thesis, position, or target user. `user_id` is the actor; nullable `target_user_id` references the followed user for a `follow` event. The `(target_user_id, created_at desc)` index supports target activity reads. Follow inserts record activity in the follow transaction; retries and unfollows add no event, and unfollow retains the historical event. Follow-up: activity lifecycle validation against confirmed domain events remains the application writer's responsibility; lifecycle triggers are outside round 3's scope.
 
 ## Migrations
 
@@ -58,8 +58,9 @@ The chain is rebased onto the AI track's migration, which is already applied to 
 - `0003_thesis_is_a_post` — generated schema changes for optional structures/backing and likes, with a derived `tagged_asset = underlying_asset` data backfill inserted before the new tag checks.
 - `0004_unbacked_wallet_fence` — hand-written replacement of the public creator-wallet function, excluding NULL links from its existing validation. Non-NULL link predicates and lock order are preserved. This hand-written migration has no snapshot.
 - `0005_slugs_and_handles` — adds required unique thesis slugs with deterministic backfill and optional unique user handles.
+- `0006_follow_activity` — adds nullable target-user FK and target/time index; drops and recreates `activity_domain_reference_required` with the same name to accept target-only events.
 
-`0000`–`0004` are frozen. Apply the full migration chain before using the post model.
+`0000`–`0005` are frozen. Apply the full migration chain before using the post model.
 
 Why the chain was rebased: drizzle-orm's migrator reads only the single most recently applied row (`order by created_at desc limit 1`) and applies a journal entry when `lastDbMigration.created_at < migration.folderMillis` (`drizzle-orm/pg-core/dialect.js`). It never compares tags or hashes. Our original chain carried `when` timestamps *earlier* than the already-applied `0000_agent_tables`, so every one of our migrations would have been skipped silently against production — reporting success while changing nothing. Any migration added from here must carry a `when` greater than every applied entry. `bunx drizzle-kit generate` does this automatically; a hand-written journal entry must be given a fresh `Date.now()`.
 

@@ -15,7 +15,7 @@
  * shares, the portfolio's wallet fence, the Bull/Bear mapping and the split
  * percentage, likes, and a `numeric` column holding `NaN` or a negative value.
  */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { comments, likes, positions, theses, users } from "@nuts/db/schema/index";
 import type { NewPosition, NewThesis } from "@nuts/db/schema/index";
@@ -143,7 +143,7 @@ if (!databaseUrl) {
 	 */
 	async function seed(tx: Database): Promise<void> {
 		await tx.insert(users).values([
-			{ id: ALICE, walletAddress: ALICE_WALLET, displayName: "Alice Probe" },
+			{ id: ALICE, walletAddress: ALICE_WALLET, displayName: "Alice Probe", handle: "alice_probe" },
 			{ id: BOB, walletAddress: BOB_WALLET, displayName: "Bob Probe" },
 			{ id: CAROL, walletAddress: CAROL_WALLET, displayName: null },
 		]);
@@ -300,6 +300,26 @@ if (!databaseUrl) {
 	});
 
 	describe("getThread", () => {
+		probe("slug and legacy uuid resolve the same thread and participant links", async tx => {
+			for (const identity of ["backed-post-2222", "BACKED-POST-2222", T_BACKED]) {
+				const thread = await getThread(identity, { database: tx });
+				expect(thread?.thesis.id).toBe(T_BACKED);
+				expect(thread?.thesis.slug).toBe("backed-post-2222");
+				expect(thread?.thesis.creator.handle).toBe("alice_probe");
+				expect(thread?.participants).toHaveLength(3);
+				expect(thread?.participants.every(p => p.thesisSlug === "backed-post-2222")).toBe(true);
+				expect(thread?.comments).toHaveLength(1);
+			}
+		});
+		probe("bad slug is rejected before a query", async tx => {
+			const select = spyOn(tx, "select");
+			try {
+				for (const invalid of ["", "a_b", "-a", "a-", "a--b", "has space", "é", "a/b"]) {
+					expect(await getThread(invalid, { database: tx })).toBeNull();
+				}
+				expect(select).not.toHaveBeenCalled();
+			} finally { select.mockRestore(); }
+		});
 		probe("lists filled participants only", async (tx) => {
 			const thread = await getThread(T_BACKED, { database: tx });
 			const ids = thread?.participants.map((p) => p.id) ?? [];
@@ -333,7 +353,7 @@ if (!databaseUrl) {
 			expect(thread?.thesis.market).toBeNull();
 		});
 
-		probe("a non-uuid slug is a miss, not a 500", async (tx) => {
+		probe("an unknown slug is a miss, not a 500", async (tx) => {
 			expect(await getThread("btc-nfp-4a2c", { database: tx })).toBeNull();
 			expect(await getThread("", { database: tx })).toBeNull();
 		});
@@ -375,6 +395,15 @@ if (!databaseUrl) {
 	});
 
 	describe("getCreator", () => {
+		probe("stored handle and wallet address both resolve; null handle uses address", async tx => {
+			for (const identity of ["alice_probe", "ALICE_PROBE", ALICE_WALLET]) {
+				const profile = await getCreator(identity, { database: tx });
+				expect(profile?.creator.id).toBe(ALICE);
+				expect(profile?.creator.handle).toBe("alice_probe");
+				expect(profile?.theses.map(t => t.slug)).toContain("backed-post-2222");
+			}
+			expect((await getCreator(BOB_WALLET, { database: tx }))?.creator.handle).toBe(BOB_WALLET);
+		});
 		probe("lists the creator's public posts and never a draft", async (tx) => {
 			const profile = await getCreator(ALICE_WALLET, { database: tx });
 			const ids = profile?.theses.map((thesis) => thesis.id) ?? [];

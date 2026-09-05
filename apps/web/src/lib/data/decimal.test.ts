@@ -5,7 +5,7 @@ import {
 	sumDecimals,
 	usdDecimalOrNull,
 } from "./decimal";
-import { creatorHandle, creatorInitials, thesisSlug } from "./identity";
+import { creatorHandle, creatorInitials } from "./identity";
 
 describe("decimalFromBaseUnits", () => {
 	const cases: [string, number, string][] = [
@@ -91,12 +91,7 @@ describe("sumDecimals", () => {
 });
 
 describe("route identity derived from today's schema", () => {
-	test("thesis slug is the uuid, because `theses` has no slug column", () => {
-		expect(thesisSlug("2b0d1a2e-0000-4000-8000-000000000001")).toBe(
-			"2b0d1a2e-0000-4000-8000-000000000001",
-		);
-	});
-	test("creator handle is the lowercase address, because `users` has no handle column", () => {
+	test("creator fallback is the lowercase address", () => {
 		expect(creatorHandle("0xAbCdEf0123456789AbCdEf0123456789AbCdEf01")).toBe(
 			"0xabcdef0123456789abcdef0123456789abcdef01",
 		);

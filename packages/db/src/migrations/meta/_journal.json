@@ -43,6 +43,13 @@
       "when": 1788585888788,
       "tag": "0005_slugs_and_handles",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788587870652,
+      "tag": "0006_follow_activity",
+      "breakpoints": true
     }
   ]
 }

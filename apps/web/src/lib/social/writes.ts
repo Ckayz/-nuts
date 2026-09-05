@@ -39,10 +39,10 @@ export async function writeFollow(database: Database, actor: string | null, targ
 		const predicate = and(eq(follows.followerUserId, userId), eq(follows.followedUserId, target));
 		const [existing] = await tx.select().from(follows).where(predicate);
 		const following = desired ?? !existing;
-		if (following) await tx.insert(follows).values({ followerUserId: userId, followedUserId: target }).onConflictDoNothing();
-		else await tx.delete(follows).where(predicate);
-		// Schema gap: a follow has neither thesisId nor positionId. Do not fake
-		// a reference just to satisfy activity_domain_reference_required.
+		if (following && !existing) {
+			await tx.insert(follows).values({ followerUserId: userId, followedUserId: target }).onConflictDoNothing();
+			await recordActivity(tx, { userId, targetUserId: target, eventType: "follow" });
+		} else if (!following && existing) await tx.delete(follows).where(predicate);
 		const [total] = await tx.select({ value: sql<string>`count(*)` }).from(follows).where(eq(follows.followedUserId, target));
 		return { following, followers: Number(total?.value ?? 0) };
 	});

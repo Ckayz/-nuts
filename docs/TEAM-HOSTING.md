@@ -19,7 +19,7 @@ From `apps/web/.env.example` and `packages/env/src/server.ts`:
 | `DIRECT_DATABASE_URL` | leave EMPTY on Vercel | Only drizzle-kit uses it, and migrations are run from a laptop (step 3), never from Vercel. |
 | `SESSION_SECRET` | 32+ random characters, e.g. `openssl rand -hex 32` | Required in production; the build fails without it. Never reuse a value from anywhere else. |
 | `OPENROUTER_API_KEY` | the team's OpenRouter key | Required (the AI agent). |
-| `AGENT_MODEL`, `AGENT_GATE_MODEL`, `BASE_RPC_URL`, `THETANUTS_ORDERS_URL`, `THESIS_REFERRER` | as in `apps/web/.env.example` | Optional with defaults; `THESIS_REFERRER` defaults to the owner's referrer wallet — keep it, that is the revenue address. |
+| `AGENT_MODEL`, `AGENT_GATE_MODEL`, `BASE_RPC_URL`, `THETANUTS_ORDERS_URL`, `THESIS_REFERRER` | as in `apps/web/.env.example` | Optional with defaults. `AGENT_MODEL` defaults to `minimax/minimax-m3:free`, a free-tier OpenRouter model; `AGENT_GATE_MODEL` stays on the paid `anthropic/claude-haiku-4.5`. `THESIS_REFERRER` defaults to the owner's referrer wallet — keep it, that is the revenue address. |
 
 The owner's laptop can push its gitignored `apps/web/.env` to Vercel with `bun run env:production -- --yes` (`scripts/sync-vercel-env.ts`), but the dashboard is the simpler path for the team. That script is fail-closed: it pushes only keys in the validated env schemas (so the owner's `PROD_*`/`SUPABASE_*` keys are skipped by name), refuses the whole run when a value it would push is local (`localhost`, `127.0.0.1`, `0.0.0.0`, `file:`) or empty in `production`, and refuses to overwrite without `--yes` (`-- --dry-run` prints the plan instead). Never commit any of these values.
 
@@ -61,4 +61,5 @@ bypasses the filter and passes even when Vercel would fail.
 ## 5. Things that will bite
 - Preview deployments get their own database URL only if you set one; do not point previews at production data.
 - The agent needs `OPENROUTER_API_KEY` at runtime; without it every `/agent` message fails.
+- The default `AGENT_MODEL` is a free-tier model. Measured 2026-09-06 on the owner's key: 50 free model requests PER DAY shared across every `:free` id (reset 00:00 UTC), then every call 429s and the agent answers "The agent is unavailable right now." That provider ceiling binds before the app's own daily limits (PRD 10.2). Adding 10 credits to the OpenRouter account raises it to 1000/day; setting `AGENT_MODEL` to a paid id removes it. Decide before a live demo.
 - Vercel's build must run `bun install` from the repo root (the `installCommand` does that); a project imported with Root Directory = `apps/web` and the default install command breaks the workspace links.

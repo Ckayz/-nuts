@@ -23,3 +23,12 @@ Read live from Devfolio's own submission guide on 2026-09-05 19:5x via the Devfo
 **The problem it solves.** Options on chain are hard to find and harder to talk about. Thesis.fun makes a trade a post: pick any market Thetanuts has liquidity for on Base, take a side with your own wallet, and the position gets its own page with a live P&L card. Say why in a post; link the trade and it unfurls into a card, X-style. Likes, comments, follows and a leaderboard built only from onchain fills, so a track record cannot be faked and a losing thesis cannot be deleted. An approval-gated AI agent explains any thesis and proposes trades; the wallet signs everything.
 
 **Challenges we ran into.** The SDK's own comment about which side the maker is on was backwards; we decoded production fills from Base bytes and pinned the rule with tests. Maker signatures expire in about a minute, so the ticket approves first, then re-quotes right before the fill. Thetanuts publishes no price history, so we removed the chart rather than fake one. Everything shown is derived from the fill event and the raw order, never from the quote.
+
+## Ready to file (2026-09-05 21:2x) — waits for the owner's "submit"
+- Pictures: `docs/screenshots/01-feed-1440.png`, `02-market-btc-1440.png`, `03-thread-1440.png`, `04-position-1440.png`, `05-search-1440.png`, `06-market-390.png` (six; `07-new-1440.png` is the spare). Shot from main `86a00a0` on a clean seeded database; one real Base position.
+- Tracks: both Thetanuts tracks (owner 20:0x).
+- Tagline (≤50 chars, OWNER picks one or writes their own): "Post a thesis. Back it with a real option." (42) · "Say it, then trade it, onchain on Base." (39) · "Options trading you can talk about." (35).
+- Hashtags: Thetanuts, Base, Next.js, wagmi, viem, Drizzle, Supabase, Bun, AI SDK.
+- The two required fields: the draft copy above (owner edits).
+- Repo: `https://github.com/Ckayz/-nuts` (public at submission time — confirm).
+- Filing path: `mcp__devfolio__getSignedUploadUrl` per image → upload → `mcp__devfolio__updateHackathonProject` with name, tagline, hashtags, pictures, the two fields, `tracksToApplyTo`, repo link → the owner presses submit in Devfolio (or asks Claude to). Nothing is uploaded or written to the draft until the owner says so.

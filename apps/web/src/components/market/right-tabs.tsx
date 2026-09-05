@@ -39,18 +39,24 @@ export function RightTabs({
 	const id = useId();
 	const [tab, setTab] = useState(0);
 	return (
-		<section className="card mkt-tabcard">
-			<div className="card-h mkt-tabcard-h">
-				<TabHeading id={id} labels={LABELS} selected={tab} onSelect={setTab} />
+		<section className="card tabcard">
+			<div className="card-h tabs-h">
+				<TabHeading
+					id={id}
+					labels={LABELS}
+					selected={tab}
+					onSelect={setTab}
+					label="About, agent and positions"
+				/>
 			</div>
 			<TabPanel id={id} selected={tab}>
-				<div className="mkt-tabbody" hidden={tab !== 0}>
+				<div className="tab-body" hidden={tab !== 0}>
 					{about}
 				</div>
-				<div className="mkt-tabbody agent-inline" hidden={tab !== 1}>
+				<div className="tab-body agent-inline" hidden={tab !== 1}>
 					{agent}
 				</div>
-				<div className="mkt-tabbody" hidden={tab !== 2}>
+				<div className="tab-body" hidden={tab !== 2}>
 					{positions}
 				</div>
 			</TabPanel>

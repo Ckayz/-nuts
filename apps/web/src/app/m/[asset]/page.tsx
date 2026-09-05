@@ -5,12 +5,13 @@ import { FeedRail } from "@/components/shell/feed-rail";
 import { PageFrame } from "@/components/shell/page-frame";
 import { Avatar, TodoOwner } from "@/components/primitives";
 import { YourPositionsRail } from "@/components/market/your-positions-rail";
-import { TaggedPostsTabs } from "@/components/market/tagged-posts-tabs";
+import { AboutPanel } from "@/components/market/about-panel";
 import { getSession } from "@/lib/auth/session";
 import { MarketRail } from "@/components/market/market-rail";
 import { AgentChat } from "@/components/agent/agent-chat";
 import { PriceChart } from "@/components/market/price-chart";
-import { StructuresList } from "@/components/market/structures-list";
+import { MarketTabs } from "@/components/market/market-tabs";
+import { RightTabs } from "@/components/market/right-tabs";
 import { TakeASide } from "@/components/market/take-a-side";
 import { usd2 } from "@/lib/format";
 import { marketStatTiles } from "@/lib/market/stat-tiles";
@@ -24,12 +25,17 @@ import "@/styles/market.css";
 import "@/styles/position.css";
 
 /**
- * The market page — the mockup's `#market` view (lines 743-925).
+ * The market page — fomo's token page shape, over the mockup's `#market` view.
  *
- * Owner 2026-09-05, from the fomo demo: trading lives here, not in a post. Three
- * columns: the shell's feed rail on the left, the asset header / live book /
- * posts about this market in the centre, and the ticket, "About <asset>" and
- * "Your <asset> positions" on the right.
+ * Owner 2026-09-05, from the fomo demo: trading lives here, not in a post.
+ * Three columns (docs/design/FOMO-DIGEST.md, "Token page layout"):
+ *
+ *   LEFT    a TABBED rail — `Markets` (the live asset list) over `Feed` (the
+ *           latest theses). fomo's own left column is `Tokens · Feed · …`.
+ *   CENTRE  the instrument header and its stat tiles, the chart, then a TABBED
+ *           table — `Structures | Theses`, fomo's `Trades | Thesis`.
+ *   RIGHT   the ticket, ALWAYS VISIBLE and never behind a tab because it is the
+ *           money path, then a tabbed panel: `About | Agent | Positions`.
  *
  * NO PRICE CHART (owner 2026-09-05, "remove the chart then"): Thetanuts
  * publishes a spot price and no history — `api.getMarketData()` returns
@@ -130,11 +136,16 @@ export default async function MarketPage({
 	}
 
 	const rail = await railTheses();
+	// ONE read for both consumers — the header's stat tiles and the About panel's
+	// split bars. It costs no network call (it reads the cached order snapshot the
+	// page already fetched) but calling it twice would compute the same tallies
+	// twice from the same snapshot.
+	const bookStats = await marketBookStats(market.asset);
 
 	return (
 		<PageFrame
 			ticketFirst
-			left={<FeedRail posts={rail} />}
+			left={<FeedRail posts={rail} markets={summaries} />}
 			// TODO-OWNER: a bottom-sheet ticket remains a later option.
 			right={
 				<>
@@ -174,81 +185,39 @@ export default async function MarketPage({
 					/>
 				)}
 
-				{/* Directly under the ticket, not at the bottom of the rail: the right
-				    column is ONE `position:sticky` stack, so a tall panel added below
-				    the other cards pushes them past the bottom of the viewport where
-				    sticky cannot reach them. The panel caps its own height too. */}
-				<section className="card pad mkt-panel agent-inline">
-					<h3 style={{ fontSize: "15px" }}>
-						Ask about {market.asset}
-						<TodoOwner />
-					</h3>
-					<AgentChat asset={market.asset} variant="panel" />
-				</section>
+				{/* Directly under the ticket, which stays a direct child of the sticky
+				    stack so `.ticket-first`'s stacking order (styles/market.css, pinned
+				    by components/shell/page-frame.test.tsx) still finds it.
 
-				<section className="card">
-					<div className="card-h">
-						<h3>About {market.asset}</h3>
-					</div>
-					<div className="card-b" style={{ padding: "0 20px 16px" }}>
-						<dl className="kv">
-							<div>
-								<dt className="k">Venue</dt>
-								<dd className="v">Thetanuts OptionBook</dd>
-							</div>
-							<div>
-								<dt className="k">Network</dt>
-								<dd className="v">Base · 8453</dd>
-							</div>
-							<div>
-								<dt className="k">Expiries</dt>
-								<dd className="v num">{market.expiryCount}</dd>
-							</div>
-							<div>
-								<dt className="k">Structures</dt>
-								<dd className="v num">{market.structureCount}</dd>
-							</div>
-							<div>
-								<dt className="k">Settlement</dt>
-								<dd className="v">Thetanuts TWAP</dd>
-							</div>
-						</dl>
-					</div>
-				</section>
+				    The ticket is deliberately NOT one of these tabs: it is the money
+				    path and must never be a click away. Everything that used to sit
+				    below it as its own card is here instead, which also fixes the
+				    reason the agent panel had to cap its own height — the right column
+				    is one `position:sticky` stack, and four stacked cards pushed the
+				    lower ones past the bottom of the viewport where sticky cannot
+				    reach them.
 
-				<YourPositionsRail asset={market.asset} />
-
-
-
-				{summaries.length > 0 ? (
-					<section className="card">
-						<div className="card-h">
-							<h3>Markets</h3>
-							<span className="x num">{summaries.length} live</span>
-						</div>
-						<div className="card-b">
-							{summaries.map((m) => (
-								<Link className="row" href={`/m/${m.slug}`} key={m.slug}>
-									<Avatar asset={m.asset} initials={m.asset} tone="asset" size={30} />
-									<span className="t">
-										<b>{m.name}</b>
-										<i>
-											{m.asset} · Base
-										</i>
-									</span>
-									<span className="v">
-										<b className="num">{usd2(m.spotUsd)}</b>
-										{m.changeLabel ? <i className={`${m.changeClass} num`}>{m.changeLabel}</i> : null}
-									</span>
-								</Link>
-							))}
-						</div>
-						<div className="card-f">
-							Assets, strikes and expiries come from live OptionBook orders. Nothing here is a
-							hardcoded list.
-						</div>
-					</section>
-				) : null}
+				    The MARKETS card that used to close this column is gone: it is the
+				    left rail's `Markets` tab now. */}
+				<RightTabs
+					about={<AboutPanel market={market} book={bookStats} />}
+					agent={<AgentChat asset={market.asset} variant="panel" />}
+					positions={
+						signedIn ? (
+							<YourPositionsRail asset={market.asset} />
+						) : (
+							// `YourPositionsRail` renders nothing at all when there is no
+							// session, so without this the tab would be a blank panel with
+							// no explanation. "0 open" is not offered instead: it would be
+							// a statement about a wallet nobody has connected.
+							// TODO-OWNER: signed-out positions copy.
+							<p className="note">
+								Connect a wallet from the header to see your {market.asset}{" "}
+								positions. <TodoOwner />
+							</p>
+						)
+					}
+				/>
 				</>
 			}
 		>
@@ -270,7 +239,7 @@ export default async function MarketPage({
 					    deliberately absent because nothing honest can fill them, is
 					    `lib/market/stat-tiles.ts`. */}
 					<div className="stats">
-						{marketStatTiles(market, tagged.length, await marketBookStats(market.asset)).map((tile) => (
+						{marketStatTiles(market, tagged.length, bookStats).map((tile) => (
 							<span className="tile" key={tile.label}>
 								<i>{tile.label}</i>
 								<b className="num">{tile.value}</b>
@@ -291,18 +260,20 @@ export default async function MarketPage({
 
 				{unavailable !== null ? <span className="mkt-warn">{unavailable}</span> : null}
 
-				{/* C#6: whether the LIST can navigate is a different question from
+				{/* fomo's tabbed table under the chart. `Structures` is the default tab
+				    and the row selection is still a LINK, so the chart above keeps
+				    reading `market.structures.find(row => row.selected)` off a fresh
+				    server render.
+
+				    C#6: whether the LIST can navigate is a different question from
 				    whether the REQUESTED instrument can be ticketed. Passing
 				    `trade !== null` made every "Select" inert on the one page whose
 				    own copy says "pick another one from the list below". */}
-				<StructuresList
+				<MarketTabs
 					rows={market.structures}
 					slug={market.slug}
 					query={carried}
 					live={selectable}
-				/>
-
-				<TaggedPostsTabs
 					posts={tagged}
 					asset={market.asset}
 					signedIn={signedIn}

@@ -35,7 +35,10 @@ export function TabHeading({ id, labels, selected, onSelect, variant = "tabs", l
 		const target = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next];
 		target?.focus();
 	}
-	if (variant === "pills") return <div className="pills">{labels.map((text, index) => <button key={text} type="button" className="pill" aria-pressed={selected === index} onClick={() => onSelect(index)}>{text}</button>)}</div>;
+	// `role="group"` only when the caller named the group: without a name the role
+	// adds nothing, and every caller that predates the `label` prop renders the
+	// bare `.pills` div it always did.
+	if (variant === "pills") return <div className="pills" role={label === undefined ? undefined : "group"} aria-label={label}>{labels.map((text, index) => <button key={text} type="button" className="pill" aria-pressed={selected === index} onClick={() => onSelect(index)}>{text}</button>)}</div>;
 	return <div className="tabs" role="tablist" aria-label={label ?? labels[0]}>
 		{labels.map((text, index) => <button key={text} type="button"
 			id={`${id}-tab-${index}`} role="tab" aria-selected={selected === index}

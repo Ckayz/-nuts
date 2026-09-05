@@ -126,7 +126,15 @@ em{font-style:normal}
 .wrap{max-width:1392px;margin:0 auto;padding:22px 24px 60px}
 .cols{display:grid;gap:22px;align-items:start}
 .cols.feed{grid-template-columns:292px minmax(0,1fr) 332px}
-.cols.page{grid-template-columns:264px minmax(0,1fr) 344px}
+/* MEASURED on fomo's live token page 2026-09-06: three columns, a 340px left
+   rail, a right rail of about the same width, the centre flexing between them,
+   and a 12px gutter — a third of what the mockup ported. The left track was
+   264px, which is a list rail; at 340px it is wide enough for the market rows'
+   name/price pair to sit on one line, which is what the tabbed rail now holds.
+   The right track is already 344px and stays there.
+   The gap is set on `.cols.page` alone: the FEED keeps the mockup's 22px, since
+   nothing was measured about that layout. */
+.cols.page{grid-template-columns:340px minmax(0,1fr) 344px;gap:12px}
 /* Adaptation: a page frame may omit a rail. Without these the remaining
    columns would keep the missing column's track. */
 .cols.feed.no-left,.cols.page.no-left{grid-template-columns:minmax(0,1fr) 332px}
@@ -185,6 +193,47 @@ em{font-style:normal}
 .tabs button[aria-selected="true"]{color:var(--text)}
 .tabs button[aria-selected="true"]::after{content:"";position:absolute;left:0;right:0;bottom:0;
   height:2px;background:var(--accent);border-radius:2px}
+
+/* ---------- a card whose heading IS its tab strip ----------
+   fomo runs tabs where a card would otherwise carry a title: the left rail
+   (`Tokens · Feed · …`), the table under the chart (`Trades | Thesis`) and the
+   right column's panels (docs/design/FOMO-DIGEST.md, "Token page layout").
+
+   `.card-h` is `align-items:baseline` with a 16px top and a 12px bottom, which
+   leaves a tab's underline floating in the middle of the header. Here the strip
+   sits ON the header's own hairline instead, so the accent underline reads as
+   the selected tab's edge — the same relationship `.tabs` already has in the
+   feed's control row. */
+.tabs-h{align-items:flex-end;padding:8px 20px 0;border-bottom:1px solid var(--line-soft);gap:16px}
+.tabs-h .tabs{gap:20px}
+.tabs-h .tabs button{font-size:14px}
+.tabs-h .x{padding-bottom:9px}
+/* The panel bodies of a tab card. The inactive ones keep the `hidden` attribute
+   (`[hidden]{display:none!important}` above) rather than being unmounted, so a
+   panel holding live state — the agent's conversation — survives a tab switch. */
+.tabcard > [role="tabpanel"]{min-width:0}
+.tab-body{padding:16px 20px 18px;min-width:0}
+/* A panel's content may bring its own card (`YourPositionsRail` renders one, and
+   it is a standalone card elsewhere). Nested, that card is invisible — both are
+   `--surface` — and only doubles the padding, so it is flattened here. */
+.tab-body > .card{background:none;border:0;border-radius:0}
+.tab-body > .card > .card-h{padding:0 0 10px}
+.tab-body > .card > .card-b{padding:0}
+.tab-body > .card > .card-f{padding:12px 0 0}
+
+/* ---------- a rail list that scrolls inside its own card ----------
+   fomo's left column is a tabbed panel over ONE scrolling list, so the rail's
+   own list scrolls rather than lengthening the page. Bounded by the viewport
+   less the sticky offset (`.sticky{top:126px}`) and the card's own header, with
+   a ceiling so a short book does not leave a tall empty box. Below 1181px the
+   cap is lifted in the responsive block at the end of this file, where
+   `.cols .sticky` goes static and the rail sits in normal page flow. */
+.rail-list{max-height:min(620px,calc(100vh - 210px));overflow-y:auto;overscroll-behavior:contain}
+
+/* An empty list inside a card says so at the size of the rows it replaces.
+   `.tagged .empty` (styles/market.css) already did this for the market page's
+   posts; this is the same treatment wherever a `.card-b` is empty. */
+.empty{display:block;padding:16px 10px 18px;font-size:13.5px;font-weight:500;color:var(--muted)}
 
 /* The feed's control row: tabs left, filter pills right (the mockup's inline
    flex row). A tab panel dropped into the row wraps onto its own full-width
@@ -394,7 +443,12 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 
 /* ---------- structures table ---------- */
 .tbl-wrap{overflow-x:auto}
-.tbl{width:100%;min-width:640px;border-collapse:separate;border-spacing:0}
+/* The floor was 640px. The centre column is 636px at the 1392px shell now that
+   the left rail is fomo's 340px, so a 640px floor put a horizontal scrollbar
+   under the book at the WIDEST layout. 600px is a floor, not a width: the cells
+   are `white-space:nowrap`, so the table still grows to its own content and
+   still scrolls inside `.tbl-wrap` on a narrow screen. */
+.tbl{width:100%;min-width:600px;border-collapse:separate;border-spacing:0}
 .tbl th{text-align:left;font-size:12.5px;font-weight:600;color:var(--muted);padding:0 9px 10px;white-space:nowrap}
 .tbl td{padding:12px 9px;font-size:13.5px;font-weight:500;border-top:1px solid var(--line-soft);white-space:nowrap}
 .tbl td:first-child{border-top-left-radius:var(--r-row);border-bottom-left-radius:var(--r-row)}
@@ -495,6 +549,9 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
   .cols .sticky{position:static}
   /* The left rail is secondary on a stacked page: it goes last, never above the header (measured 2026-09-05: it pushed the market header down 330px at 901–1180px). */
   .col-left{order:9}
+  /* With the rails static and in normal flow, a viewport-relative cap on the
+     rail list would clip a list the page has already scrolled past. */
+  .rail-list{max-height:none;overflow-y:visible}
 }
 @media (max-width:900px){
   .cols.feed,.cols.page,.cols.feed.no-left,.cols.page.no-left{grid-template-columns:minmax(0,1fr)}

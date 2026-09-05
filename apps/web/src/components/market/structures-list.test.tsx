@@ -54,10 +54,22 @@ describe("C#6: the route asks the LIST whether it can navigate, not the ticket",
 		expect(branch.slice(0, branch.indexOf("unavailable: STRUCTURE_UNAVAILABLE"))).toContain("selectable: true,");
 	});
 
+	// The table moved inside the centre tab card (`market-tabs.tsx`), so the route
+	// passes `live` to THAT and the card passes it straight through. Both halves
+	// are asserted: a pass-through that dropped the prop would otherwise leave the
+	// route's assertion green while every Select went inert.
 	test("the route passes `selectable`, never `trade !== null`", async () => {
 		const route = await Bun.file(new URL("../../app/m/[asset]/page.tsx", import.meta.url)).text();
-		const list = route.slice(route.indexOf("<StructuresList"));
+		expect(route).toContain("<MarketTabs");
+		const list = route.slice(route.indexOf("<MarketTabs"));
 		expect(list.slice(0, list.indexOf("/>"))).toContain("live={selectable}");
 		expect(list.slice(0, list.indexOf("/>"))).not.toContain("trade !== null");
+	});
+
+	test("the tab card hands the LIST's own `live` to the list", async () => {
+		const card = await Bun.file(new URL("./market-tabs.tsx", import.meta.url)).text();
+		expect(card).toContain("<StructuresList");
+		const list = card.slice(card.indexOf("<StructuresList"));
+		expect(list.slice(0, list.indexOf("/>"))).toContain("live={live}");
 	});
 });

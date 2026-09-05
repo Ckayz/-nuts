@@ -30,7 +30,7 @@ export function AboutPanel({
 	market,
 	book,
 }: {
-	market: Pick<Market, "asset" | "expiryCount" | "structureCount">;
+	market: Pick<Market, "expiryCount" | "structureCount">;
 	book: MarketBookStats;
 }) {
 	const bars: { key: string; left: string; right: string; bar: SplitBar }[] = [];

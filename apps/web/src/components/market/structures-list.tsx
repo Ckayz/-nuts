@@ -14,6 +14,12 @@ import type { MarketStructure } from "@/lib/display-types";
  * row is the selection, so it carries `aria-selected`; the button is the control
  * that changes it.
  *
+ * It renders the card's CONTENTS, not the card: since the market page's centre
+ * column became a tabbed panel (`market-tabs.tsx`, fomo's `Trades | Thesis`
+ * table), the frame and the heading belong to the tab card and the table is one
+ * of the two things that go inside it. Nesting a second `.card` in there would
+ * be an invisible box — both use `--surface` — with a second set of paddings.
+ *
  * In `DATA_SOURCE=mock` the rows are fixtures and Select is inert, exactly as
  * before. Against the live book each Select is a link that reloads the page with
  * that structure quoted, keeping whatever post and side the visitor arrived
@@ -38,11 +44,7 @@ export function StructuresList({
 	live?: boolean;
 }) {
 	return (
-		<section className="card">
-			<div className="card-h">
-				<h3>Live structures</h3>
-				<span className="x">From OptionBook orders · prices move every block</span>
-			</div>
+		<>
 			<div className="card-b tbl-wrap">
 				<table className="tbl">
 					<thead>
@@ -91,9 +93,10 @@ export function StructuresList({
 				</table>
 			</div>
 			<div className="card-f">
-				How structures are ordered and which of them are surfaced first
+				From OptionBook orders · prices move every block. How structures are
+				ordered and which of them are surfaced first
 				<TodoOwner />
 			</div>
-		</section>
+		</>
 	);
 }

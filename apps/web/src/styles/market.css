@@ -179,11 +179,99 @@
 	margin-top: 0;
 }
 
-/* ---------- posts about <asset> (mockup lines 817-855) ---------- */
-.tagged-h .x {
+/* ---------- About panel: fomo's split bars ----------
+   `About <TOKEN>` on fomo's token page draws paired proportional bars — green
+   left, red right, widths in proportion (docs/design/FOMO-DIGEST.md,
+   "About-panel pattern worth stealing"). The counts are printed in words above
+   the bar, so the bar itself is `aria-hidden` decoration and a reader who cannot
+   see it loses nothing.
+
+   The maths is `lib/market/split-bar.ts`, which returns null rather than a
+   proportion whenever a side is missing or the total is zero; a bar with no
+   denominator would render as a full-width claim.
+
+   TODO-OWNER: CLAUDE.md's rule is "colour only on money (never bars, labels,
+   names)". These bars are green/red by brief, as fomo's are. */
+.sbars {
 	display: flex;
-	gap: 6px;
+	flex-direction: column;
+	gap: 15px;
+	padding-bottom: 16px;
+	margin-bottom: 4px;
+	border-bottom: 1px solid var(--line-soft);
+}
+.sbar-row {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+}
+.sbar-k {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	font-size: 12.5px;
+	font-weight: 600;
+	min-width: 0;
+}
+.sbar-k b {
+	font-weight: 700;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.sbar-k i {
 	margin-left: auto;
+	font-style: normal;
+	font-weight: 700;
+	flex: none;
+}
+.sbar {
+	display: flex;
+	height: 6px;
+	border-radius: var(--r-chip);
+	overflow: hidden;
+	background: var(--surface2);
+}
+.sbar-l {
+	background: var(--gain);
+}
+.sbar-r {
+	background: var(--loss);
+}
+.sbar-note {
+	font-size: 12px;
+	line-height: 1.45;
+	font-weight: 500;
+	color: var(--muted);
+}
+
+/* ---------- the agent, inside a tab ----------
+   `.agent-panel{max-height:460px}` (styles/agent.css) exists because the right
+   column used to be four stacked cards in ONE sticky element, and a chat that
+   grew without limit pushed the cards under it past the bottom of the viewport.
+   Inside a tab there is nothing under it, and a hard 460px cap in a panel that
+   owns the whole card is arbitrary — so the cap is replaced the same way
+   `.agent-slide .agent-panel` replaces it: the WRAPPER is the bounded flex
+   column and the chat fills it, scrolling its own message list. */
+.tab-body.agent-inline {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	height: min(620px, calc(100vh - 260px));
+	padding-top: 4px;
+}
+.tab-body.agent-inline .agent-panel {
+	max-height: none;
+	flex: 1;
+}
+
+/* ---------- posts about <asset> (mockup lines 817-855) ---------- */
+/* The All / Backed filter, now a row of its own under the card's tab strip
+   rather than a control in a card header (the header is the Structures / Theses
+   strip). */
+.tagged-filter {
+	padding: 13px 20px 0;
 }
 .tagged {
 	padding: 0 10px 10px;

@@ -120,6 +120,11 @@ export function PositionPage({ page, rail }: { page: PositionPageView; rail: The
 				</>
 			}
 		>
+				{/* m4: the route's headings were all card titles (`h3`), so `/p/<id>`
+				    had no `h1`. The instrument the card already prints is the page's
+				    subject, so it becomes the heading — the same words, taken out of
+				    the picture rather than added to it. */}
+				<h1 className="a11y-hidden">{page.card.instrumentLabel}</h1>
 				<PositionHero page={page} />
 
 				<section className="card">

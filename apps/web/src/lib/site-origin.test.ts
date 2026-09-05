@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
 
+import { acceptedOrigins } from "./site-origin";
+import { extractTradeLinks } from "./thesis/links";
+
 /**
  * 9(b). `siteOrigins()` reads `next/headers` and `@nuts/env/server`, so each
  * case runs in its own child with those two modules stubbed — the same
@@ -72,4 +75,70 @@ test("nothing to go on returns nothing rather than failing the page", () => {
 	// means only path-only `/p/<uuid>` links unfurl.
 	expect(run(undefined, "throws")).toEqual([]);
 	expect(run(undefined, {})).toEqual([]);
+});
+
+/**
+ * M1 (user-flow re-walk 2026-09-06). The tester's own reading of this defect was
+ * WRONG — `headers()` does not throw in the render that follows a publish
+ * action. Re-measured on a `next start` production build, publishing from
+ * `http://127.0.0.1:3171/new`:
+ *
+ *   normal page render      host=127.0.0.1:3171  x-forwarded-host=127.0.0.1:3171
+ *   post-action re-render   host=localhost:3171  x-forwarded-host=127.0.0.1:3171
+ *                           (x-action-redirect=/t/<slug>;push)
+ *
+ * The re-render's `host` is the SERVER's own address, so the copied absolute
+ * URL failed the same-origin test and the post rendered a bare URL until it was
+ * reloaded. The forwarded host is the one the browser actually used.
+ */
+test("the post-action re-render's forwarded host is accepted, not just the server's own host", () => {
+	expect(
+		run(undefined, {
+			host: "localhost:3171",
+			"x-forwarded-host": "127.0.0.1:3171",
+			"x-forwarded-proto": "http",
+		}),
+	).toEqual(["http://127.0.0.1:3171", "http://localhost:3171"]);
+});
+
+test("a custom domain in front of a deployment URL is accepted from the forwarded host", () => {
+	expect(
+		run(PREVIEW, {
+			host: "thesis-fun-abc123.vercel.app",
+			"x-forwarded-host": "thesis.fun",
+			"x-forwarded-proto": "https",
+		}),
+	).toEqual([PREVIEW, "https://thesis.fun"]);
+});
+
+test("a proxy chain uses the client-facing first entry", () => {
+	expect(
+		run(undefined, {
+			host: "internal.local",
+			"x-forwarded-host": "thesis.fun, internal.local",
+			"x-forwarded-proto": "https",
+		}),
+	).toEqual(["https://thesis.fun", "https://internal.local"]);
+});
+
+test("an unusable forwarded host is dropped, never repaired", () => {
+	expect(
+		run(undefined, { host: "thesis.fun", "x-forwarded-host": "not a host", "x-forwarded-proto": "https" }),
+	).toEqual(["https://thesis.fun"]);
+	expect(run(undefined, { "x-forwarded-host": "   ", host: "" })).toEqual([]);
+});
+
+/**
+ * The end the user sees: with the post-action re-render's origins, the copied
+ * absolute URL unfurls, and a look-alike host still does not.
+ */
+test("the copied absolute URL unfurls with the post-action origins", () => {
+	const origins = acceptedOrigins({
+		host: "localhost:3171",
+		forwardedHost: "127.0.0.1:3171",
+		forwardedProto: "http",
+	});
+	const id = "69125d9b-38e3-4280-9119-61ee46fefff4";
+	expect(extractTradeLinks(`See http://127.0.0.1:3171/p/${id} now`, origins)).toEqual([id]);
+	expect(extractTradeLinks(`See http://127.0.0.1:3171.evil.example/p/${id} now`, origins)).toEqual([]);
 });

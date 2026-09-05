@@ -23,6 +23,22 @@ export interface PositionQuantities {
 	readonly collateralDecimals: number;
 }
 
+/**
+ * B1. The two live prices a card needs, for MANY positions at once.
+ *
+ * A page resolves this once (`lib/position/spot.ts` `livePriceBook`) from the
+ * one cached order snapshot and hands it to every card and row builder, so the
+ * feed, the thread, a profile, the portfolio and `/p/[id]` all print the same
+ * figure for the same fill. Every lookup may answer `null`, which keeps the
+ * existing "not available yet" sentence instead of inventing a price.
+ */
+export interface LivePriceBook {
+	spotUsd8(asset: string | null | undefined): string | null;
+	collateralUsdPrice8(symbol: string | null | undefined): string | null;
+	/** Set when the order feed could not be read at all; never shown as "$0". */
+	readonly feedError: string | null;
+}
+
 export interface PositionPageDetail {
 	readonly position: Domain.Position;
 	readonly owner: Domain.Creator;

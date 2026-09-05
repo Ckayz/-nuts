@@ -131,6 +131,48 @@ if (!databaseUrl) {
 		expect(row?.underlyingAsset).toBeNull();
 	});
 
+	/**
+	 * m13 (user-flow re-walk 2026-09-06) — the finding is REFUTED, and this is the
+	 * regression guard that keeps it refuted.
+	 *
+	 * The tester reported `tagged_asset` stored as `''` rather than NULL for an
+	 * untagged post. Their evidence was a psql aligned-output cell, which prints
+	 * NULL and the empty string identically. Re-measured directly on a post
+	 * written through the composer:
+	 *
+	 *   select slug, tagged_asset is null as is_null, length(tagged_asset) ...
+	 *   card-abs-1788636701575-564b |  | t |
+	 *
+	 * `is_null = t`, so it is NULL. `writePost` already refuses "" before the
+	 * insert. An empty string would also break the two CHECK constraints' intent
+	 * (`theses_tagged_asset_matches_structure` compares it to `underlying_asset`),
+	 * so a case is pinned here rather than left to a future reading of psql.
+	 */
+	probe("an untagged post stores NULL, never an empty string", async (tx) => {
+		// The three shapes `/new` can actually send: no field, an explicitly null
+		// field, and the empty value of an unselected pill. A whitespace-only tag
+		// is NOT in this list: measured, `writePost` refuses it as `invalid_tag`
+		// (`taggedAssetSchema` trims, then requires `^[A-Z0-9]+$`). Unreachable
+		// from the composer, and changing an error path would be a product call.
+		for (const tag of [undefined, null, ""]) {
+			const result = await writePost(tx, {
+				userId: AUTHOR,
+				headline: `untagged ${JSON.stringify(tag)}`,
+				taggedAsset: tag,
+			});
+			if ("error" in result) throw new Error(`${JSON.stringify(tag)} -> ${result.error}`);
+			const [row] = await tx.select().from(theses).where(eq(theses.id, result.id));
+			expect(row?.taggedAsset).toBeNull();
+			// The distinction the psql cell could not show.
+			const [check] = await tx
+				.select({ isNull: sql<boolean>`${theses.taggedAsset} is null`, len: sql<number | null>`length(${theses.taggedAsset})` })
+				.from(theses)
+				.where(eq(theses.id, result.id));
+			expect(check?.isNull).toBe(true);
+			expect(check?.len).toBeNull();
+		}
+	});
+
 	probe("blank and whitespace-only headlines are refused before any insert", async (tx) => {
 		const before = await tx.select({ n: sql<string>`count(*)` }).from(theses);
 		for (const headline of ["", "   ", "  ", "\n\t", null, 42]) {

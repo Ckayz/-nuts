@@ -1,6 +1,15 @@
 import { expect, test } from "bun:test";
 import * as display from "../display";
 import { backingCard, linkedPositionCard, withCards } from "../position/view";
+import type { LivePriceBook } from "../position/types";
+
+/** Only the USD-pegged collateral price these two cases had before B1: no spot,
+ *  so their assertions still exercise the recorded-value branches. */
+const pegOnly: LivePriceBook = {
+	spotUsd8: () => null,
+	collateralUsdPrice8: () => "100000000",
+	feedError: null,
+};
 import type * as Domain from "@/types";
 import { attachLinkedPositions, enrichWithTradeLinks, linkedPositionIds } from "./enrich";
 
@@ -101,7 +110,7 @@ test("C8: a SELLER's linked card locks collateral instead of paying a premium", 
 			collateral: "1150000",
 			collateralDecimals: 6,
 		},
-	}, new Date("2026-09-05T08:00:00Z"), "100000000");
+	}, new Date("2026-09-05T08:00:00Z"), pegOnly);
 
 	// The seller's own tile, not the buyer's.
 	expect(seller.stats[0]?.label).toBe("Collateral locked");
@@ -146,7 +155,7 @@ test("C8: a BUYER's linked card still pays a premium", () => {
 			collateral: "0",
 			collateralDecimals: 6,
 		},
-	}, new Date("2026-09-05T08:00:00Z"), "100000000");
+	}, new Date("2026-09-05T08:00:00Z"), pegOnly);
 	expect(buyer.stats[0]?.label).toBe("Premium paid");
 	expect(buyer.instrumentLabel).toContain("BTC");
 });

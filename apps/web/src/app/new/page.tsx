@@ -28,6 +28,10 @@ export default async function NewThesisPage({
 	return (
 		<div className="wrap">
 			<div className="compose stack lg">
+				{/* m4: the route's only heading was the card's own `h3`. The same
+				    words become the page heading, out of the picture, so nothing
+				    about the mockup's composer changes. */}
+				<h1 className="a11y-hidden">New thesis</h1>
 				<Composer {...data} />
 				{/* The mockup puts this line OUTSIDE the card, centred under it. */}
 				<p className="mut compose-foot">

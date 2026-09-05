@@ -1,6 +1,10 @@
 /**
  * The single place `SESSION_SECRET` is read.
  *
+ * Missing in production, this throws at import: a deploy that forgot the value
+ * must fail at boot instead of serving anonymous visitors happily and 500ing
+ * only for the ones who come back with a cookie.
+ *
  * FOLLOW-UP (out of this round's fence): this belongs in `packages/env`'s
  * validated server schema as `SESSION_SECRET: z.string().min(32)`, next to
  * DATABASE_URL and BASE_RPC_URL, so a missing value fails at boot instead of at
@@ -35,3 +39,10 @@ export function getSessionSecret(): string {
 export function resetSessionSecretCache(): void {
 	cached = undefined;
 }
+
+/**
+ * Boot check. `process.env.NODE_ENV` is "production" in a built server, so an
+ * import of this module there validates the secret immediately. Development and
+ * test keep the lazy path so a local run without a secret still boots.
+ */
+if (process.env.NODE_ENV === "production") getSessionSecret();

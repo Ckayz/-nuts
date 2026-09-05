@@ -21,3 +21,10 @@ export const CREATOR_PAGE_SIZE = 50;
  * which requires a fill event exactly for these four.
  */
 export const FILLED_POSITION_STATUSES = ["confirmed", "indexed", "expired", "settled"] as const;
+
+/**
+ * Thesis statuses a page may render. `lib/display.ts` has a presentation for
+ * exactly these two (`page-data.renderableStatus` enforces the same rule), and
+ * a `draft` or `cancelled` headline must never leave the database.
+ */
+export const PUBLIC_THESIS_STATUSES = ["open", "settled"] as const;

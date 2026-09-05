@@ -83,7 +83,15 @@ export function WalletBar({ network }: { network: string }) {
 
 	if (phase === "loading") return <span className="wallet dim">…</span>;
 
-	if (session !== null) {
+	// The session belongs to one address. If the wallet is now on a different
+	// account, the header must not keep showing the old identity — it drops back
+	// to the sign-in control so the connected account can sign for itself. A
+	// disconnected wallet is not a mismatch: the server session is still real.
+	const sessionMatchesAccount =
+		session !== null &&
+		(!isConnected || !address || address.toLowerCase() === session.walletAddress.toLowerCase());
+
+	if (session !== null && sessionMatchesAccount) {
 		return (
 			<span className="wallet">
 				<span className="dot" />

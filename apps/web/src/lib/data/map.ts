@@ -5,7 +5,19 @@
  * Rules held here:
  *  - money and quantities cross as decimal strings, converted from base units
  *    with `decimalFromBaseUnits`, exactly as `packages/db/src/ai-context.ts` does;
- *  - a value the database does not hold stays null. Nothing is estimated.
+ *  - a value the database does not hold stays null. Nothing is estimated;
+ *  - a value the database holds but that is not a plain decimal (a `numeric`
+ *    column can legally hold `NaN`) degrades to null — "unavailable" — and never
+ *    reaches `BigInt()`.
+ *
+ * A thesis is a post (owner 2026-09-05). DB round 7 made the whole structure
+ * group nullable as one unit (`theses_structure_all_or_nothing`) and added
+ * `tagged_asset`, and a backing position is optional
+ * (`theses_backing_requires_structure`). So this maps three states:
+ *   text only — `market`, `structure` and `backing` all null;
+ *   tagged    — `market` from `tagged_asset` with a null `expiryAt`, no structure;
+ *   structured — `market` and `structure` from the structure group, `backing`
+ *                present only when `creator_position_id` is linked.
  *
  * TODO-OWNER items surfaced by the domain type, each left null/false/0 here:
  *  - `endingSoon` (PRD 8.3 "ending soon" rule is undecided);
@@ -16,9 +28,8 @@
  *  - `SideStats.amountUsd` is summed from `positions.entry_premium_usd`; whether
  *    the split bar should count premium spent or maximum loss is undecided.
  *
- * SCHEMA FOLLOW-UP: `likes` is always 0. There is no likes table in today's
- * schema; the in-flight `packages/db` round adds one. `Position.entrySpotPriceUsd`
- * is always null: `positions` has no entry-spot column.
+ * SCHEMA FOLLOW-UP: `Position.entrySpotPriceUsd` is always null; `positions` has
+ * no entry-spot column.
  */
 import type { Comment as CommentRow, Position as PositionRow, Thesis as ThesisRow, User as UserRow } from "@nuts/db/schema/index";
 import type * as Domain from "@/types";
@@ -29,10 +40,16 @@ import { creatorHandle, creatorInitials, thesisSlug } from "./identity";
 export interface ThesisAggregates {
 	backCount: number;
 	counterCount: number;
-	/** Sum of `entry_premium_usd` over filled Back positions, decimal string. */
-	backAmountUsd: string;
-	counterAmountUsd: string;
+	/**
+	 * Sum of `entry_premium_usd` over filled Back positions, decimal string.
+	 * Null means the total is unavailable (see `usdDecimalOrNull`), not zero.
+	 */
+	backAmountUsd: string | null;
+	counterAmountUsd: string | null;
 	commentCount: number;
+	likeCount: number;
+	/** Whether the signed-in viewer has liked this thesis. False when nobody is. */
+	likedByViewer: boolean;
 }
 
 export const emptyAggregates: ThesisAggregates = {
@@ -41,6 +58,8 @@ export const emptyAggregates: ThesisAggregates = {
 	backAmountUsd: "0",
 	counterAmountUsd: "0",
 	commentCount: 0,
+	likeCount: 0,
+	likedByViewer: false,
 };
 
 /** Counts a user has on their profile; null where the formula is the owner's. */
@@ -112,8 +131,28 @@ function verification(position: PositionRow | null): Domain.ThesisAiContext["ver
 	};
 }
 
-/** Whole percent of the Back side; the Bear half is the remainder, so the two always sum to 100. */
-function backPercent(backAmountUsd: string, counterAmountUsd: string): number {
+/**
+ * A side total fit to be summed and split: a plain decimal string that is not
+ * negative. Anything else (`NaN`, `1e5`, `+3`, `-500.00`, a stray space) becomes
+ * null, which the display renders as "—". A negative premium spend has no
+ * meaning here and drawing it would give the split bar a negative width, so it
+ * degrades the same way rather than being clamped to a number nobody chose.
+ */
+export function sideAmountOrNull(value: string | null): string | null {
+	const decimal = usdDecimalOrNull(value);
+	if (decimal === null) return null;
+	return decimal.startsWith("-") ? null : decimal;
+}
+
+/**
+ * Whole percent of the Back side; the Bear half is the remainder, so the two
+ * always sum to 100. Both inputs are validated non-negative decimals, so the
+ * `BigInt()` calls below cannot see `NaN` and the result cannot be negative.
+ * Returns 0 when either total is unavailable: no bar is drawn from a half-known
+ * split.
+ */
+function backPercent(backAmountUsd: string | null, counterAmountUsd: string | null): number {
+	if (backAmountUsd === null || counterAmountUsd === null) return 0;
 	const scale = (value: string) => {
 		const [integer = "0", fraction = ""] = value.split(".");
 		return { integer, fraction };
@@ -140,59 +179,94 @@ export interface MapThesisInput {
 	dataAsOf: Date;
 }
 
-export function mapThesis(input: MapThesisInput): Domain.Thesis {
-	const { thesis, creatorPosition, aggregates, dataAsOf } = input;
-	const strikesUsd = thesis.strikes.map((strike) => decimalFromBaseUnits(strike, thesis.strikeDecimals));
-	const backPct = backPercent(aggregates.backAmountUsd, aggregates.counterAmountUsd);
+/**
+ * The structure group is null-or-complete (`theses_structure_all_or_nothing`),
+ * so one column decides it for all of them. `underlyingAsset` is the column the
+ * `theses_backing_requires_structure` and `theses_tagged_asset_matches_structure`
+ * CHECKs are written against, so it is the one read here.
+ */
+function hasStructure(thesis: ThesisRow): boolean {
+	return thesis.underlyingAsset !== null;
+}
+
+function mapMarket(thesis: ThesisRow): Domain.Thesis["market"] {
+	const asset = thesis.underlyingAsset ?? thesis.taggedAsset;
+	if (asset === null) return null;
+	return {
+		chainId: 8453,
+		underlyingAsset: asset,
+		// No spot source in the database; the price feed is a Thetanuts read.
+		currentSpotPriceUsd: null,
+		expiryAt: thesis.expiryAt === null ? null : thesis.expiryAt.toISOString(),
+	};
+}
+
+function mapStructure(thesis: ThesisRow, creatorPosition: PositionRow | null): Domain.ThesisStructure | null {
+	if (
+		!hasStructure(thesis) ||
+		thesis.productType === null ||
+		thesis.isCall === null ||
+		thesis.isLong === null ||
+		thesis.strikes === null ||
+		thesis.strikeDecimals === null
+	) {
+		return null;
+	}
+	const isCall = thesis.isCall;
+	const isLong = thesis.isLong;
+	const strikeDecimals = thesis.strikeDecimals;
+	const strikesUsd = thesis.strikes.map((strike) => decimalFromBaseUnits(strike, strikeDecimals));
+	return {
+		productType: thesis.productType,
+		isCall,
+		isLong,
+		strikesUsd,
+		collateralSymbol: thesis.collateralSymbol,
+		contracts:
+			creatorPosition === null
+				? null
+				: decimalFromNullableBaseUnits(creatorPosition.contracts, creatorPosition.contractDecimals),
+		// `theses` carries one is_call / is_long pair for the whole structure, so
+		// every leg repeats them. Per-leg direction is a schema follow-up.
+		legs: strikesUsd.map((strikeUsd) => ({ strikeUsd, isCall, isLong })),
+	};
+}
+
+/**
+ * The creator's own fill and the sides other traders took on it. Null when the
+ * post carries no linked creator position — the state DB round 7 permits.
+ */
+function mapBacking(
+	thesis: ThesisRow,
+	creatorPosition: PositionRow | null,
+	aggregates: ThesisAggregates,
+	dataAsOf: Date,
+): Domain.ThesisBacking | null {
+	if (thesis.creatorPositionId === null || creatorPosition === null) return null;
+	const backAmountUsd = sideAmountOrNull(aggregates.backAmountUsd);
+	const counterAmountUsd = sideAmountOrNull(aggregates.counterAmountUsd);
+	const backPct = backPercent(backAmountUsd, counterAmountUsd);
 	const fills = aggregates.backCount + aggregates.counterCount;
-	// Null means "nothing filled yet", which the display renders as "—". A real
-	// zero would claim the pool is empty when positions exist without a USD price.
+	// Null means "nothing filled yet" or "not a figure we can add up", which the
+	// display renders as "—". A real zero would claim the pool is empty when
+	// positions exist without a usable USD price.
 	const pooledUsd =
-		fills === 0 ? null : sumDecimals([aggregates.backAmountUsd, aggregates.counterAmountUsd]);
+		fills === 0 || backAmountUsd === null || counterAmountUsd === null
+			? null
+			: sumDecimals([backAmountUsd, counterAmountUsd]);
 
 	return {
-		id: thesis.id,
-		slug: thesisSlug(thesis.id),
-		creatorUserId: thesis.creatorUserId,
 		creatorPositionId: thesis.creatorPositionId,
-		creator: mapCreator(input.creator, input.creatorCounts),
-		thesis: {
-			id: thesis.id,
-			headline: thesis.headline,
-			rationale: thesis.rationale,
-			direction: thesis.direction,
-			status: thesis.status,
-			createdAt: thesis.createdAt.toISOString(),
-		},
-		market: {
-			chainId: 8453,
-			underlyingAsset: thesis.underlyingAsset,
-			// No spot source in the database; the price feed is a Thetanuts read.
-			currentSpotPriceUsd: null,
-			expiryAt: thesis.expiryAt.toISOString(),
-			dataAsOf: dataAsOf.toISOString(),
-		},
-		structure: {
-			productType: thesis.productType,
-			isCall: thesis.isCall,
-			isLong: thesis.isLong,
-			strikesUsd,
-			collateralSymbol: thesis.collateralSymbol,
-			contracts:
-				creatorPosition === null
-					? null
-					: decimalFromBaseUnits(creatorPosition.contracts, creatorPosition.contractDecimals),
-			// `theses` carries one is_call / is_long pair for the whole structure, so
-			// every leg repeats them. Per-leg direction is a schema follow-up.
-			legs: strikesUsd.map((strikeUsd) => ({
-				strikeUsd,
-				isCall: thesis.isCall,
-				isLong: thesis.isLong,
-			})),
-		},
 		economics: economics(creatorPosition),
 		verification: verification(creatorPosition),
-		endingSoon: false,
+		pooledUsd,
+		bull: { pct: backPct, count: aggregates.backCount, amountUsd: backAmountUsd, signed: false },
+		bear: {
+			pct: backAmountUsd === null || counterAmountUsd === null ? 0 : 100 - backPct,
+			count: aggregates.counterCount,
+			amountUsd: counterAmountUsd,
+			signed: false,
+		},
 		mock: {
 			settledAgoMinutes:
 				thesis.settledAt === null
@@ -204,28 +278,43 @@ export function mapThesis(input: MapThesisInput): Domain.Thesis {
 			payoutPerContractUsd: null,
 			transactionFragment: null,
 		},
-		pooledUsd,
-		bull: {
-			pct: backPct,
-			count: aggregates.backCount,
-			amountUsd: aggregates.backAmountUsd,
-			signed: false,
+	};
+}
+
+export function mapThesis(input: MapThesisInput): Domain.Thesis {
+	const { thesis, creatorPosition, aggregates, dataAsOf } = input;
+
+	return {
+		id: thesis.id,
+		slug: thesisSlug(thesis.id),
+		creatorUserId: thesis.creatorUserId,
+		creator: mapCreator(input.creator, input.creatorCounts),
+		thesis: {
+			id: thesis.id,
+			headline: thesis.headline,
+			rationale: thesis.rationale,
+			// Null on a post without a structure: the direction column is part of
+			// the `theses_structure_all_or_nothing` group. The shared AI contract
+			// requires a direction, so an unstructured post cannot fill it —
+			// reason `no_structure` in `packages/db/src/ai-context.ts`.
+			direction: thesis.direction,
+			status: thesis.status,
+			createdAt: thesis.createdAt.toISOString(),
 		},
-		bear: {
-			pct: 100 - backPct,
-			count: aggregates.counterCount,
-			amountUsd: aggregates.counterAmountUsd,
-			signed: false,
-		},
-		fills,
-		likes: 0,
+		dataAsOf: dataAsOf.toISOString(),
+		market: mapMarket(thesis),
+		structure: mapStructure(thesis, creatorPosition),
+		backing: mapBacking(thesis, creatorPosition, aggregates, dataAsOf),
+		endingSoon: false,
+		likes: aggregates.likeCount,
+		likedByViewer: aggregates.likedByViewer,
 		commentCount: aggregates.commentCount,
 	};
 }
 
 export interface MapPositionInput {
 	position: PositionRow;
-	thesis: Pick<ThesisRow, "id" | "headline" | "underlyingAsset">;
+	thesis: Pick<ThesisRow, "id" | "headline" | "underlyingAsset" | "taggedAsset">;
 }
 
 export function mapPosition(input: MapPositionInput): Domain.Position {
@@ -244,7 +333,11 @@ export function mapPosition(input: MapPositionInput): Domain.Position {
 		walletAddress: position.walletAddress.toLowerCase(),
 		thesisSlug: thesisSlug(thesis.id),
 		thesisHeadline: thesis.headline,
-		underlyingAsset: thesis.underlyingAsset,
+		// A position exists only on a structured thesis
+		// (`theses_backing_requires_structure` plus the positions relationship
+		// trigger), so `underlying_asset` is set; `tagged_asset` equals it by
+		// CHECK and is the fallback rather than an invented ticker.
+		underlyingAsset: thesis.underlyingAsset ?? thesis.taggedAsset ?? "",
 		contracts: decimalFromNullableBaseUnits(position.contracts, position.contractDecimals),
 		// `positions` has no entry-spot column; nothing is estimated here.
 		entrySpotPriceUsd: null,

@@ -7,7 +7,16 @@
  *
  * The database branch imports `./data/reads` dynamically so a mock build never
  * pulls `@nuts/db` (and its eager connection pool) into the module graph.
+ *
+ * Every database branch starts with `await connection()`. Rows change after the
+ * build, so a page served from them must be rendered per request: without it
+ * `/t/[slug]` and `/u/[handle]` are prerendered once and never revalidated, and
+ * a URL first requested while its thesis is a draft keeps returning 404 after it
+ * is published. `connection()` (next/server) marks the render dynamic without
+ * naming a revalidation interval, which would be an owner's number, and it is
+ * scoped to the database branch so the mock build keeps its static output.
  */
+import { connection } from "next/server";
 import type * as View from "./display-types";
 import * as display from "./display";
 import * as mock from "./view-data";
@@ -43,11 +52,11 @@ export interface PortfolioData {
 	currentUser: View.Creator | null;
 }
 
-/** Wallet of the signed-in visitor, or null. Only consulted in database mode. */
-async function sessionWallet(): Promise<string | null> {
+/** The signed-in visitor, or null. Only consulted in database mode. */
+async function viewer(): Promise<{ userId: string; walletAddress: string } | null> {
 	const { getSession } = await import("./auth/session");
 	const session = await getSession();
-	return session?.walletAddress ?? null;
+	return session === null ? null : { userId: session.userId, walletAddress: session.walletAddress };
 }
 
 export async function discoverData(): Promise<DiscoverData> {
@@ -59,10 +68,11 @@ export async function discoverData(): Promise<DiscoverData> {
 			yourPositions: mock.yourPositions,
 		};
 	}
+	await connection();
 	const { listFeed, getPortfolio } = await import("./data/reads");
-	const theses = await listFeed();
-	const wallet = await sessionWallet();
-	const positions = wallet === null ? [] : await getPortfolio(wallet);
+	const signedIn = await viewer();
+	const theses = await listFeed({ viewerUserId: signedIn?.userId ?? null });
+	const positions = signedIn === null ? [] : await getPortfolio(signedIn.walletAddress);
 	return {
 		// TODO-OWNER: the leaderboard formula and window, and the trending and
 		// ending-soon rules, are undecided (PRD 19). Both rails stay empty in
@@ -70,11 +80,10 @@ export async function discoverData(): Promise<DiscoverData> {
 		// already render their TODO-OWNER notes underneath.
 		leaderboard: [],
 		theses: theses.map(display.thesis),
+		// `getPortfolio` already applies the single fill-status rule, so nothing
+		// is filtered by status a second time here.
+		yourPositions: positions.map(display.position).filter(isOpen),
 		trending: [],
-		yourPositions: positions
-			.filter((position) => position.status !== "failed")
-			.map(display.position)
-			.filter(isOpen),
 	};
 }
 
@@ -91,8 +100,10 @@ function renderableStatus(status: string): boolean {
 export async function thesisDetailData(slug: string): Promise<View.ThesisDetail | undefined> {
 	if (!usingDatabase()) return mock.thesisDetailBySlug(slug);
 
+	await connection();
 	const { getThread } = await import("./data/reads");
-	const thread = await getThread(slug);
+	const signedIn = await viewer();
+	const thread = await getThread(slug, { viewerUserId: signedIn?.userId ?? null });
 	if (thread === null) return undefined;
 	if (!renderableStatus(thread.thesis.thesis.status)) return undefined;
 
@@ -100,10 +111,11 @@ export async function thesisDetailData(slug: string): Promise<View.ThesisDetail 
 		thesis: thread.thesis,
 		shareUrl: `thesis.fun/t/${thread.thesis.slug}`,
 		shareHeadline: thread.thesis.thesis.headline,
-		// TODO-OWNER: settlement wording, the spot series and the "Take a side"
-		// ticket all come from outside the database — settlement copy is the
-		// owner's, and spot and quote data are Thetanuts reads. Null keeps those
-		// parts of the page hidden instead of stating something unverified.
+		// TODO-OWNER: settlement wording and the spot series both come from
+		// outside the database — settlement copy is the owner's, and spot is a
+		// Thetanuts read. Null keeps those parts of the page hidden instead of
+		// stating something unverified. The ticket is not here at all: since round
+		// 6 a post carries no ticket and trading happens on the market page.
 		settlementLabel: null,
 		spotChangePct: null,
 		participants: thread.participants,
@@ -111,7 +123,6 @@ export async function thesisDetailData(slug: string): Promise<View.ThesisDetail 
 		activity: thread.activity,
 		activityCount: thread.activityCount,
 		participantCount: thread.participantCount,
-		ticket: null,
 	});
 }
 
@@ -126,8 +137,10 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 			activity: mock.activityByCreator(handle),
 		};
 	}
+	await connection();
 	const { getCreator } = await import("./data/reads");
-	const profile = await getCreator(handle);
+	const signedIn = await viewer();
+	const profile = await getCreator(handle, { viewerUserId: signedIn?.userId ?? null });
 	if (profile === null) return undefined;
 	return {
 		creator: display.creator(profile.creator),
@@ -149,14 +162,16 @@ export async function portfolioData(): Promise<PortfolioData> {
 			currentUser: mock.currentUser,
 		};
 	}
-	const wallet = await sessionWallet();
-	if (wallet === null) {
+	await connection();
+	const signedIn = await viewer();
+	if (signedIn === null) {
 		return { openPositions: [], settledPositions: [], currentUser: null };
 	}
 	const { getCreator, getPortfolio } = await import("./data/reads");
-	const positions = await getPortfolio(wallet);
-	const profile = await getCreator(wallet);
-	const rows = positions.filter((position) => position.status !== "failed").map(display.position);
+	const positions = await getPortfolio(signedIn.walletAddress);
+	const profile = await getCreator(signedIn.walletAddress, { viewerUserId: signedIn.userId });
+	// `getPortfolio` already applies the single fill-status rule.
+	const rows = positions.map(display.position);
 	return {
 		openPositions: rows.filter(isOpen),
 		settledPositions: rows.filter((position) => !isOpen(position)),
@@ -164,15 +179,11 @@ export async function portfolioData(): Promise<PortfolioData> {
 	};
 }
 
-/**
- * Route params for the pre-rendered thesis and creator pages. Database mode
- * returns none, so those routes render on demand instead of being enumerated at
- * build time against a database that may not be reachable.
+/*
+ * `/t/[slug]` and `/u/[handle]` used to export `generateStaticParams`. They no
+ * longer do: `export const dynamic = "force-dynamic"` on those routes means
+ * nothing is prerendered, and while `generateStaticParams` was exported Next
+ * still listed them as SSG (measured: the route table printed ● even with
+ * force-dynamic set). Enumerating params against a database that may not be
+ * reachable at build time was never wanted either.
  */
-export function staticThesisSlugs(): { slug: string }[] {
-	return usingDatabase() ? [] : mock.thesisDetails.map((detail) => ({ slug: detail.thesis.slug }));
-}
-
-export function staticCreatorHandles(): { handle: string }[] {
-	return usingDatabase() ? [] : mock.allCreators.map((creator) => ({ handle: creator.handle }));
-}

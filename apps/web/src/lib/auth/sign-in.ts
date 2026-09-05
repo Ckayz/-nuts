@@ -6,7 +6,7 @@ import "server-only";
  * verifier. The server actions in `actions.ts` add cookies and headers on top.
  */
 import type { User } from "@nuts/db/schema/index";
-import { AUTH_CHAIN_ID, SIGN_IN_STATEMENT } from "./constants";
+import { SIGN_IN_STATEMENT } from "./constants";
 import { buildSignInMessage } from "./message";
 import { consumeChallenge, createOrFetchUser, issueChallenge, normalizeWalletAddress, type Database } from "./store";
 import { verifyWalletSignature, type SignatureVerifier } from "./verifier";
@@ -40,7 +40,6 @@ export async function startSignIn(
 export type CompleteSignInFailure =
 	| "challenge_invalid"
 	| "domain_mismatch"
-	| "chain_mismatch"
 	| "signature_invalid";
 
 export type CompleteSignInResult =
@@ -70,7 +69,10 @@ export async function completeSignIn(
 	const challenge = await consumeChallenge(database, { nonce: input.nonce, walletAddress });
 	if (challenge === null) return { ok: false, reason: "challenge_invalid" };
 	if (challenge.domain !== input.domain) return { ok: false, reason: "domain_mismatch" };
-	if (challenge.chainId !== AUTH_CHAIN_ID) return { ok: false, reason: "chain_mismatch" };
+	// No chain check: `issueChallenge` writes AUTH_CHAIN_ID (./constants) and the
+	// `auth_challenges_base_chain` CHECK refuses any other value, so a stored row
+	// cannot carry a different chain. The signed message still names the chain,
+	// and it is rebuilt from `challenge.chainId` below.
 	if (!/^0x[0-9a-fA-F]*$/.test(input.signature) || input.signature.length < 4) {
 		return { ok: false, reason: "signature_invalid" };
 	}

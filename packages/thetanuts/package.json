@@ -9,7 +9,8 @@
   },
   "scripts": {
     "check-types": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "tiny-fill": "bun run scripts/tiny-fill.ts"
   },
   "dependencies": {
     "@thetanuts-finance/thetanuts-client": "0.3.0",

@@ -82,11 +82,19 @@ export function SearchIcon(props: Props) {
 	);
 }
 
-export function HeartIcon(props: Props) {
+/** `filled` is the liked state: the mockup fills the same path with currentColor. */
+export function HeartIcon({ filled, ...props }: Props & { filled?: boolean }) {
 	return (
-		<Svg {...props}>
+		<svg
+			viewBox="0 0 24 24"
+			fill={filled ? "currentColor" : "none"}
+			stroke="currentColor"
+			strokeWidth={2}
+			aria-hidden="true"
+			{...props}
+		>
 			<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z" />
-		</Svg>
+		</svg>
 	);
 }
 
@@ -102,6 +110,24 @@ export function ShareIcon(props: Props) {
 	return (
 		<Svg {...props}>
 			<path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5" />
+		</Svg>
+	);
+}
+
+export function MarketIcon(props: Props) {
+	return (
+		<Svg {...props}>
+			<path d="M7 4v3M7 17v3M17 4v3M17 17v3" />
+			<rect x="4" y="7" width="6" height="10" rx="1.5" />
+			<rect x="14" y="7" width="6" height="10" rx="1.5" />
+		</Svg>
+	);
+}
+
+export function CheckIcon(props: Props) {
+	return (
+		<Svg strokeWidth={2.5} {...props}>
+			<path d="M20 6L9 17l-5-5" />
 		</Svg>
 	);
 }

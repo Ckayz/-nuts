@@ -11,7 +11,7 @@
 import { describe, expect, test } from "bun:test";
 import { and, eq, sql } from "drizzle-orm";
 import { authChallenges, users } from "@nuts/db/schema/index";
-import { consumeChallenge, createOrFetchUser, issueChallenge, normalizeWalletAddress } from "./store";
+import { consumeChallenge, createOrFetchUser, deleteExpiredChallenges, issueChallenge, normalizeWalletAddress } from "./store";
 import type { Database } from "./store";
 import { completeSignIn, startSignIn } from "./sign-in";
 import type { SignatureVerifier } from "./verifier";
@@ -237,25 +237,115 @@ if (!databaseUrl) {
 			// suffix. The stub stands in for the RPC that would validate it.
 			const erc6492 =
 				`0x${"ab".repeat(200)}6492649264926492649264926492649264926492649264926492649264926492` as const;
-			let seen: { address: string; message: string; signature: string } | null = null;
+			// Collected in an array so the observed values need no cast: a `let`
+			// initialised to null narrows to `null` for the checks below.
+			const seen: { address: string; message: string; signature: string }[] = [];
 			const result = await completeSignIn(tx, {
 				walletAddress: WALLET,
 				nonce: challenge.nonce,
 				signature: erc6492,
 				domain: DOMAIN,
 				verify: async (input) => {
-					seen = { address: input.address, message: input.message, signature: input.signature };
+					seen.push({ address: input.address, message: input.message, signature: input.signature });
 					return true;
 				},
 			});
 
 			expect(result.ok).toBe(true);
-			expect(seen).not.toBeNull();
-			const observed = seen as unknown as { address: string; message: string; signature: string };
-			expect(observed.message).toBe(expected);
-			expect(observed.message).toBe(challenge.message);
-			expect(observed.address).toBe(WALLET);
-			expect(observed.signature).toBe(erc6492);
+			expect(seen).toHaveLength(1);
+			const observed = seen[0];
+			expect(observed?.message).toBe(expected);
+			expect(observed?.message).toBe(challenge.message);
+			expect(observed?.address).toBe(WALLET);
+			expect(observed?.signature).toBe(erc6492);
+		});
+	});
+
+	describe("challenge issue is bounded for an unauthenticated caller", () => {
+		probe("300 requests for one wallet leave exactly one live challenge", async (tx) => {
+			let last = "";
+			for (let index = 0; index < 300; index += 1) {
+				const challenge = await startSignIn(tx, { walletAddress: WALLET, domain: DOMAIN });
+				last = challenge.nonce;
+			}
+			const rows = await tx
+				.select()
+				.from(authChallenges)
+				.where(eq(authChallenges.walletAddress, WALLET));
+			expect(rows).toHaveLength(1);
+			expect(rows[0]?.nonce).toBe(last);
+			expect(rows[0]?.consumedAt).toBeNull();
+		});
+
+		probe("the reused challenge keeps its original expiry", async (tx) => {
+			const first = await issueChallenge(tx, { walletAddress: WALLET, domain: DOMAIN });
+			const second = await issueChallenge(tx, { walletAddress: WALLET, domain: DOMAIN });
+			expect(second.id).toBe(first.id);
+			expect(second.nonce).toBe(first.nonce);
+			expect(second.expiresAt.getTime()).toBe(first.expiresAt.getTime());
+		});
+
+		probe("a consumed challenge is not reused; the next request issues a new one", async (tx) => {
+			const first = await issueChallenge(tx, { walletAddress: WALLET, domain: DOMAIN });
+			await consumeChallenge(tx, { nonce: first.nonce, walletAddress: WALLET });
+			const second = await issueChallenge(tx, { walletAddress: WALLET, domain: DOMAIN });
+			expect(second.nonce).not.toBe(first.nonce);
+		});
+
+		probe("a different domain gets its own challenge, never the other domain's", async (tx) => {
+			const one = await issueChallenge(tx, { walletAddress: WALLET, domain: DOMAIN });
+			const two = await issueChallenge(tx, { walletAddress: WALLET, domain: "thesis.fun" });
+			expect(two.id).not.toBe(one.id);
+			expect(two.domain).toBe("thesis.fun");
+		});
+
+		probe("a different wallet gets its own challenge", async (tx) => {
+			const one = await issueChallenge(tx, { walletAddress: WALLET, domain: DOMAIN });
+			const two = await issueChallenge(tx, { walletAddress: OTHER_WALLET, domain: DOMAIN });
+			expect(two.id).not.toBe(one.id);
+		});
+
+		probe("issuing sweeps that wallet's expired rows and leaves other wallets alone", async (tx) => {
+			await tx.insert(authChallenges).values([
+				{ walletAddress: WALLET, nonce: `stale-a-${Date.now()}`, domain: DOMAIN, chainId: 8453, expiresAt: new Date(Date.now() - 60_000) },
+				{ walletAddress: WALLET, nonce: `stale-b-${Date.now()}`, domain: DOMAIN, chainId: 8453, expiresAt: new Date(Date.now() - 30_000) },
+				{ walletAddress: OTHER_WALLET, nonce: `stale-c-${Date.now()}`, domain: DOMAIN, chainId: 8453, expiresAt: new Date(Date.now() - 60_000) },
+			]);
+			await issueChallenge(tx, { walletAddress: WALLET, domain: DOMAIN });
+			const mine = await tx.select().from(authChallenges).where(eq(authChallenges.walletAddress, WALLET));
+			expect(mine).toHaveLength(1);
+			expect(mine[0]?.expiresAt.getTime()).toBeGreaterThan(Date.now());
+			const theirs = await tx.select().from(authChallenges).where(eq(authChallenges.walletAddress, OTHER_WALLET));
+			expect(theirs).toHaveLength(1);
+		});
+
+		probe("an expired challenge is never reused, even before the sweep runs", async (tx) => {
+			await tx.insert(authChallenges).values({
+				walletAddress: WALLET,
+				nonce: `expired-reuse-${Date.now()}`,
+				domain: DOMAIN,
+				chainId: 8453,
+				expiresAt: new Date(Date.now() - 1000),
+			});
+			const issued = await issueChallenge(tx, { walletAddress: WALLET, domain: DOMAIN });
+			expect(issued.expiresAt.getTime()).toBeGreaterThan(Date.now());
+		});
+
+		probe("deleteExpiredChallenges with no wallet sweeps every expired row", async (tx) => {
+			// The live challenge is issued first: issuing sweeps its own wallet, so
+			// inserting the stale rows afterwards keeps both of them in the table.
+			const live = await issueChallenge(tx, { walletAddress: WALLET, domain: DOMAIN });
+			await tx.insert(authChallenges).values([
+				{ walletAddress: WALLET, nonce: `sweep-a-${Date.now()}`, domain: DOMAIN, chainId: 8453, expiresAt: new Date(Date.now() - 1000) },
+				{ walletAddress: OTHER_WALLET, nonce: `sweep-b-${Date.now()}`, domain: DOMAIN, chainId: 8453, expiresAt: new Date(Date.now() - 1000) },
+			]);
+			const removed = await deleteExpiredChallenges(tx);
+			expect(removed).toBe(2);
+			const remaining = await tx
+				.select()
+				.from(authChallenges)
+				.where(eq(authChallenges.nonce, live.nonce));
+			expect(remaining).toHaveLength(1);
 		});
 	});
 }

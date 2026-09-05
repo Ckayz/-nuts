@@ -7,17 +7,34 @@
  */
 import { headers } from "next/headers";
 import { db } from "@nuts/db";
+import { vercelOrigin } from "@nuts/env/server";
 import { truncateAddress, type SignInSessionSummary } from "./address";
 import { clearSession, getSession, setSession } from "./session";
 import { completeSignIn, startSignIn } from "./sign-in";
 
 /**
- * The authority the challenge is bound to. The Host header is attacker-
- * controllable, so this is not a security boundary on its own; the fence is the
- * signature over the server-issued nonce. Binding still stops a signature
- * captured on one deployment from being replayed on another.
+ * The authority the challenge is bound to.
+ *
+ * `vercelOrigin` (packages/env/src/server.ts) is the deployment's own URL, set
+ * by the platform and not by the caller, so it is used whenever it exists — it
+ * is the only configured origin `@nuts/env` holds. Off Vercel there is none, and
+ * the fallback is the `Host` header, which the caller controls. That is not a
+ * security boundary on its own; the fence is the signature over the
+ * server-issued nonce. Binding still stops a signature captured on one
+ * deployment from being replayed on another.
+ *
+ * TODO-OWNER: the canonical sign-in domain. Pinning it needs an owner-set value
+ * (the production hostname), and this round does not add environment variables.
  */
 async function requestDomain(): Promise<string> {
+	if (vercelOrigin !== undefined) {
+		try {
+			return new URL(vercelOrigin).host;
+		} catch {
+			// A malformed platform URL falls through to the Host header rather
+			// than taking sign-in down.
+		}
+	}
 	const header = await headers();
 	const host = header.get("host");
 	if (!host) throw new Error("Request has no Host header; cannot bind an auth challenge");

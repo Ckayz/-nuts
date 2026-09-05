@@ -6,6 +6,13 @@ import "server-only";
  * The cookie is httpOnly, sameSite=lax (so the sign-in redirect and normal
  * navigation keep it) and `secure` outside development. It is signed, not
  * encrypted; see `token.ts`.
+ *
+ * FOLLOW-UP (out of this round's fence): there is no server-side revocation.
+ * `signOut` deletes the cookie, so a token captured before that stays valid for
+ * the rest of `SESSION_TTL_SECONDS`. Revoking needs somewhere to record it — a
+ * session or revocation table, or a per-user token version column — and
+ * `packages/db` is another writer's fence this round. Flagged for the owner
+ * together with the `SESSION_SECRET` move into `packages/env`.
  */
 import { cookies } from "next/headers";
 import { SESSION_COOKIE_NAME, SESSION_TTL_SECONDS } from "./constants";

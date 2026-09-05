@@ -38,11 +38,46 @@ export function newNonce(): string {
 	return randomBytes(16).toString("hex");
 }
 
+/**
+ * Issues, or re-issues, the challenge for one wallet.
+ *
+ * `requestSignInChallenge` is callable by anyone with no authentication, so this
+ * must not grow the table once per call. Two structural fences do that, and
+ * neither is a number this code chose:
+ *
+ *  1. the wallet's already-expired challenges are deleted first, so abandoned
+ *     rows do not accumulate;
+ *  2. an unconsumed, unexpired challenge for the same wallet, domain and chain
+ *     is returned again instead of inserting a new one. The nonce is still
+ *     single-use — `consumeChallenge` burns it — and the reused row keeps its
+ *     original `expires_at`, so replaying this call cannot extend a challenge's
+ *     life.
+ *
+ * TODO-OWNER: any per-wallet or per-IP request cap, and the window it is
+ * measured over, are product limits and are not set here.
+ */
 export async function issueChallenge(
 	database: Database,
 	input: { walletAddress: string; domain: string },
 ): Promise<AuthChallenge> {
 	const walletAddress = normalizeWalletAddress(input.walletAddress);
+	await deleteExpiredChallenges(database, { walletAddress });
+
+	const live = await database
+		.select()
+		.from(authChallenges)
+		.where(
+			and(
+				eq(authChallenges.walletAddress, walletAddress),
+				eq(authChallenges.domain, input.domain),
+				eq(authChallenges.chainId, AUTH_CHAIN_ID),
+				isNull(authChallenges.consumedAt),
+				gt(authChallenges.expiresAt, new Date()),
+			),
+		)
+		.limit(1);
+	if (live[0]) return live[0];
+
 	// TODO-OWNER: CHALLENGE_TTL_SECONDS is a placeholder nonce lifetime.
 	const expiresAt = new Date(Date.now() + CHALLENGE_TTL_SECONDS * 1000);
 	const [row] = await database
@@ -118,11 +153,21 @@ export async function createOrFetchUser(
 	throw new Error(`Failed to create or fetch user for ${walletAddress}`);
 }
 
-/** Housekeeping helper for expired, unconsumed nonces. Not wired to a schedule. */
-export async function deleteExpiredChallenges(database: Database): Promise<number> {
-	const rows = await database
-		.delete(authChallenges)
-		.where(sql`${authChallenges.expiresAt} <= now()`)
-		.returning({ id: authChallenges.id });
+/**
+ * Deletes expired challenges. `issueChallenge` calls it scoped to the wallet it
+ * is about to issue for, which is what keeps an unauthenticated caller from
+ * growing the table. Called with no wallet it sweeps every expired row, which is
+ * the shape a scheduled job would use; nothing schedules one yet.
+ */
+export async function deleteExpiredChallenges(
+	database: Database,
+	options: { walletAddress?: string } = {},
+): Promise<number> {
+	const expired = sql`${authChallenges.expiresAt} <= now()`;
+	const where =
+		options.walletAddress === undefined
+			? expired
+			: and(expired, eq(authChallenges.walletAddress, normalizeWalletAddress(options.walletAddress)));
+	const rows = await database.delete(authChallenges).where(where).returning({ id: authChallenges.id });
 	return rows.length;
 }

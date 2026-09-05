@@ -46,7 +46,15 @@ export function payoffAtExpiry(params: RiskParams, settlementPrice: bigint): big
 /** The contract-size decimal convention is UNVERIFIED (research §9/open question 1); callers must pass the verified value. */
 export function payoffCurve(params: RiskParams, prices: readonly bigint[]): bigint[] { return prices.map((price) => payoffAtExpiry(params, price)); }
 
-/** The contract-size decimal convention is UNVERIFIED (research §9/open question 1); callers must pass the verified value. Returns null for an uncapped short vanilla position. */
+/** Net maximum loss, not the upfront collateral debit: short puts risk strike × size
+ * minus received premium; short spreads risk width × size minus received premium.
+ * Supplied production fill 0xdf3323fefb54cd040a0e86cca3733e4c469a77e33c85a0351e9e987dcfda76f3
+ * posts 22,000,000 aBasUSDC base units for 10,000 contract units at strike 2200;
+ * pass its NET premium converted to USD8 for net P&L. With zero premium this
+ * returns the full collateral value. Risk outputs are USD8, not token base units.
+ * Non-USDC contract units remain UNVERIFIED. Returns null for a short vanilla call;
+ * this USD payoff model does not model inverse-call underlying collateral.
+ */
 export function maxLoss(params: RiskParams): bigint | null {
   const scale = checked(params);
   if (params.positionSide === "long") return params.premiumUsd8;

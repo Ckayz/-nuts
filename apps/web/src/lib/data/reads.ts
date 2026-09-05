@@ -7,11 +7,16 @@ import "server-only";
  * before use. Nothing writes; nothing calls the Thetanuts SDK. Money and
  * quantities leave this layer as decimal strings (see `./decimal`).
  *
+ * One rule for position status, used by every read in this file:
+ * `FILLED_POSITION_STATUSES`. The board totals, the participants table, the
+ * portfolio and the creator page therefore agree — a `pending` or `failed`
+ * transaction is never presented as somebody's filled position.
+ *
  * Page sizes are TODO-OWNER placeholders in `./constants`.
  */
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db as defaultDb } from "@nuts/db";
-import { comments, follows, positions, theses, users } from "@nuts/db/schema/index";
+import { comments, follows, likes, positions, theses, users } from "@nuts/db/schema/index";
 import type { Position as PositionRow, Thesis as ThesisRow, User as UserRow } from "@nuts/db/schema/index";
 import type * as Domain from "@/types";
 import {
@@ -19,6 +24,7 @@ import {
 	FEED_PAGE_SIZE,
 	FILLED_POSITION_STATUSES,
 	PORTFOLIO_PAGE_SIZE,
+	PUBLIC_THESIS_STATUSES,
 	THREAD_COMMENT_PAGE_SIZE,
 } from "./constants";
 import {
@@ -31,9 +37,25 @@ import {
 	type ThesisAggregates,
 } from "./map";
 
-type Database = typeof defaultDb;
+/** The shared handle, or a transaction handle from `db.transaction` (tests). */
+export type Database =
+	| typeof defaultDb
+	| Parameters<Parameters<typeof defaultDb.transaction>[0]>[0];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Options every read takes. `viewerUserId` drives `likedByViewer` only. */
+export interface ReadOptions {
+	database?: Database;
+	/** `users.id` of the signed-in visitor, or null/undefined for anonymous. */
+	viewerUserId?: string | null;
+}
+
+/** A session carries a uuid; anything else is treated as anonymous, never queried. */
+function viewerId(options: ReadOptions): string | null {
+	const value = options.viewerUserId;
+	return typeof value === "string" && UUID.test(value) ? value : null;
+}
 
 function count(value: unknown): number {
 	// count(*) is bigint; node-postgres hands it over as a string.
@@ -42,7 +64,21 @@ function count(value: unknown): number {
 }
 
 /**
- * Per-thesis participation totals over positions that represent a real fill.
+ * `entry_premium_usd` values fit to be added up: present, not `NaN` (a `numeric`
+ * column can legally hold it) and not negative (a negative premium spend has no
+ * meaning and would give the split bar a negative width). A NULL premium is not
+ * "bad" — it is a fill the indexer has not priced yet — so it is neither summed
+ * nor counted as unusable.
+ */
+const USABLE_PREMIUM = sql`${positions.entryPremiumUsd} is not null and ${positions.entryPremiumUsd} <> 'NaN'::numeric and ${positions.entryPremiumUsd} >= 0`;
+
+/**
+ * Per-thesis participation totals over positions that represent a real fill,
+ * plus comment and like counts.
+ *
+ * A side whose rows include an unusable premium reports `null` rather than a
+ * total that silently omits it: the figure is either exactly right or shown as
+ * unavailable.
  *
  * TODO-OWNER: the amount is summed from `positions.entry_premium_usd` — the USD
  * a taker actually spent. Whether the Bull/Bear split should measure premium
@@ -51,6 +87,7 @@ function count(value: unknown): number {
 async function aggregatesByThesis(
 	database: Database,
 	thesisIds: readonly string[],
+	viewerUserId: string | null,
 ): Promise<Map<string, ThesisAggregates>> {
 	const result = new Map<string, ThesisAggregates>();
 	if (thesisIds.length === 0) return result;
@@ -61,7 +98,8 @@ async function aggregatesByThesis(
 			thesisId: positions.thesisId,
 			side: positions.side,
 			fills: sql<string>`count(*)`,
-			amountUsd: sql<string>`coalesce(sum(${positions.entryPremiumUsd}), 0)::text`,
+			amountUsd: sql<string>`coalesce(sum(${positions.entryPremiumUsd}) filter (where ${USABLE_PREMIUM}), 0)::text`,
+			unusable: sql<string>`count(*) filter (where ${positions.entryPremiumUsd} is not null and not (${USABLE_PREMIUM}))`,
 		})
 		.from(positions)
 		.where(
@@ -78,34 +116,59 @@ async function aggregatesByThesis(
 		.where(inArray(comments.thesisId, ids))
 		.groupBy(comments.thesisId);
 
+	const likeCounts = await database
+		.select({ thesisId: likes.thesisId, total: sql<string>`count(*)` })
+		.from(likes)
+		.where(inArray(likes.thesisId, ids))
+		.groupBy(likes.thesisId);
+
+	const viewerLikes =
+		viewerUserId === null
+			? []
+			: await database
+					.select({ thesisId: likes.thesisId })
+					.from(likes)
+					.where(and(inArray(likes.thesisId, ids), eq(likes.userId, viewerUserId)));
+
 	for (const id of ids) result.set(id, { ...emptyAggregates });
 	for (const row of sides) {
 		const current = result.get(row.thesisId);
 		if (current === undefined) continue;
+		const amountUsd = count(row.unusable) > 0 ? null : row.amountUsd;
 		if (row.side === "back") {
 			current.backCount = count(row.fills);
-			current.backAmountUsd = row.amountUsd;
+			current.backAmountUsd = amountUsd;
 		} else {
 			current.counterCount = count(row.fills);
-			current.counterAmountUsd = row.amountUsd;
+			current.counterAmountUsd = amountUsd;
 		}
 	}
 	for (const row of commentCounts) {
 		const current = result.get(row.thesisId);
 		if (current !== undefined) current.commentCount = count(row.total);
 	}
+	for (const row of likeCounts) {
+		const current = result.get(row.thesisId);
+		if (current !== undefined) current.likeCount = count(row.total);
+	}
+	for (const row of viewerLikes) {
+		const current = result.get(row.thesisId);
+		if (current !== undefined) current.likedByViewer = true;
+	}
 	return result;
 }
 
 /**
- * Open theses, newest first, with their creator and the creator's own position.
+ * Open theses, newest first, with their creator and — when one is linked — the
+ * creator's own position.
  *
- * Only `open` is returned: PRD 8.3's feed is public theses, and the
- * `theses_public_creator_position_required` CHECK guarantees an open thesis has
- * a creator position, so no card is built from an unbacked thesis.
+ * Only `open` is returned: PRD 8.3's feed is public theses. Since DB round 7 a
+ * post may carry no structure and no backing position at all
+ * (`theses_structure_all_or_nothing`, `theses_backing_requires_structure`), so
+ * the join to `positions` is a LEFT join and an unbacked post is a normal card.
  */
 export async function listFeed(
-	options: { limit?: number; database?: Database } = {},
+	options: ReadOptions & { limit?: number } = {},
 ): Promise<Domain.Thesis[]> {
 	const database = options.database ?? defaultDb;
 	const dataAsOf = new Date();
@@ -119,7 +182,11 @@ export async function listFeed(
 		// TODO-OWNER: FEED_PAGE_SIZE is a placeholder page size.
 		.limit(options.limit ?? FEED_PAGE_SIZE);
 
-	const aggregates = await aggregatesByThesis(database, rows.map((row) => row.thesis.id));
+	const aggregates = await aggregatesByThesis(
+		database,
+		rows.map((row) => row.thesis.id),
+		viewerId(options),
+	);
 	return rows.map((row) =>
 		mapThesis({
 			thesis: row.thesis,
@@ -145,10 +212,10 @@ export interface Thread {
 	activityCount: number;
 }
 
-/** Thesis + creator + every position on it + comments. Null when the id is unknown. */
+/** Thesis + creator + every filled position on it + comments. Null when the id is unknown. */
 export async function getThread(
 	thesisId: string,
-	options: { database?: Database } = {},
+	options: ReadOptions = {},
 ): Promise<Thread | null> {
 	const database = options.database ?? defaultDb;
 	// `theses.id` is a uuid column: a non-uuid slug would make Postgres raise
@@ -170,7 +237,14 @@ export async function getThread(
 		.select({ position: positions, user: users })
 		.from(positions)
 		.innerJoin(users, eq(users.id, positions.userId))
-		.where(eq(positions.thesisId, thesisId))
+		// Same status rule as the board totals above: a `pending` or `failed`
+		// transaction is not a position anybody holds, so it is not a participant.
+		.where(
+			and(
+				eq(positions.thesisId, thesisId),
+				inArray(positions.status, [...FILLED_POSITION_STATUSES]),
+			),
+		)
 		.orderBy(desc(positions.createdAt));
 
 	const commentRows = await database
@@ -182,7 +256,7 @@ export async function getThread(
 		// TODO-OWNER: THREAD_COMMENT_PAGE_SIZE is a placeholder page size.
 		.limit(THREAD_COMMENT_PAGE_SIZE);
 
-	const aggregates = await aggregatesByThesis(database, [thesisId]);
+	const aggregates = await aggregatesByThesis(database, [thesisId], viewerId(options));
 
 	return {
 		thesis: mapThesis({
@@ -202,10 +276,10 @@ export async function getThread(
 	};
 }
 
-/** Every position held by a wallet, newest first, with the thesis it belongs to. */
+/** Every filled position held by a wallet, newest first, with the thesis it belongs to. */
 export async function getPortfolio(
 	walletAddress: string,
-	options: { limit?: number; database?: Database } = {},
+	options: ReadOptions & { limit?: number } = {},
 ): Promise<Domain.Position[]> {
 	const database = options.database ?? defaultDb;
 	const address = walletAddress.trim().toLowerCase();
@@ -213,7 +287,12 @@ export async function getPortfolio(
 		.select({ position: positions, thesis: theses })
 		.from(positions)
 		.innerJoin(theses, eq(theses.id, positions.thesisId))
-		.where(eq(positions.walletAddress, address))
+		.where(
+			and(
+				eq(positions.walletAddress, address),
+				inArray(positions.status, [...FILLED_POSITION_STATUSES]),
+			),
+		)
 		.orderBy(desc(positions.createdAt))
 		// TODO-OWNER: PORTFOLIO_PAGE_SIZE is a placeholder page size.
 		.limit(options.limit ?? PORTFOLIO_PAGE_SIZE);
@@ -234,7 +313,7 @@ export interface CreatorProfile {
  */
 export async function getCreator(
 	handleOrAddress: string,
-	options: { database?: Database } = {},
+	options: ReadOptions = {},
 ): Promise<CreatorProfile | null> {
 	const database = options.database ?? defaultDb;
 	const address = handleOrAddress.trim().toLowerCase();
@@ -267,18 +346,31 @@ export async function getCreator(
 		// creator's profile shows their finished calls as well as their live ones
 		// (PRD 8.5: "the creator's public history updates from confirmed settled
 		// positions"). Losing theses cannot be hidden.
-		.where(and(eq(theses.creatorUserId, user.id), inArray(theses.status, ["open", "settled"])))
+		.where(and(eq(theses.creatorUserId, user.id), inArray(theses.status, [...PUBLIC_THESIS_STATUSES])))
 		.orderBy(desc(theses.createdAt))
 		// TODO-OWNER: CREATOR_PAGE_SIZE is a placeholder page size.
 		.limit(CREATOR_PAGE_SIZE);
 
-	const aggregates = await aggregatesByThesis(database, thesisRows.map((row) => row.thesis.id));
+	const aggregates = await aggregatesByThesis(
+		database,
+		thesisRows.map((row) => row.thesis.id),
+		viewerId(options),
+	);
 
 	const positionRows = await database
 		.select({ position: positions, thesis: theses })
 		.from(positions)
 		.innerJoin(theses, eq(theses.id, positions.thesisId))
-		.where(eq(positions.userId, user.id))
+		.where(
+			and(
+				eq(positions.userId, user.id),
+				// Same position rule as everywhere else, and only positions on
+				// public theses: a `draft` or `cancelled` headline must not reach a
+				// public profile through a participant row.
+				inArray(positions.status, [...FILLED_POSITION_STATUSES]),
+				inArray(theses.status, [...PUBLIC_THESIS_STATUSES]),
+			),
+		)
 		.orderBy(desc(positions.createdAt))
 		.limit(CREATOR_PAGE_SIZE);
 

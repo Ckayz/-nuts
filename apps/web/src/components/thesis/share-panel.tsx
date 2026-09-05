@@ -9,8 +9,9 @@ export function SharePanel({
 }: {
 	url: string;
 	headline: string;
-	bull: SideStats;
-	bear: SideStats;
+	/** Absent on an unbacked post: nobody has taken a side, so no bar. */
+	bull?: SideStats;
+	bear?: SideStats;
 }) {
 	return (
 		<div className="panel">
@@ -25,13 +26,15 @@ export function SharePanel({
 				<p className="h" style={{ fontSize: "18px" }}>
 					{headline}
 				</p>
-				<div className="sent" style={{ marginTop: "10px" }}>
-					<div className="row2" style={{ fontSize: "11px" }}>
-						<span className="bull">{bull.pct}% Bull</span>
-						<span className="bear">{bear.pct}% Bear</span>
+				{bull && bear ? (
+					<div className="sent" style={{ marginTop: "10px" }}>
+						<div className="row2" style={{ fontSize: "11px" }}>
+							<span className="bull">{bull.pct}% Bull</span>
+							<span className="bear">{bear.pct}% Bear</span>
+						</div>
+						<Bar pct={bull.pct} style={{ height: "8px" }} />
 					</div>
-					<Bar pct={bull.pct} style={{ height: "8px" }} />
-				</div>
+				) : null}
 			</div>
 			<button type="button" className="btn block">
 				Copy link

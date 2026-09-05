@@ -33,7 +33,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
             card was empty while the position card
             (`app/p/[id]/opengraph-image.tsx`) fills the same space with the
             share card's own rows. The mockup's share card
-            (docs/mockups/thesis-fun-mockup.html line 929, "3 · POSITION — the
+            (docs/mockups/thesis-fun-mockup.html line 928, "3 · POSITION — the
             share card is the hero") is the reference for what a card carries:
             who, what, the number. The post's own words are the "what" here, so
             the rationale takes the empty region and nothing else is added.

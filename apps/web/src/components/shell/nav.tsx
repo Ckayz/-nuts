@@ -11,7 +11,7 @@ import { usePathname } from "next/navigation";
  * M3 (user-flow re-walk 2026-09-06). Markets opens ONE market, never a
  * hardcoded asset, which matches the mockup: its nav's "Markets" button is
  * `data-go="market"` and that view is a single asset page, `/m/btc`
- * (docs/mockups/thesis-fun-mockup.html line 367; the view itself is line 741).
+ * (docs/mockups/thesis-fun-mockup.html line 417; the view itself is line 741).
  * There is no markets index in the mockup and no `/markets` route in the app.
  *
  * WHICH market, measured rather than assumed: `firstMarketSlug` is

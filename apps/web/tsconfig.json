@@ -1,7 +1,21 @@
 {
+  // CL-3 (one-shot review 2026-09-06). The three packages extend the shared
+  // strict base; this app did not, so `noUnusedLocals`, `noUnusedParameters` and
+  // `noUncheckedIndexedAccess` were OFF in the workspace that carries the money
+  // path. Measured before this change: a probe file with an unused top-level
+  // const typechecked clean, and turning the base flags on raised 17 diagnostics
+  // (7 unchecked-index in test harness code, 10 unused symbols).
+  //
+  // Every option below overrides the base deliberately: Next needs `dom` libs,
+  // its own JSX transform, its language-service plugin, the `@/*` and
+  // `@nuts/ui/*` aliases, and `allowJs` for the generated files it emits into
+  // `.next/types`. `types` is left unset (the base pins `["node"]`) so the
+  // ambient React and Next declarations this app depends on stay visible.
+  "extends": "@nuts/config/tsconfig.base.json",
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2023", "dom", "dom.iterable"],
+    "types": [],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,

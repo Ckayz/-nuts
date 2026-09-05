@@ -2,8 +2,6 @@ import "server-only";
 
 import { tool } from "ai";
 import { z } from "zod";
-import { buildFillTransactions } from "@nuts/thetanuts";
-import { env } from "@nuts/env/server";
 
 import { findByInstrumentKey, instrumentKey } from "@/lib/thetanuts/instrument";
 import { AGENT_COLLATERAL, MAX_LOSS_USD, withinAgentLimits } from "./limits";
@@ -15,7 +13,6 @@ import {
 	collateralUsdPrice,
 	getOrderSnapshot,
 	isFeedUnavailable,
-	readClient,
 	sizeFill,
 	usdRisk,
 } from "@/lib/thetanuts/orders";
@@ -46,12 +43,6 @@ import {
  *    fill and a market-page fill are checked identically. A second recording
  *    path is exactly what those fences exist to prevent.
  */
-
-/** Decimal token amount to base units. Mirrors the parsing sizeFill already validated. */
-function toBaseUnits(amount: string, decimals: number): bigint {
-	const [whole = "0", fraction = ""] = amount.split(".");
-	return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(fraction.padEnd(decimals, "0") || "0");
-}
 
 /**
  * Refuse to hand over calldata built from an order whose signature is about to

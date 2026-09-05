@@ -1,4 +1,5 @@
 export * from "./activity";
+export * from "./agent";
 export * from "./auth-challenges";
 export * from "./comments";
 export * from "./enums";

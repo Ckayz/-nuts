@@ -1,17 +1,17 @@
 # Thesis.fun Product Requirements Document
 
-**Version:** 1.0  
+**Version:** 2.0  
 **Status:** Active source of truth  
 **Last updated:** 2026-09-05  
-**Primary hackathon track:** Best Product Built on the Thetanuts SDK
+**Hackathon tracks:** Best Product Built on the Thetanuts SDK + AI Agent
 
 ## 1. Product Summary
 
 Thesis.fun is a social options platform where market opinions are backed by real onchain positions on Thetanuts, executed on Base mainnet.
 
-A creator publishes a market thesis, manually selects a compatible live option structure, commits their own capital, and signs the transaction. Other users can inspect the thesis, see its bounded payoff and risk, and either back or counter it with their own independently previewed and signed Thetanuts position. Creator performance and participant P&L are tied to verifiable onchain transactions.
+A creator publishes a market thesis, commits capital, and signs a real Thetanuts transaction. Other users can inspect the thesis, see its bounded payoff and risk, and either back or counter it with their own independently previewed and signed Thetanuts position. Creator performance and participant P&L are tied to verifiable onchain transactions.
 
-The AI companion helps users understand a thesis and its option structure. It does not select, size, recommend, encode, sign, or execute trades.
+The embedded AI trading agent turns a plain-language goal or selected thesis into up to three bounded-risk choices using live Thetanuts data. It may prepare OptionBook fills and custom OptionFactory RFQs, but it never signs or submits transactions. The connected wallet must approve every onchain action.
 
 **Positioning:** Verified social conviction, not anonymous market calls.
 
@@ -37,14 +37,14 @@ Thesis.fun connects social discovery to verifiable execution. Every backed thesi
 2. Require financial skin in the game before a thesis is publicly marked as backed.
 3. Let users discover, back, or counter theses using their own budget and wallet.
 4. Display transaction-backed creator history and participant positions.
-5. Explain option payoff and risk in plain language without delegating financial decisions to AI.
-6. Complete at least one end-to-end Base mainnet creator trade and one participant trade for the hackathon demo.
+5. Make option discovery accessible through a constrained, explainable AI agent.
+6. Complete at least one end-to-end Base mainnet AI-assisted trade for the hackathon demo.
 
 ### 3.2 Non-goals for v1
 
 - Guaranteed returns, profit promises, or personalized financial advice.
-- Autonomous or AI-selected trading.
-- AI position sizing, order selection, transaction construction, or execution.
+- Autonomous trading, server wallets, or custody.
+- Unbounded-loss structures, silent substitutions, automatic retries, or transactions without explicit approval.
 - Custody of user funds or private keys.
 - Copying a creator's entry price when that price is no longer available.
 - Creating a new options liquidity venue or market-making system.
@@ -68,7 +68,7 @@ Thesis.fun qualifies through meaningful use of Thetanuts:
 
 ### 4.2 AI agent track
 
-The v1 AI companion does not qualify for the AI agent track because it does not place a trade. This is intentional. Entering that track requires an owner-approved scope change and a separate user-approved execution design; it must not be added implicitly.
+Thesis.fun qualifies through an agent that can inspect live OptionBook liquidity, gather risk constraints, prepare a real OptionBook fill or custom OptionFactory RFQ, and guide the user through wallet-approved execution on Base mainnet. The agent itself never controls a key or bypasses wallet confirmation.
 
 ## 5. Target Users
 
@@ -88,8 +88,8 @@ A user who understands a market opinion but needs help interpreting spreads, str
 
 1. **Onchain proof over social claims.** A thesis is not “Backed Onchain” until its creator transaction is confirmed.
 2. **Risk before action.** Previewed cost, maximum loss, maximum payout, expiry, and key conditions appear before the wallet prompt.
-3. **Users make the decision.** Users manually select a side, structure, and budget.
-4. **AI explains; deterministic code calculates.** The SDK and application logic own financial values.
+3. **Users make the final decision.** The agent may suggest choices, but every transaction requires a clear preview and wallet approval.
+4. **AI proposes; deterministic code calculates.** The SDK and application logic own financial values and calldata.
 5. **Live liquidity is authoritative.** Never hardcode assets, strikes, expiries, prices, or available structures.
 6. **Every wallet signs its own position.** Joining a thesis never copies funds or grants custody.
 7. **No stale execution.** Refresh and preview the selected order immediately before signing.
@@ -200,14 +200,17 @@ If no compatible order is available, the relevant action is disabled with an exp
 4. Settled positions show settlement price, payout, fees, and final P&L.
 5. The creator's public history updates from confirmed settled positions.
 
-### 8.6 Explain with AI
+### 8.6 Discover and trade with the AI agent
 
-1. User selects **Explain this thesis** from a feed card or thesis page.
-2. The app opens a companion panel with the current trusted thesis context.
-3. The AI provides a concise initial explanation.
-4. User can ask follow-up questions.
-5. The companion cites the values it used and labels their timestamp/status.
-6. Trading remains a separate manual interface outside the conversation.
+1. User opens `/agent` directly or passes a selected thesis as trusted context.
+2. The agent asks for any missing budget, direction, expiry preference, and maximum acceptable loss.
+3. The user chooses listed OptionBook liquidity only or allows a custom RFQ.
+4. Read tools inspect current Thetanuts data and present at most three choices.
+5. Each choice clearly labels source, timestamp, expiry, cost/collateral, maximum loss, and key payoff conditions.
+6. The user selects a choice and explicitly approves transaction preparation.
+7. The server refreshes the source data, reruns deterministic validation, and returns calldata only if the preview still matches the approved limits.
+8. The connected wallet displays and submits the transaction on Base mainnet.
+9. The app records the transaction hash and tracks confirmation. RFQs additionally expose offer monitoring, user-selected settlement, and cancellation.
 
 ## 9. Functional Requirements
 
@@ -215,7 +218,7 @@ If no compatible order is available, the relevant action is disabled with an exp
 
 - Base mainnet wallet connection and wallet-signature authentication.
 - Live OptionBook discovery with no hardcoded market list.
-- Manual order selection and budget input.
+- Manual or AI-assisted order selection with an explicit budget and loss limit.
 - Deterministic fill preview and risk display.
 - Collateral allowance check and approval.
 - User-signed OptionBook fill using the Thetanuts SDK's external-wallet calldata path.
@@ -223,7 +226,9 @@ If no compatible order is available, the relevant action is disabled with an exp
 - Thesis creation gated by the creator's confirmed transaction.
 - Feed, thesis detail, create flow, and portfolio.
 - Open, expired, syncing, failed, and settled states.
-- AI explanation panel using trusted server-side context.
+- Responsive `/agent` workspace with discovery and thesis-context entry points.
+- OpenRouter model integration through the Vercel AI SDK.
+- Approval-gated OptionBook transaction preparation and custom RFQ lifecycle.
 - Responsive UI and explicit loading, empty, error, and wallet-rejection states.
 
 ### 9.2 P1 — Important after the end-to-end trade works
@@ -244,33 +249,44 @@ If no compatible order is available, the relevant action is disabled with an exp
 - AI localization and voice explanations.
 - Owner-approved AI trade-agent mode as a separate product surface.
 
-## 10. AI Companion Specification
+## 10. AI Trading Agent Specification
 
 ### 10.1 Responsibilities
 
-The AI companion may:
+The AI agent may:
 
 - Summarize the creator's thesis.
 - Explain the option structure and each strike.
 - Explain how the position can make or lose money.
 - Explain maximum loss, maximum payout, break-even values, and expiry when supplied by trusted calculations.
-- Compare Back and Counter conceptually without recommending one.
+- Search and rank live choices that satisfy explicit user constraints.
+- Prepare deterministic OptionBook and OptionFactory RFQ calldata after approval.
+- Monitor RFQ state and offers, then prepare settlement or cancellation calldata selected by the user.
 - Explain current versus settled P&L.
 - Answer beginner follow-up questions.
 
-The AI companion must not:
+The AI agent must not:
 
-- Select or rank trades for the user.
-- Recommend Back or Counter.
-- Generate a position size or budget.
+- Invent a budget, maximum loss, expiry, asset, or direction.
 - Claim a probability of profit unless a trusted deterministic value is explicitly supplied and labeled.
 - Calculate authoritative prices, payout, P&L, or risk from scratch.
-- Build transaction calldata.
-- Request a signature or invoke a wallet.
+- Sign, submit, automatically retry, or silently alter a transaction.
+- Request unlimited token allowance.
 - Access private keys, seed phrases, or unrestricted wallet permissions.
 - Promise or imply guaranteed profit.
 
-### 10.2 Shared context contract
+### 10.2 Safety contract
+
+- Base mainnet and USDC collateral only for v1.
+- `maximumLossUsd <= 10` and `requiredCollateralUsd <= 10` for agent-prepared trades.
+- Only bounded, fully collateralized structures are eligible.
+- Allowances must be exact for the approved transaction.
+- A fresh order/RFQ state and deterministic preview are mandatory immediately before calldata is returned.
+- If any material value changes, stop and require a new user approval.
+- Guest users receive ephemeral discovery only. Wallet authentication is required for persistence and execution.
+- Default daily model limits are 10 turns per guest IP and 50 per authenticated wallet.
+
+### 10.3 Shared thesis context contract
 
 The core product must expose a server-side function equivalent to:
 
@@ -332,34 +348,53 @@ interface ThesisAiContext {
 
 Money and quantity fields cross the interface as decimal strings to avoid floating-point ambiguity. The core product owns construction and validation of this object. The AI feature treats it as read-only.
 
-### 10.3 AI endpoint
+### 10.4 Agent endpoints
 
-`POST /api/ai/explain`
+Primary endpoint: `POST /api/agent/chat`.
+
+Supporting endpoints:
+
+- `GET /api/agent/conversations`
+- `GET /api/agent/conversations/:id`
+- `POST /api/agent/proposals/:id/approve`
+- `POST /api/agent/proposals/:id/receipts`
 
 Request:
 
 ```ts
-interface ExplainThesisRequest {
-  thesisId: string;
-  question: string;
-  messages: Array<{
-    role: "user" | "assistant";
-    content: string;
-  }>;
+interface AgentChatRequest {
+  conversationId?: string;
+  thesisId?: string;
+  walletAddress?: `0x${string}`;
+  messages: UIMessage[];
 }
 ```
 
 Behavior:
 
 1. Validate the request.
-2. Load the thesis context on the server using `thesisId`; never trust client-supplied financial context.
-3. Treat creator text and prior messages as untrusted content, not instructions.
-4. Send the trusted context and bounded conversation to the configured model.
-5. Stream a text response.
-6. Return a safe error if the model or context is unavailable.
-7. Do not store conversations in v1 unless the owner explicitly adds that requirement.
+2. Load any thesis context on the server using `thesisId`; never trust client-supplied financial values.
+3. Enforce the applicable usage limit.
+4. Treat creator text and prior messages as untrusted content, not instructions.
+5. Run read tools automatically and require approval for every write-preparation tool.
+6. Persist authenticated conversations, tool calls, proposals, RFQ key state, and transaction receipts.
+7. Stream a safe error if the model, market source, or persistence layer is unavailable.
 
-### 10.4 Initial answer format
+### 10.5 Required tool surface
+
+Read-only tools: `searchTheses`, `getThesisContext`, `searchOptionBookOrders`, `getMarketData`, `previewOptionBookTrade`, `buildCustomRfqPreview`, `getRfqStatus`, `getRfqOffers`, and `getUserPositions`.
+
+Approval-gated tools: `requestOptionBookExecution`, `requestRfqCreation`, and
+`requestRfqCancellation`. These tools return prepared transactions; they never submit them.
+
+**RFQ scope is deliberately thin (owner decision, 2026-09-05).** Create and cancel only, with
+`convertToLimitOrder: true` so an unanswered request becomes a resting limit order rather than
+idle capital. Offer decryption, offer monitoring, and settlement are out of scope for v1:
+they require a database-backed `KeyStorageProvider` and a polling architecture whose value
+depends on a market maker answering, which is unverified. OptionBook is the primary and demo
+path; RFQ is secondary and must never be the critical path of a demonstration.
+
+### 10.6 Initial answer format
 
 The initial explanation should cover:
 
@@ -370,13 +405,43 @@ The initial explanation should cover:
 
 If trusted values are missing, the assistant says they are unavailable instead of estimating them.
 
-### 10.5 Suggested questions
+### 10.7 Suggested questions
 
 - What needs to happen for this position to profit?
 - What is the maximum loss?
 - Explain the strikes in simple terms.
 - What happens at expiry?
 - How is the Counter side different?
+
+### 10.8 Scope enforcement
+
+The agent answers questions about this product only. Off-topic requests are declined and
+redirected, never answered.
+
+**In scope.** Options education and terminology, market and price questions for supported
+assets, thesis discussion, live Thetanuts liquidity, trade previews and risk, the user's own
+positions and P&L, and how this application works. Beginner explanations are explicitly in
+scope: a first-time user asking what a put is must get a real answer.
+
+**Out of scope.** General conversation, coding help, homework, other protocols and venues,
+and any request unrelated to options or this product.
+
+Enforcement is layered. Each layer alone is insufficient.
+
+1. **Pre-model gate.** Every inbound message is classified before the primary model runs. A
+   request classified out of scope returns a canned redirect and never reaches the primary
+   model. This layer is authoritative and also bounds cost.
+2. **Tool-grounded answering.** The agent's function is to call tools. When no tool serves a
+   request, it declines rather than answering from parametric knowledge.
+3. **System instruction.** States the scope boundary and the refusal format. Supporting
+   layer only; it must never be the sole control.
+
+Refusals redirect into the product rather than dead-ending, for example: "I only handle
+options and theses here. Want me to show what is tradeable on ETH this week?"
+
+Thesis text, comments, and display names are user-generated and enter model context as
+untrusted data. Scope enforcement must hold when that content attempts to redirect the
+agent. This is a required test case, not an aspiration.
 
 ## 11. Technical Architecture
 
@@ -400,9 +465,33 @@ If trusted values are missing, the assistant says they are unavailable instead o
 - Use OptionBook reads, preview, payout utilities, position/history reads, and external-wallet transaction encoding.
 - Do not use the Thetanuts MCP package at runtime.
 - Fetch fresh order data immediately before every fill and preserve API order fields verbatim.
+- Order listing uses `client.api.fetchOrders()` and is filtered client-side. `filterOrders()`
+  is unusable: it reads `response.orders` while the payload nests under `data.orders`, and the
+  upstream worker ignores query parameters.
+- No order stream exists. The SDK's configured WebSocket host does not resolve; poll on a
+  20-30 second interval.
+- Tradeable set for v1 is USDC-collateral orders with `isLong: false`, where the user takes the
+  long side. Verified live on 2026-09-05: roughly 200 of 367 open Base mainnet orders, across
+  BTC, ETH, BNB, SOL, AVAX and XRP.
+- The book carries three product shapes, all USDC-collateralised and all tradeable: single-leg
+  vanillas (which publish a `ticker`), multi-leg structures, and **binaries** published with a
+  `name` such as "ETH 2460 Up 1D" and `type: "binaries"`. Binaries express a directional view
+  on a level by a date, which is the same shape as a thesis, and are the easiest product to
+  explain to a first-time user. One live snapshot held 139 vanilla, 37 multi-leg and 25 binary.
+- Structured products omit `ticker`. Resolve their underlying from `priceFeed`, using the
+  mapping learned from the vanillas in the same snapshot rather than a hardcoded table.
+- `availableAmount` is the maker's collateral budget, not a contract count. Contract sizing
+  must always come from `previewFillOrder`.
+- Position read-back after a fill is asynchronous: call `api.triggerIndexerUpdate()` and poll.
+- The seven `PHYSICAL_*` multi-leg implementations are not deployed on Base. The agent's
+  product menu must exclude them.
 
 ### Database
 
+- Hosted Supabase project `-nuts` (AWS ap-northeast-1), shared by both developers. Hosting is Vercel.
+- Schema changes ship as drizzle migrations, never `drizzle-kit push`. `push` reshapes the database to match the schema of whoever runs it and can drop the other developer's tables.
+- Each developer owns their own tables. The AI track owns the `agent_*` tables; the core product owns users, theses, positions, follows, comments and activity. Both export from `packages/db/src/schema/index.ts`.
+- The app connects through Supabase's transaction pooler; migrations use the direct connection.
 - PostgreSQL with Drizzle.
 - Database stores social state and an indexed record of app-originated transactions.
 - Server-only access through `@nuts/db`.
@@ -483,7 +572,17 @@ Conventional social relationships tied to users and theses. Activity records ref
 - Never publish an unconfirmed position as Backed Onchain.
 - Never label an estimate as settled P&L.
 - Always show the participant's own preview rather than the creator's economics at execution.
-- Refresh the selected order before building calldata.
+- Refresh the selected order before building calldata. OptionBook order signatures are
+  short-lived: makers re-sign the book roughly every 60 seconds, and the remaining validity
+  of any order fetched at random was measured between 59 and 113 seconds on 2026-09-05.
+  Treat the window as under one minute. Collateral approval must complete before order
+  selection; calldata must be built and broadcast within 30 seconds of the fetch that
+  produced it. The instrument persists across re-signing while the price drifts, so a
+  visible price-drift tolerance is required.
+- Simulate every write with the SDK `callStatic*` family before returning calldata to the
+  client, so a chain-level failure surfaces as a server error rather than a wallet revert.
+- Enforce agent spend and loss limits outside the model process. A limit expressed only as a
+  system instruction or an in-process check is not a spend control.
 - Verify transaction chain, recipient contract, function, and receipt before persistence.
 - Keep model API keys, database credentials, and RPC credentials server-only.
 - Escape and sanitize user-generated content.
@@ -502,13 +601,14 @@ Owns:
 - `ThesisAiContext` construction and validation.
 - Core loading, failure, and syncing states.
 
-### AI companion developer
+### AI agent developer
 
 Owns:
 
 - AI provider integration and server-side streaming.
-- `/api/ai/explain` request validation and response behavior.
-- Explanation panel and follow-up conversation UI.
+- `/api/agent/*` request validation, streaming, persistence, and rate limiting.
+- `/agent` discovery/context workspace and transaction approval UI.
+- Thetanuts read tools and deterministic transaction preparation for OptionBook and RFQ.
 - System instructions, context formatting, prompt-injection resistance, and safety behavior.
 - AI-specific tests and evaluation fixtures.
 - Graceful model failure and missing-context behavior.
@@ -545,7 +645,9 @@ Neither developer changes the shared contract without notifying the other and up
 - Every financial value comes from the trusted context object.
 - Missing values are acknowledged rather than estimated.
 - Creator text cannot override system safety instructions.
-- No AI path can invoke wallet, SDK write, or transaction functionality.
+- No AI path can sign or submit a transaction.
+- Every prepared transaction satisfies the safety contract and is explicitly approved before the wallet prompt.
+- The agent can complete one owner-approved, small Base mainnet OptionBook trade in the demo environment.
 - Model failure does not block viewing or trading the thesis.
 
 ## 17. Hackathon Demo Script
@@ -569,7 +671,7 @@ Neither developer changes the shared contract without notifying the other and up
 - Creators and participants manually select orders and budgets.
 - Wallet address is the v1 identity.
 - Users sign every financial transaction.
-- AI is an explanation companion only.
+- AI is an approval-gated trading agent; the user's wallet remains the sole execution authority.
 - No Thetanuts MCP runtime dependency.
 - Deterministic code, not AI, owns financial calculations.
 
@@ -583,7 +685,7 @@ Do not invent these values or policies:
 - Leaderboard formula and minimum eligibility.
 - Creator verification thresholds beyond transaction confirmation.
 - Comment, profile, and thesis content limits.
-- AI provider, model, rate limits, and usage budget.
+- Production model budget above the v1 default rate limits.
 - Final connector-kit choice.
 
 These decisions should be added to this PRD when approved.

@@ -43,6 +43,13 @@
       "when": 1788556070707,
       "tag": "0005_wallet-and-snapshot-invariants",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788557327839,
+      "tag": "0006_agent_tables",
+      "breakpoints": true
     }
   ]
 }

@@ -21,7 +21,9 @@ Owner decisions (all 2026-09-05):
 - **No Privy.** Wallet address is the identity (wagmi + viem, include Coinbase Smart Wallet). Add email/social login only if the owner asks.
 - Product numbers are the owner's: budget presets, trending and ending-soon rules, leaderboard formula, creator payout rate, fees, slippage, gas headroom. Tag them `TODO-OWNER` in code and UI. Never invent a value.
 
-Team: owner + Claude on UI and Thetanuts logic. Teammate on the AI companion.
+Team: owner + Claude on UI and Thetanuts logic. Teammate on the AI track.
+
+**Unresolved scope conflict (2026-09-05, needs the owner):** the teammate's push (`d5d2144`…`e83de7d`) rewrote `docs/PRD.md` to v2.0 with "AI is an embedded trading agent" (discovery, up to three choices, OptionBook fills and OptionFactory RFQs prepared after approval, wallet signs), a `/agent` workspace, and limits not given to Claude by the owner (`maximumLossUsd <= 10`, `requiredCollateralUsd <= 10`, 10 model turns/day per guest IP, 50 per wallet). The owner's decision as given to Claude is the companion-only bullet above, with RFQ never used. Until the owner rules, Claude's tracks (UI, Thetanuts core, DB) follow the bullets above and do not depend on the AI scope; the AI track follows the PRD. The shared `ThesisAiContext` contract (PRD §10.3 in v2.0, §10.2 in v1.0) is field-identical in both versions.
 
 ## Design direction (decided 2026-09-05)
 
@@ -54,7 +56,7 @@ Owner's order: **UI first, then Thetanuts core logic, then DB and socials.** Con
 4. **Foundation + socials**: Drizzle schema (users, theses, positions, follows, comments, activity), sign-in with wallet, follow, comment, activity, leaderboard, trending, creator payouts.
 5. **Polish and ship**: Open Graph share cards, verified badges, Vercel.
 
-Parallel track (teammate): AI companion, once the thesis data shape from step 2/4 is agreed.
+Parallel track (teammate): AI track per `docs/PRD.md` v2.0 (`/agent` workspace, `apps/web/src/lib/thetanuts/*`, `packages/db/src/schema/agent.ts`, migration `0006_agent_tables`). See the unresolved scope conflict above.
 
 Shared contract with the teammate: `docs/PRD.md` §10.2 defines `ThesisAiContext`; the core side (us) builds and validates it and provides a fixture plus server function. Neither side changes it without telling the other and updating the PRD (PRD §15).
 
@@ -67,7 +69,8 @@ Shared contract with the teammate: `docs/PRD.md` §10.2 defines `ThesisAiContext
 - **Bun only.** Never npm, npx, yarn, pnpm. Registry lookups via `bun pm view`. shadcn via `bunx shadcn@latest add <name> -c packages/ui`.
 - Never push without an explicit owner command. Never `--no-verify`. Local commits are fine.
 - **Pull from GitHub whenever the team has pushed** (owner rule 2026-09-05): `git fetch origin` at the start of every work block and before every commit or worker launch; merge `origin/main` if it is ahead; re-read changed guidance (`CLAUDE.md`, `docs/PRD.md`) before acting; pin worker base commits to hashes on the merged main.
-- The repo will be public: no credential-shaped values in tracked files. `apps/web/.env` is the only env file and is gitignored; it holds the local `DATABASE_URL` and the production Supabase password (project ref still needed to form the prod URL).
+- The repo will be public: no credential-shaped values in tracked files. Env files: `apps/web/.env.local` (real values, gitignored) overrides `apps/web/.env` (gitignored; Claude's local `DATABASE_URL`, the production Supabase URL and password); `apps/web/.env.example` is the only env file in git and never holds a real value. `packages/env/src/server.ts` now also requires `OPENROUTER_API_KEY` (teammate's agent); local runs need a placeholder value in `.env`.
+- Teammate's rule (their CLAUDE.md, 2026-09-05): they push validated checkpoints to feature branches under a standing approval they record from the owner; that approval is not approval to merge to main. Claude's own push rule above is unchanged.
 
 ## Commands
 
@@ -83,7 +86,10 @@ cd packages/thetanuts && bun test          # offline unit tests for the trade lo
 cd packages/thetanuts && bunx tsc --noEmit
 
 # Database (Drizzle + Postgres, run from root)
-bun run db:push | db:generate | db:migrate | db:studio
+bun run db:push             # LOCAL THROWAWAY DATABASES ONLY - see warning below
+bun run db:generate         # write SQL migrations to packages/db/src/migrations
+bun run db:migrate          # apply migrations
+bun run db:studio           # Drizzle Studio
 
 # Local Postgres via Supabase CLI (Docker), config in packages/db/supabase/
 # Only the db (and its kong gateway) are enabled; auth, storage, studio, realtime,
@@ -93,7 +99,14 @@ cd packages/db && supabase status
 cd packages/db && supabase stop
 
 # The turbo db:* wrappers are marked interactive and fail without a TTY (agents, CI).
-cd packages/db && bunx drizzle-kit push
+# Run drizzle-kit directly instead. No --env-file needed: see Env loading below.
+cd packages/db && bunx drizzle-kit generate --name <change>   # write the migration
+cd packages/db && bunx drizzle-kit migrate                    # apply it
+
+# NEVER run `drizzle-kit push` against the shared Supabase project. push reshapes
+# the database to match the schema of whoever runs it, so running it from a tree
+# that lacks the other developer's tables can DROP those tables. Migrations are
+# additive and reviewable; push is for a local throwaway database only.
 
 # Vercel
 bun run deploy:setup        # vercel link (once)
@@ -120,7 +133,9 @@ scripts/             sync-vercel-env.ts (used by env:preview / env:production)
 ```
 
 How the pieces connect:
-- **One env file**: `apps/web/.env` (gitignored). `drizzle.config.ts` points at it explicitly. `packages/env/src/server.ts` loads `.env` from the **current working directory** via dotenv, so `@nuts/db` finds it when Next runs from `apps/web` but not when a script runs from `packages/db`. For scripts there, use `bun --env-file=../../apps/web/.env run <file>`.
+- **Env files**: `apps/web/.env.local` holds real values and is gitignored; `apps/web/.env.example` is committed and documents every variable. `.env.local` overrides `.env`, matching Next.js precedence, and the real process environment beats both so Vercel and CI are unaffected. Copy to start: `cp apps/web/.env.example apps/web/.env.local`.
+- **Env loading**: `@nuts/env/load` resolves the files relative to the repo, not the current working directory, and every entry point imports it. A script run from `packages/db` finds the same values the web app sees, so `bun --env-file=...` is no longer needed. Required today: `DATABASE_URL` and `OPENROUTER_API_KEY`.
+- **Two database URLs.** `DATABASE_URL` is Supabase's transaction pooler (port 6543) and is what the app uses: Vercel functions open many short-lived connections and would exhaust a direct connection. `DIRECT_DATABASE_URL` is the direct connection (port 5432), used only by drizzle-kit because schema changes cannot run through the pooler. On a local database one string does both jobs and `DIRECT_DATABASE_URL` stays empty.
 - **DB access**: import `db` from `@nuts/db`. It is created eagerly from `env.DATABASE_URL`, so importing `@nuts/db` in a client component will fail. Keep it in server components, route handlers, and server actions.
 - **Env validation** runs at import time. `next.config.ts` imports `@nuts/env/web` so bad client env fails the build. `SKIP_ENV_VALIDATION=1` bypasses server validation.
 - **Bun installs into an isolated store**: packages resolve through `node_modules/.bun/<name>@<version>/node_modules/...` and per-package `node_modules` symlinks, not a flat root `node_modules/<name>`.

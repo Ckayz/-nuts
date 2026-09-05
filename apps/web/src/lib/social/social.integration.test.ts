@@ -107,9 +107,9 @@ if (!databaseUrl) {
 			try { await db.transaction(async tx => {
 				await tx.insert(users).values([{ id: A, walletAddress: WA }, { id: B, walletAddress: WB }]);
 				await tx.insert(theses).values([
-					{ id: T, creatorUserId: A, headline: "Social A", status: "open", ...STRUCTURE },
-					{ id: U, creatorUserId: B, headline: "Social B", status: "open", ...STRUCTURE, expiryAt: new Date(EXPIRY.getTime() + 86400000) },
-					{ id: D, creatorUserId: A, headline: "Private social draft", status: "draft" },
+					{ id: T, slug: "social-a-3333", creatorUserId: A, headline: "Social A", status: "open", ...STRUCTURE },
+					{ id: U, slug: "social-b-3333", creatorUserId: B, headline: "Social B", status: "open", ...STRUCTURE, expiryAt: new Date(EXPIRY.getTime() + 86400000) },
+					{ id: D, slug: "private-social-draft-3333", creatorUserId: A, headline: "Private social draft", status: "draft" },
 				]);
 				await tx.execute(sql`SET CONSTRAINTS ALL IMMEDIATE`);
 				await run(tx);

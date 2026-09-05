@@ -1,6 +1,7 @@
 /** Pure domain → presentation boundary. Decimal values are never used for trading math. */
 import type * as Domain from "@/types";
 import type * as View from "./display-types";
+import { renderTextWithLinks, tradeLinkHref } from "./thesis/links";
 /** Validate and split decimal strings without a binary floating-point conversion. */
 function decimal(value: string) {
     if (!/^-?\d+(?:\.\d+)?$/.test(value))
@@ -100,7 +101,18 @@ function backing(value: Domain.Thesis, settled: boolean): View.Backing {
         creatorPnlLabel: settled ? "Result" : "Live P&L", pooledUsd: amount(back.pooledUsd),
         bull: stats(back.bull), bear: stats(back.bear), settled };
 }
-export function thesis(value: Domain.Thesis): View.Thesis {
+/**
+ * `siteOrigin` lets an absolute `https://<site>/p/<uuid>` in a rationale be
+ * recognised as our own link. It is a SEPARATE function rather than a second
+ * parameter of `thesis` because `theses.map(display.thesis)` would otherwise
+ * hand the array index in as the origin (the compiler caught exactly that).
+ *
+ * GAP: nothing configures a site origin today — `packages/env` defines none and
+ * `vercelOrigin` there is exported but unused — so no caller passes one yet and
+ * only path-only `/p/<uuid>` links unfurl. That is the safe direction: a link
+ * that cannot be PROVEN same-origin stays plain text.
+ */
+export function thesisWithOrigin(value: Domain.Thesis, siteOrigin: string | undefined): View.Thesis {
     // TODO-OWNER: the mockup specifies no presentation for other PRD lifecycle states.
     if (value.thesis.status !== "open" && value.thesis.status !== "settled")
         throw new Error(`No mockup presentation for ${value.thesis.status}`);
@@ -125,8 +137,78 @@ export function thesis(value: Domain.Thesis): View.Thesis {
         postedLabel: settled ? `· settled ${value.backing?.mock.settledAgoMinutes ?? "—"}m` : `· ${elapsed(value.thesis.createdAt, value.dataAsOf)}`,
         tag: value.market === null ? null : { slug: marketSlug(value.market.underlyingAsset), asset: value.market.underlyingAsset, structureLabel: struct === null ? null : `${struct.strikesLabel} · ${struct.expiryLabel}` },
         structure: struct, backing: value.backing === null ? null : backing(value, settled),
-        likes: value.likes, likedByViewer: value.likedByViewer, commentCount: value.commentCount };
+        likes: value.likes, likedByViewer: value.likedByViewer, commentCount: value.commentCount,
+        // The link tokens are derived from the rationale the author wrote; the
+        // cards come from whichever of those links the reads actually resolved,
+        // so an unresolved link simply stays a link (owner: no error state).
+        noteTokens: value.thesis.rationale === null ? undefined : renderTextWithLinks(value.thesis.rationale, siteOrigin),
+        tradeCards: (value.linkedPositions ?? []).map(tradeCard) };
 }
+export function thesis(value: Domain.Thesis): View.Thesis {
+    return thesisWithOrigin(value, undefined);
+}
+/**
+ * Signed percent of `base`, rounded half-up to one decimal, in exact decimal
+ * arithmetic — the same discipline `group` above uses, so no money value is
+ * ever routed through binary floating point. Null when either side is missing
+ * or the base is zero (there is no percentage of nothing).
+ */
+function signedPercent(value: string, base: string): string | null {
+    const numerator = decimal(value);
+    const denominator = decimal(base);
+    const places = Math.max(numerator.fraction.length, denominator.fraction.length);
+    const scale = (parts: { integer: string; fraction: string }) =>
+        BigInt(parts.integer + parts.fraction.padEnd(places, "0"));
+    // Magnitudes only; the sign is carried separately so the rounding below
+    // stays half-up on the magnitude rather than half-up towards +infinity.
+    const top = scale(numerator) * 1000n;
+    const bottom = scale(denominator);
+    if (bottom === 0n) return null;
+    const tenths = (top + bottom / 2n) / bottom;
+    const sign = numerator.sign * denominator.sign;
+    const whole = tenths / 10n;
+    const digit = tenths % 10n;
+    if (sign === 0) return `0.0%`;
+    return `${sign > 0 ? "+" : "\u2212"}${group(`${whole}`)}.${digit}%`;
+}
+
+/**
+ * The compact card a post's `/p/<uuid>` link unfurls into.
+ *
+ * Every figure comes from the position row; nothing is estimated. A value the
+ * database does not hold renders as "\u2014" rather than a zero.
+ *
+ * TODO-OWNER: the mockup specifies no trade card, so the three tiles (Risked /
+ * Premium / Max payout), the status chip wording and the percent BASIS (P&L
+ * over maximum loss, shown on screen as "of risked") are the minimum honest
+ * presentation of the columns that exist, not approved product copy.
+ */
+export function tradeCard(value: Domain.LinkedPosition): View.TradeCard {
+    const settled = value.position.status === "settled";
+    const economics = value.position.economics;
+    const pnlRaw = settled ? economics.finalPnlUsd : economics.estimatedPnlUsd;
+    const risked = economics.maximumLossUsd;
+    const percent = pnlRaw === null || risked === null ? null : signedPercent(pnlRaw, risked);
+    return {
+        positionId: value.position.id,
+        href: tradeLinkHref(value.position.id),
+        owner: creator(value.owner),
+        statusLabel: value.position.status.toUpperCase(),
+        settled,
+        instrumentLabel: value.position.underlyingAsset === "" ? "\u2014" : value.position.underlyingAsset,
+        side: value.position.side === "back" ? "bull" : "bear",
+        sideLabel: value.position.side === "back" ? "Bull" : "Bear",
+        pnlUsd: amount(pnlRaw),
+        pnlLabel: settled ? "Result" : "Live P&L",
+        pnlPct: percent === null ? null : { value: percent, basis: "of risked" },
+        stats: [
+            { label: "Risked", value: amount(risked).usd },
+            { label: "Premium", value: amount(economics.entryPremiumUsd).usd },
+            { label: "Max payout", value: amount(economics.maximumPayoutUsd).usd },
+        ],
+    };
+}
+
 export function position(value: Domain.Position): View.Position {
     return { id: value.id, thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(value.status === "settled" ? value.economics.finalPnlUsd : value.economics.estimatedPnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled: value.status === "settled" };
 }

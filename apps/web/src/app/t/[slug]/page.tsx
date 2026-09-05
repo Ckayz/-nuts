@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ActivityList } from "@/components/creator/activity-list";
 import { CreatorStats } from "@/components/creator/creator-stats";
 import { LikeButton } from "@/components/feed/like-button";
+import { PostText, TradeCards } from "@/components/feed/trade-card";
 import { CommentIcon, ShareIcon, SparkIcon } from "@/components/icons";
 import { Avatar, Pill, SplitBar, StatusChip, TagRow } from "@/components/primitives";
 import { CommentsList } from "@/components/thesis/comments-list";
@@ -102,7 +103,10 @@ export default async function ThesisPage({
 							) : null}
 						</div>
 						<h1 className="h">{t.headline}</h1>
-						{t.note ? <p className="t">{t.note}</p> : null}
+						{t.note ? <PostText text={t.note} tokens={t.noteTokens} /> : null}
+						{/* A `/p/<uuid>` link in the post text unfurls into a trade
+						    card here, exactly as it does in the feed. */}
+						<TradeCards cards={t.tradeCards} />
 						<div className="meta">
 							<Avatar initials={t.creator.initials} size="s" />
 							<b>{t.creator.displayName}</b>

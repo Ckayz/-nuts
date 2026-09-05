@@ -20,15 +20,54 @@ Table derived from `packages/env/src/server.ts` and `packages/env/src/web.ts` at
 | THETANUTS_ORDERS_URL | Defaulted | Legacy feed configuration; unused by the SDK-backed order adapter |
 | NEYNAR_API_KEY | Optional | Neynar key for the "From Farcaster" rail. Absent: the rail renders an honest "not configured" line and makes no request. Must also appear in `turbo.json`'s `tasks.build.env` or the build cannot see it |
 
-The default `AGENT_MODEL` is a free-tier OpenRouter model: free tiers are
-rate-limited and return 429 or 502 under load, and the app's own daily model
-limits (PRD 10.2) still apply on top of the provider's. Measured 2026-09-06 on
-the owner's key, the provider ceiling is the tighter one: 50 free model requests
-per day shared across every `:free` id (`X-RateLimit-Limit: 50`, reset 00:00
-UTC), after which every call 429s and the agent answers "The agent is
-unavailable right now." OpenRouter's stated remedy is adding 10 credits to the
-account, which raises it to 1000/day. The gate model is deliberately left on a
-paid id — see `packages/env/src/server.ts` for the measurement that forced that.
+OWNER DECISION 2026-09-06 03:4x: this deployment keeps the **Vercel AI Gateway**
+with the paid `anthropic/claude-haiku-4.5`, and the gateway credit is not to be
+spent by anything but real usage — "don't spam it and finish his credits". Both
+`AGENT_MODEL` and `AGENT_GATE_MODEL` default to that id.
+
+A free-tier OpenRouter id is the other consistent configuration (unset
+`AI_GATEWAY_API_KEY`, set a `:free` id). Free tiers are rate-limited and return
+429 or 502 under load, and the app's own daily model limits (PRD 10.2) apply on
+top of the provider's. Measured 2026-09-06 on the owner's key, the provider
+ceiling is the tighter one: 50 free model requests per day shared across every
+`:free` id (`X-RateLimit-Limit: 50`, reset 00:00 UTC). OpenRouter's stated remedy
+is adding 10 credits to the account, which raises it to 1000/day.
+
+**The id and the provider must agree.** A gateway id never carries `:free`; an
+OpenRouter `:free` id needs NO gateway key. Setting both at once is what took the
+agent down on 2026-09-06 (`da09e81`), and `apps/web/src/lib/agent/model.ts` now
+refuses it at startup rather than failing every turn.
+
+## If the agent fails
+
+Open **`GET /api/agent/health`** first. It calls no model, costs nothing and is
+safe for an uptime monitor to poll: 200 when the provider and the configured ids
+agree, 503 when they do not, with the exact problem in `config.problem`.
+
+`GET /api/agent/health?probe=1` additionally makes one two-token call per model
+and reports `models.agent.errorClass` / `models.gate.errorClass`. **It spends
+real model credit — an uptime monitor must NOT use it.** The answer is cached for
+60 seconds (`PROBE_CACHE_MS`, TODO-OWNER), so reloading cannot burn quota.
+
+| `errorClass` | What it means | The fix |
+| --- | --- | --- |
+| `ok` | the model answered | — |
+| `model_not_found` | the id is not served by the provider in use | make the id and the provider agree (see above); `config.problem` names the variable when the check caught it |
+| `no_credit` | 401/402/403 — the account has no credit, or the key was rejected | add credit, or replace the key (`AI_GATEWAY_API_KEY` / `OPENROUTER_API_KEY`) |
+| `rate_limited` | 429 — the quota for the window is spent | wait for the reset, add credit, or move to a paid id |
+| `provider_down` | 5xx or a network failure | wait; nothing in this repo fixes it |
+| `unknown` | none of the above matched | read the server log: every failure logs `[agent/chat] [<class>] model=<id>` or `[agent/scope] …` beside the stack trace |
+
+The same class decides what the browser is told, so a user's report ("it says the
+quota is used up") already names the cause. No provider message, key or status
+code ever reaches the browser.
+
+One state answers no sentence at all: when `AGENT_MODEL` and the provider
+disagree, `lib/agent/model.ts` throws at import, so `/api/agent/chat` answers
+**HTTP 500** and the browser shows its generic line. That is deliberate — a 500
+shows up in monitoring where the old silent HTTP 200 did not — and
+`/api/agent/health` still answers, because it does not import that module until
+`?probe=1`.
 
 ## Local verify
 

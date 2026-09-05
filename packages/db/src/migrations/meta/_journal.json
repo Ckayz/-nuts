@@ -43,6 +43,13 @@
       "when": 1788585888788,
       "tag": "0005_slugs_and_handles",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788588894657,
+      "tag": "0007_standalone_positions",
+      "breakpoints": true
     }
   ]
 }

@@ -157,15 +157,20 @@ export interface Thesis {
 }
 export interface Position {
     id: string;
-    thesisId: string;
+    /** Null for a standalone position (migration 0007). */
+    thesisId: string | null;
     userId: string;
-    role: "creator" | "participant";
+    role: "creator" | "participant" | "standalone";
     side: PositionSide;
     status: PositionStatus;
     chainId: 8453;
     walletAddress: string;
-    thesisSlug: string;
-    thesisHeadline: string;
+    /** Null for a standalone position: migration 0007 made `positions.thesis_id`
+     *  nullable, so a fill can belong to no post at all (owner 2026-09-05,
+     *  "trade is just trade"). */
+    thesisSlug: string | null;
+    /** Null for a standalone position, for the same reason. */
+    thesisHeadline: string | null;
     underlyingAsset: string;
     contracts: string | null;
     entrySpotPriceUsd: string | null;

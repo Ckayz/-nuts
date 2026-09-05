@@ -11,7 +11,10 @@ export const positions = pgTable(
   "positions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    thesisId: uuid("thesis_id").notNull().references((): AnyPgColumn => theses.id),
+    // Nullable since migration 0007: a standalone fill belongs to no post
+    // (owner 2026-09-05). `positions_thesis_role_consistent` keeps the two in
+    // step, so exactly the `standalone` rows are the post-less ones.
+    thesisId: uuid("thesis_id").references((): AnyPgColumn => theses.id),
     userId: uuid("user_id").notNull().references(() => users.id),
     role: positionRoleEnum("role").notNull(),
     side: positionSideEnum("side").notNull(),
@@ -97,6 +100,14 @@ export const positions = pgTable(
   },
   (table) => [
     check("positions_base_chain", sql`${table.chainId} = 8453`),
+    // A post-less position is exactly a standalone one, in both directions. The
+    // comparison casts to text on purpose: `ALTER TYPE ... ADD VALUE` and a use
+    // of the new enum literal cannot share one transaction, and drizzle runs
+    // each migration in one.
+    check(
+      "positions_thesis_role_consistent",
+      sql`(${table.thesisId} is null) = (${table.role}::text = 'standalone')`,
+    ),
     check("positions_confirmed_fill_event_required", sql`${table.status} not in ('confirmed', 'indexed', 'expired', 'settled') or (${table.fillEvent} is not null and coalesce(${table.fillEvent}->>'version' = '1', false))`),
     check("positions_budget_decimals_nonnegative", sql`${table.budgetDecimals} >= 0`),
     check("positions_contract_decimals_nonnegative", sql`${table.contractDecimals} >= 0`),

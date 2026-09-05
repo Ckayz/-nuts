@@ -132,6 +132,8 @@ async function aggregatesByThesis(
 
 	for (const id of ids) result.set(id, { ...emptyAggregates });
 	for (const row of sides) {
+		// `inArray` already excludes the standalone rows, whose `thesis_id` is null.
+		if (row.thesisId === null) continue;
 		const current = result.get(row.thesisId);
 		if (current === undefined) continue;
 		const amountUsd = count(row.unusable) > 0 ? null : row.amountUsd;
@@ -390,4 +392,48 @@ export async function getCreator(
 			mapParticipant({ position: row.position, thesis: row.thesis, user }),
 		),
 	};
+}
+
+/**
+ * One position and its owner, for `/p/[id]` and for the trade cards a post's
+ * text unfurls (owner 2026-09-05). ADDED in the trade round; nothing above was
+ * restructured.
+ *
+ * The join to `theses` is a LEFT join because a standalone position belongs to
+ * no post (migration 0007). `getPortfolio` above still uses an INNER join, so it
+ * does not list standalone positions yet — flagged for the orchestrator.
+ */
+export interface PositionDetail {
+	position: Domain.Position;
+	owner: Domain.Creator;
+}
+
+export async function getPosition(id: string, options: ReadOptions = {}): Promise<PositionDetail | null> {
+	if (!UUID.test(id)) return null;
+	const rows = await listPositionsByIds([id], options);
+	return rows.get(id.toLowerCase()) ?? null;
+}
+
+/** Batch form, so a feed of posts unfurls its trade cards in one query. */
+export async function listPositionsByIds(
+	ids: readonly string[],
+	options: ReadOptions = {},
+): Promise<Map<string, PositionDetail>> {
+	const wanted = [...new Set(ids.filter((id) => UUID.test(id)).map((id) => id.toLowerCase()))];
+	const result = new Map<string, PositionDetail>();
+	if (wanted.length === 0) return result;
+	const database = options.database ?? defaultDb;
+	const rows = await database
+		.select({ position: positions, thesis: theses, user: users })
+		.from(positions)
+		.innerJoin(users, eq(users.id, positions.userId))
+		.leftJoin(theses, eq(theses.id, positions.thesisId))
+		.where(inArray(positions.id, wanted));
+	for (const row of rows) {
+		result.set(row.position.id.toLowerCase(), {
+			position: mapPosition({ position: row.position, thesis: row.thesis }),
+			owner: mapCreator(row.user),
+		});
+	}
+	return result;
 }

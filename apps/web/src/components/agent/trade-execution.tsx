@@ -11,7 +11,7 @@ import { TodoOwner } from "@/components/primitives";
 // ticket's) does not, and this leg is the one that produces the fill calldata.
 import { prepareAgentTrade } from "@/lib/agent/actions";
 import { recordTrade } from "@/lib/trade/actions";
-import { clearHeldFill, readHeldFill, sessionFillStore, writeHeldFill } from "@/lib/trade/held-fill";
+import { clearHeldFill, type HeldFill, readHeldFill, sessionFillStore, writeHeldFill } from "@/lib/trade/held-fill";
 import { approvalMatches, fillIsStale } from "@/lib/trade/approval";
 import { formatBaseUnits, formatUsd8 } from "@/lib/market/units";
 import { sameEconomics, sendGuard } from "@/components/market/take-a-side";
@@ -255,18 +255,28 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 		},
 		[holdChain, holdWallet],
 	);
+	/**
+	 * C-R1 (lane C confirming pass, confirming round, MAJOR). Take over a fill
+	 * this card did not send.
+	 *
+	 * `setSent`, NOT `holdSent`: the pair is already in the store, and writing it
+	 * back would only re-serialise what was just read.
+	 */
+	const adoptHeld = useCallback((held: HeldFill) => {
+		setSent({ hash: held.txHash as `0x${string}`, token: held.token });
+		setTxHash(held.txHash as `0x${string}`);
+		setPhase("error");
+		// TODO-OWNER: recovery copy.
+		setMessage(COPY.heldFillRestored);
+	}, []);
 	const restored = useRef(false);
 	useEffect(() => {
 		if (restored.current) return;
 		restored.current = true;
 		const held = readHeldFill(sessionFillStore(), holdChain, holdWallet);
 		if (held === null) return;
-		setSent({ hash: held.txHash as `0x${string}`, token: held.token });
-		setTxHash(held.txHash as `0x${string}`);
-		setPhase("error");
-		// TODO-OWNER: recovery copy.
-		setMessage(COPY.heldFillRestored);
-	}, [holdChain, holdWallet]);
+		adoptHeld(held);
+	}, [adoptHeld, holdChain, holdWallet]);
 	const [positionPath, setPositionPath] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
 	/** C5: the economics the user has been shown and clicked through. */
@@ -403,6 +413,50 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 		}
 		const account = address as `0x${string}`;
 
+		/**
+		 * C-R1 (lane C confirming pass, confirming round, MAJOR). Is the wallet
+		 * already holding a fill that has not been recorded?
+		 *
+		 * `agent-chat.tsx:300` renders ONE `TradeExecution` per prepared tool
+		 * result, so a transcript can hold several mounted cards at once. Each one
+		 * read the hold ONCE at mount, behind the `restored` ref, and its send
+		 * handler then checked only its OWN `sent`. The reviewer mounted two, let
+		 * the first fill broadcast, refused the recording, and pressed the second:
+		 *   AFTER_FIRST  {"sends":1,"held":1,"a":"Record the fill","b":"Sign in wallet"}
+		 *   AFTER_SECOND {"sends":2,"prepares":0,"records":2}
+		 * Both cards were already prepared, so no server round trip stood between
+		 * the second click and `eth_sendTransaction`.
+		 *
+		 * Re-read immediately before EVERY send. Reaching this line means this
+		 * card's own `sent` is null (the top of `send` returns otherwise), so any
+		 * hold found here belongs to another surface and this send must not
+		 * happen — the card adopts it and offers to record it instead.
+		 */
+		const anotherFillIsHeld = (): boolean => {
+			const held = readHeldFill(sessionFillStore(), holdChain, holdWallet);
+			if (held === null) return false;
+			adoptHeld(held);
+			return true;
+		};
+		/**
+		 * C-R1. True once a `prepareAgentTrade` round trip has run inside THIS
+		 * send. `prepareTradeFor` refuses with `UNRECORDED_FILL` while the wallet
+		 * has a fresh `pending` row (`lib/trade/prepare.ts:84`), which is the only
+		 * fence that sees another TAB, another device, or a browser whose storage
+		 * is unavailable — `sessionFillStore()` returns null in a private window,
+		 * with site data blocked, and during server rendering, and the reviewer
+		 * measured `NO_STORAGE_REMOUNT {"sends":2,"records":2}` in exactly that
+		 * state.
+		 *
+		 * RESIDUAL, stated plainly: neither fence sees a fill that was broadcast
+		 * and whose `recordTrade` never reached the server at all (the tab closed,
+		 * the request was lost) while the store is also unavailable — no `pending`
+		 * row is written until `recordTrade` runs, so there is nothing for
+		 * `findUnrecordedFill` to find. That case needs the reload-recovery UI the
+		 * owner still has open.
+		 */
+		let preparedThisSend = false;
+
 		try {
 			let ready:
 				| { stage: "approve"; approve: { to: string; data: string } }
@@ -434,6 +488,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 			 */
 			const reprepare = async (): Promise<string | null> => {
 				setPhase("preparing");
+				preparedThisSend = true;
 				const fresh = await prepareAgentTrade({
 					structureId: trade.structureId,
 					side: trade.side,
@@ -477,6 +532,9 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 					setMessage(`${exact.reason} ${COPY.approvalNotSent}`);
 					return;
 				}
+				// C-R1. A fill already left this wallet from another card or tab.
+				// Nothing else is signed until it is recorded.
+				if (anotherFillIsHeld()) return;
 				setPhase("approving");
 				const approvalHash = await sendTransactionAsync({
 					to: ready.approve.to as `0x${string}`,
@@ -497,6 +555,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 					return;
 				}
 				setPhase("preparing");
+				preparedThisSend = true;
 				const second = await prepareAgentTrade({
 					structureId: trade.structureId,
 					side: trade.side,
@@ -534,6 +593,18 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				}
 			}
 
+			// C-R1. With no store there is no browser fence at all, so the SERVER
+			// fence has to run before the money moves. One round trip is enough:
+			// the approval branch above already made one.
+			if (sessionFillStore() === null && !preparedThisSend) {
+				const failed = await reprepare();
+				if (failed !== null) {
+					setPhase("error");
+					setMessage(failed);
+					return;
+				}
+			}
+
 			// C5. Nothing is signed until the figures on this card are the figures
 			// being signed for.
 			const shown = acknowledged ?? shownQuote;
@@ -557,6 +628,8 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				return;
 			}
 
+			// C-R1. The last cross-surface check before the money moves.
+			if (anotherFillIsHeld()) return;
 			setPhase("filling");
 			const fillHash = await sendTransactionAsync({
 				to: ready.fill.to as `0x${string}`,
@@ -588,11 +661,14 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 	}, [
 		acknowledged,
 		address,
+		adoptHeld,
 		config,
 		expectedChainId,
 		expiresAt,
 		finishRecording,
+		holdChain,
 		holdSent,
+		holdWallet,
 		isConnected,
 		recordingThrew,
 		sent,

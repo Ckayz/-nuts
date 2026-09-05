@@ -15,7 +15,7 @@
   Surface   : cards on a near-black ground. Hairlines, no drop shadows except the dialog.
   Radius    : cards 18 · frame 24 · trade card / fields 14-16 · rows 12 · chips 999.
               Deliberately NOT uniform.
-  Palette   : ONE accent (#6f5cff, fomo violet) on primary buttons, the active tab
+  Palette   : ONE accent (#3f6fe0, deep navy blue) on primary buttons, the active tab
               underline, the selected side, the share-card frame and focus rings.
               Green/red appear on NUMBERS only — never as bars, never as backgrounds.
               No gold, no gradients, no glassmorphism.
@@ -42,11 +42,11 @@
   --text:#f7f7f7;
   --muted:#9899a3;
   /* the one accent */
-  --accent:#6f5cff;
+  --accent:#3f6fe0;
   --accent-ink:#ffffff;
-  --accent-lift:#a99bff;          /* accent as TEXT on a dark tint (contrast-safe) */
-  --accent-tint:rgba(111,92,255,.14);
-  --accent-tint-soft:rgba(111,92,255,.08);
+  --accent-lift:#7598e9;          /* accent as TEXT on a dark tint (contrast-safe) */
+  --accent-tint:rgba(63,111,224,.14);
+  --accent-tint-soft:rgba(63,111,224,.08);
   /* money */
   --gain:#1cce59;
   --loss:#fd6536;
@@ -72,7 +72,7 @@ button{cursor:pointer}
 h1,h2,h3{margin:0;letter-spacing:-.01em;font-weight:700}
 p{margin:0}
 .todo{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.05em;
-  color:var(--accent-lift);border:1px dashed rgba(169,155,255,.5);border-radius:5px;
+  color:var(--accent-lift);border:1px dashed rgba(117,152,233,.5);border-radius:5px;
   padding:1px 5px;margin-left:6px;vertical-align:middle}
 
 /* ---------- top bar ---------- */
@@ -139,10 +139,10 @@ em{font-style:normal}
   transition:background-color .16s var(--ease),border-color .16s var(--ease),color .16s var(--ease),transform .18s var(--ease)}
 .btn:active{transform:translateY(1px)}
 .btn.acc{background:var(--accent);color:var(--accent-ink)}
-.btn.acc:hover{background:#7d6cff}
+.btn.acc:hover{background:#4d7ae2}
 .btn.sec{background:var(--surface2);border-color:var(--line);color:var(--text)}
 .btn.sec:hover{border-color:#343442;background:#20202a}
-.btn.out{background:transparent;border-color:rgba(111,92,255,.45);color:var(--accent-lift);height:30px;
+.btn.out{background:transparent;border-color:rgba(63,111,224,.45);color:var(--accent-lift);height:30px;
   padding:0 13px;font-size:12.5px;border-radius:var(--r-chip)}
 .btn.out:hover{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn.block{width:100%}
@@ -153,7 +153,7 @@ em{font-style:normal}
   display:inline-flex;align-items:center;gap:6px;
   transition:color .16s var(--ease),background-color .16s var(--ease),border-color .16s var(--ease)}
 .pill:hover{color:var(--text);border-color:var(--line)}
-.pill[aria-pressed="true"]{color:var(--text);background:var(--accent-tint);border-color:rgba(111,92,255,.4)}
+.pill[aria-pressed="true"]{color:var(--text);background:var(--accent-tint);border-color:rgba(63,111,224,.4)}
 .tabs{display:flex;gap:22px;align-items:center}
 .tabs button{position:relative;height:34px;font-size:15px;font-weight:600;color:var(--muted);
   transition:color .16s var(--ease)}
@@ -287,7 +287,7 @@ em{font-style:normal}
 .sel-btn{height:28px;padding:0 11px;border-radius:var(--r-chip);font-size:12.5px;font-weight:600;
   color:var(--muted);border:1px solid var(--line);transition:color .16s var(--ease),border-color .16s var(--ease)}
 .sel-btn:hover{color:var(--text);border-color:#3a3a48}
-.sel-btn[aria-pressed="true"]{color:var(--accent-lift);border-color:rgba(111,92,255,.5)}
+.sel-btn[aria-pressed="true"]{color:var(--accent-lift);border-color:rgba(63,111,224,.5)}
 
 /* ---------- ticket ---------- */
 .seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:var(--surface2);

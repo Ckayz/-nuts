@@ -104,6 +104,32 @@ The owner (2026-09-05 18:3x): "some work here my team continue better. list them
 - A-m4 `docs/DEPLOY.md:36` still says `bunx next build && DATA_SOURCE=db bunx next build` ("both builds"); reality is one db-mode build. Fix the wording; add failed-migration recovery (drizzle wraps ALL pending migrations in one transaction, `drizzle-orm/pg-core/dialect.js:60`).
 - Fence coverage gaps to pin with tests: empty `PGOPTIONS`, `PGSERVICE`, hostless URL + `PGHOST`, `PGPORT`/`PGDATABASE` fallbacks, IPv6 loopback, `postgres://`.
 
+## 4c. Opus user-flow tester (report in `.research/…/userflow-opus-report.md`, 2026-09-05 19:1x) — RED: 2 BLOCKER, 8 MAJOR, 16 MINOR; F1–F10 re-measured (F4/F5/F6 fixed by `47e5de7`, verified)
+
+| # | Rank | Finding | Cause | Status |
+|---|---|---|---|---|
+| F11 | MAJOR | The Leaderboard can never list anyone: positions inner-join theses; every fill is standalone. | `lib/data/reads.ts:442-444` | = B4, Writer A. |
+| F12 | MAJOR | Copy link produces an absolute URL that the unfurler rejects. | `copy-link.tsx:33`, `display.ts:179` | = C9, DONE in Writer B's branch. |
+| F13 | **BLOCKER** | Nobody can trade below 1181 px: the right column (ticket, Your positions, Creator card, post→market panel) is hidden by the mockup's own CSS; at 390 px the Trade button is 0×0. | `apps/web/src/index.css:420-423` | **OWNER DECISION** (the mockup hides it). Options: ticket into the main column below 1180 px, or a bottom sheet. |
+| F14 | MAJOR | The wrong-chain guard never fires: `useChainId()` returns the config chain (Base only), so the check is dead; a wallet on chain 1 signed in and got `eth_sendTransaction` with no chainId. | `take-a-side.tsx:80,121`, `lib/wagmi.ts` | Writer A (with C4): guard on the CONNECTED wallet's chain. |
+| F15 | **BLOCKER** | `/agent` is dead: `useChat()` without a transport posts to `/api/chat`; the route is `/api/agent/chat` → 404 on every message. | `components/agent/agent-chat.tsx:25` | Writer A. |
+| F16 | MINOR | `/agent` not in the nav; its `h-[100dvh]` column renders under the sticky top bar. | `agent-chat.tsx:36` | Writer A. |
+| F17 | MAJOR | The centred search box is an inert `<div>` that advertises `⌘ K` and has a hover state. | `shell/top-bar.tsx:21-25`, `index.css:83` | **OWNER DECISION**: build search, or remove the box/badge until it exists. |
+| F18 | MINOR | Raw machine codes shown to users: `invalid_handle`, `handle_taken`, `challenge_invalid`. | `profile-editor.tsx:37`, `auth/actions.ts:79` → `wallet-bar.tsx:66-67` | Writer A (mapping; wording `TODO-OWNER`). |
+| F19 | MINOR | Ticket prints a raw ISO timestamp. | `lib/trade/view.ts:63` | Writer A. |
+| F20 | MINOR | Ticket requotes on blur only; money contradicts the focused size field. | `take-a-side.tsx:292-293` | Writer A. |
+| F21 | MINOR | Ranger C suffix on the live page. | `live.ts:241,283,358` | = D-m7, DONE in Writer B's branch. |
+| F22 | MINOR | Thread OG image still gold. | `t/[slug]/opengraph-image.tsx:18,26` | = D8, DONE in Writer B's branch. |
+| F23 | MINOR | Chip menu network label is a fixture string ("Base" even on Ethereum). | `top-bar.tsx:32` ← `mock/data.ts:1031` | Writer A. |
+| F24 | MINOR | A rejected signature and a server failure are indistinguishable (both silent). | `wallet-bar.tsx:71-75` | Writer A. |
+| F25 | MINOR | `/portfolio` one-item fake tab bar. | `portfolio/page.tsx:24` | = F16 (ours), DONE in Writer B's branch. |
+| F26 | MINOR | Disabled Follow on your own post gives no reason. | `creator-stats.tsx:13-15` | DONE in Writer B's branch (hidden for self). |
+| F27 | MINOR | Two `<main>` on `/new`; no `<h1>` on the feed; no skip link. | `layout.tsx:38`, `new/page.tsx:30` | `main` DONE in B; h1/skip link open (`TODO-OWNER`). |
+| F28 | MINOR (process) | The tester was pinned to `c2d6044` while main moved (`47e5de7` landed mid-walk). | | Rule: testers get a detached worktree at the certified commit, like reviewers. |
+| F29 | MINOR (doc) | Stale comment claims `getPortfolio` inner-joins. | `reads.ts:476-477` vs `:294` | Writer A. |
+| F1/F2/F3/F7/F9/F10 | | Confirmed by the tester; all DONE in Writer B's branch (`40ea809`). | | |
+| F8 | MINOR | "since Sep 26". | `map.ts:73-76` | `TODO-OWNER` format. |
+
 ## 5. AI hookup (owner 18:2x: "did u forget to hook up the ai part … ask what this thesis is about then potentially trade on it?" → "go on all")
 
 1. "Explain" on a post → `/agent?thesis=<id>`: the agent page takes no parameter today (`apps/web/src/app/agent`, `components/agent/agent-chat.tsx`); the agent already has a `getThesisContext` tool (`lib/agent/tools.ts`, PRD v2.0 §10.3 `ThesisAiContext` from `packages/db/src/ai-context.ts`). Preload the thesis into the first message/context.

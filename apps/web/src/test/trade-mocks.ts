@@ -25,6 +25,13 @@ export interface Calls {
 
 export const calls: Calls = { quotes: [], prepares: [], agentPrepares: 0, sends: [], records: [] };
 
+/** M5. What the mocked `waitForTransactionReceipt` answers, given its parameters. */
+export type ReceiptReply = (params: {
+	hash: string;
+	chainId?: number;
+	timeout?: number;
+}) => Promise<{ status: string }>;
+
 export const replies = {
 	quote: (async () => {
 		throw new Error("quoteTicket not stubbed");
@@ -40,6 +47,18 @@ export const replies = {
 	}) as (input: { token: string; txHash: string }) => Promise<RecordResult>,
 	send: (async () => HASH) as (input: { to: string; data: string }) => Promise<string>,
 	receiptStatus: "success" as "success" | "reverted",
+	/**
+	 * M5 (Opus user-flow tester, confirming round). What `waitForTransactionReceipt`
+	 * does, as a function of the parameters it was CALLED with.
+	 *
+	 * The default answers with `receiptStatus`, so every existing probe is
+	 * unchanged. `neverLandingReceipt()` below stands in for viem's own behaviour
+	 * when a broadcast transaction never mines: it rejects at the `timeout` the
+	 * caller passed, and hangs FOREVER when the caller passed none — which is
+	 * exactly the difference the M5 fix is about, and what makes a mutant that
+	 * drops the bound go red instead of merely slow.
+	 */
+	receipt: (async () => ({ status: "success" })) as ReceiptReply,
 	/** What `useConnection()` reports. */
 	connection: { address: WALLET as string | undefined, isConnected: true, chainId: 8453 as number | undefined },
 };
@@ -64,6 +83,7 @@ export function resetTradeMocks(): void {
 	calls.sends = [];
 	calls.records = [];
 	replies.receiptStatus = "success";
+	replies.receipt = async () => ({ status: replies.receiptStatus });
 	replies.connection = { address: WALLET, isConnected: true, chainId: 8453 };
 	replies.send = async () => HASH;
 	replies.record = async () => ({
@@ -97,8 +117,25 @@ mock.module("wagmi", () => ({
 }));
 
 mock.module("wagmi/actions", () => ({
-	waitForTransactionReceipt: async () => ({ status: replies.receiptStatus }),
+	waitForTransactionReceipt: (_config: unknown, params: { hash: string; chainId?: number; timeout?: number }) =>
+		replies.receipt(params),
 }));
+
+/**
+ * M5. A transaction hash the chain never mines.
+ *
+ * With a `timeout` the wait ends in a rejection, the way viem's own
+ * `waitForTransactionReceipt` ends it (`WaitForTransactionReceiptTimeoutError`,
+ * `viem/_esm/actions/public/waitForTransactionReceipt.js:73`). With no
+ * `timeout` the promise never settles, which is what a caller that passes none
+ * is asking for as far as this harness can tell.
+ */
+export function neverLandingReceipt(): void {
+	replies.receipt = async (params: Parameters<ReceiptReply>[0]) => {
+		if (params.timeout === undefined) return await new Promise<never>(() => {});
+		throw new Error(`Timed out while waiting for transaction with hash "${params.hash}" to be confirmed.`);
+	};
+}
 
 mock.module("@/lib/trade/actions", () => ({
 	quoteTicket: (input: { side: string; budgetInput: string }) => {

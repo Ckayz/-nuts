@@ -14,7 +14,7 @@ import { FillDialog } from "@/components/market/fill-dialog";
 import { clearHeldFill, readHeldFill, sessionFillStore, writeHeldFill } from "@/lib/trade/held-fill";
 // C-R2 / C-R3: the same two helpers the agent's execution card uses, so the
 // manual ticket and the agent card are fenced by ONE implementation.
-import { approvalMatches, fillIsStale } from "@/lib/trade/approval";
+import { approvalMatches, APPROVAL_RECEIPT_TIMEOUT_MS, fillIsStale } from "@/lib/trade/approval";
 import { formatBaseUnits } from "@/lib/market/units";
 import type {
 	FillCard,
@@ -269,6 +269,14 @@ export const TICKET_CHANGED_MESSAGE =
  *
  * TODO-OWNER: wording.
  */
+/**
+ * M5. What the ticket says when it stops waiting for an approval to be mined.
+ * It must NOT claim the approval failed — it may still land — and it must say
+ * that pressing again is safe. TODO-OWNER: wording.
+ */
+export const APPROVAL_NOT_CONFIRMED_MESSAGE =
+	"Your approval has not confirmed on Base yet, so nothing was filled. Nothing else was sent. Press Trade again once it confirms.";
+
 export const TOO_OLD_TO_SEND_MESSAGE =
 	"This trade could not be refreshed inside the 30 seconds a fill has to reach Base, so nothing was sent. Press Trade again.";
 
@@ -661,10 +669,26 @@ export function TakeASide({
 					// simulated. Preparation used to continue on the approval HASH,
 					// which is only a broadcast: the refetch below then read an
 					// allowance that did not exist yet.
-					const approvalReceipt = await waitForTransactionReceipt(config, {
-						hash: approvalHash,
-						chainId: trade.chainId,
-					});
+					//
+					// M5. Bounded, and its failure has its own branch: an approval
+					// that never mines used to leave this button reading "Approving…",
+					// disabled, with no sentence at all. Any failure of the WAIT — a
+					// timeout, an unreachable RPC — means the same thing to the user
+					// (we do not know whether the allowance landed), so they are all
+					// answered the same way. Nothing is sent here; the next press
+					// re-prepares against the allowance that is actually on chain.
+					let approvalReceipt: { status: string };
+					try {
+						approvalReceipt = await waitForTransactionReceipt(config, {
+							hash: approvalHash,
+							chainId: trade.chainId,
+							timeout: APPROVAL_RECEIPT_TIMEOUT_MS,
+						});
+					} catch {
+						setPhase("failed");
+						setMessage(APPROVAL_NOT_CONFIRMED_MESSAGE);
+						return;
+					}
 					if (approvalReceipt.status !== "success") {
 						setPhase("failed");
 						setMessage("The approval did not succeed on Base, so nothing was filled.");

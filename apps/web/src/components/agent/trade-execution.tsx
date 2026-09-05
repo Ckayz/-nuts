@@ -12,7 +12,7 @@ import { TodoOwner } from "@/components/primitives";
 import { prepareAgentTrade } from "@/lib/agent/actions";
 import { recordTrade } from "@/lib/trade/actions";
 import { clearHeldFill, type HeldFill, readHeldFill, sessionFillStore, writeHeldFill } from "@/lib/trade/held-fill";
-import { approvalMatches, fillIsStale } from "@/lib/trade/approval";
+import { approvalMatches, APPROVAL_RECEIPT_TIMEOUT_MS, fillIsStale } from "@/lib/trade/approval";
 import { formatBaseUnits, formatUsd8 } from "@/lib/market/units";
 import { sameEconomics, sendGuard } from "@/components/market/take-a-side";
 import type { QuoteRaw } from "@/lib/trade/types";
@@ -166,6 +166,13 @@ const COPY = {
 		"This approval does not say what it would allow, so it was not sent. Ask the agent for a fresh quote.",
 	/** TODO-OWNER: the approval transaction did not succeed. */
 	approvalFailed: "The approval did not succeed on Base, so nothing was filled.",
+	/**
+	 * TODO-OWNER: M5 — the approval was broadcast and has not been mined inside
+	 * `APPROVAL_RECEIPT_TIMEOUT_MS`. It may still land, so this must not say it
+	 * failed, and it must say that pressing again is safe.
+	 */
+	approvalNotConfirmed:
+		"Your approval has not confirmed on Base yet, so nothing was filled. Nothing else was sent. Press again once it confirms.",
 	/** TODO-OWNER: C#5 — the bytes disagree with the printed allowance. */
 	approvalNotSent: "Nothing was sent.",
 	/** TODO-OWNER: C5 — the fresh quote differs from what the card showed. */
@@ -545,10 +552,21 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 					account,
 				});
 				// C4: the allowance must be ON CHAIN before the fill is built.
-				const approvalReceipt = await waitForTransactionReceipt(config, {
-					hash: approvalHash,
-					chainId: expectedChainId,
-				});
+				// M5: bounded, with its own branch — the same defect the market
+				// ticket had. An approval that never mines must not leave this card
+				// on "Confirm approval…" with no sentence. Nothing is sent here.
+				let approvalReceipt: { status: string };
+				try {
+					approvalReceipt = await waitForTransactionReceipt(config, {
+						hash: approvalHash,
+						chainId: expectedChainId,
+						timeout: APPROVAL_RECEIPT_TIMEOUT_MS,
+					});
+				} catch {
+					setPhase("error");
+					setMessage(COPY.approvalNotConfirmed);
+					return;
+				}
 				if (approvalReceipt.status !== "success") {
 					setPhase("error");
 					setMessage(COPY.approvalFailed);

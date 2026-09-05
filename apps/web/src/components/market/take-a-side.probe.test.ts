@@ -7,7 +7,7 @@
  */
 import { beforeAll, describe, expect, test } from "bun:test";
 import { deferred, mount } from "@/test/hook-runner";
-import { calls, HASH, replies, resetTradeMocks, storage, WALLET } from "@/test/trade-mocks";
+import { calls, HASH, neverLandingReceipt, replies, resetTradeMocks, storage, WALLET } from "@/test/trade-mocks";
 import type { PrepareResult, QuoteRaw, TicketQuoteView, TradePanelContext } from "@/lib/trade/types";
 import type { Ticket } from "@/lib/display-types";
 
@@ -515,5 +515,72 @@ describe("C-R3: no allowance is signed before the economics are compared", () =>
 		await h.settle();
 		expect(calls.sends).toEqual([]);
 		expect(h.text()).toContain("Nothing was sent");
+	});
+});
+
+// ------------------------------- M5: an approval that never confirms
+
+/**
+ * M5 (Opus user-flow tester, confirming round). With a wallet that returns a
+ * hash which never lands, the ticket's button stayed "Approving…" and DISABLED
+ * at t = 30 / 60 / 120 / 185 / 200 / 215 s, with no message and no way out but
+ * a reload (`final-j4-stuck-approving.png`). Reproduced here:
+ *   STUCK_APPROVING {"label":"Approving…","disabled":true,"message":false}
+ *
+ * The safety half held then and must keep holding: exactly one transaction (the
+ * approve) is ever offered, and no fill is broadcast.
+ */
+describe("M5: the ticket stops waiting for an approval and says so", () => {
+	const USDC_TOKEN = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+	const BOOK_ADDRESS = "1bdff855d6811728acadc00989e79143a2bdfded";
+	const approveFive: PrepareResult = {
+		ok: true,
+		stage: "approve",
+		approve: {
+			to: USDC_TOKEN as `0x${string}`,
+			data: `0x095ea7b3${"0".repeat(24)}${BOOK_ADDRESS}${(5_000_000).toString(16).padStart(64, "0")}` as `0x${string}`,
+			value: "0" as const,
+		},
+		allowance: {
+			amount: "5000000",
+			spender: `0x${BOOK_ADDRESS}`,
+			tokenAddress: USDC_TOKEN,
+			tokenSymbol: "USDC",
+			tokenDecimals: 6,
+		},
+		expected: RAW_BUY,
+		note: "Approve USDC first.",
+	};
+
+	test("a receipt that never arrives ends in a usable ticket with one sentence", async () => {
+		reset();
+		replies.prepare = async () => approveFive;
+		neverLandingReceipt();
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+		const button = primary(h);
+		expect({
+			label: button.text,
+			disabled: button.props.disabled === true,
+			// Exactly one transaction was ever offered: the approval.
+			sends: calls.sends.length,
+			// No fill was prepared behind it.
+			prepares: calls.prepares.length,
+			says: h.text().includes("has not confirmed on Base yet"),
+			// It must NOT claim the approval failed - it may still land.
+			claimsFailure: h.text().includes("did not succeed"),
+		}).toEqual({ label: "Trade", disabled: false, sends: 1, prepares: 1, says: true, claimsFailure: false });
+	});
+
+	test("a REVERTED approval still reads as a failure, not as a timeout", async () => {
+		reset();
+		replies.prepare = async () => approveFive;
+		replies.receiptStatus = "reverted";
+		const h = mountTicket();
+		h.click(primary(h));
+		await h.settle();
+		expect(h.text()).toContain("The approval did not succeed on Base");
+		expect(calls.sends.length).toBe(1);
 	});
 });

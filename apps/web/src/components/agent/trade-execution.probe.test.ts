@@ -6,7 +6,7 @@
  */
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mount, type Mounted } from "@/test/hook-runner";
-import { calls, HASH, replies, resetTradeMocks, USDC, WALLET } from "@/test/trade-mocks";
+import { calls, HASH, neverLandingReceipt, replies, resetTradeMocks, USDC, WALLET } from "@/test/trade-mocks";
 import type { QuoteRaw } from "@/lib/trade/types";
 import type { PreparedTrade } from "./trade-execution";
 
@@ -469,5 +469,38 @@ describe("C-R1: a second mounted card must not send a second fill", () => {
 			prepares: 0,
 			sends: ["0xFILL"],
 		});
+	});
+});
+
+/**
+ * M5. The agent card carried the same unbounded approval wait as the market
+ * ticket. Reproduced with the same harness:
+ *   AGENT_STUCK {"label":"Confirm approval\u2026","disabled":true}
+ */
+describe("M5: the agent card stops waiting for an approval and says so", () => {
+	test("a receipt that never arrives ends in a usable card with one sentence", async () => {
+		reset();
+		neverLandingReceipt();
+		const h = mount(TradeExecution, { trade: approveTrade() });
+		press(h);
+		await h.settle();
+		const button = primary(h);
+		expect({
+			disabled: button.props.disabled === true,
+			sends: calls.sends.length,
+			prepares: calls.agentPrepares,
+			says: h.text().includes("has not confirmed on Base yet"),
+			claimsFailure: h.text().includes("did not succeed"),
+		}).toEqual({ disabled: false, sends: 1, prepares: 0, says: true, claimsFailure: false });
+	});
+
+	test("a REVERTED approval still reads as a failure", async () => {
+		reset();
+		replies.receiptStatus = "reverted";
+		const h = mount(TradeExecution, { trade: approveTrade() });
+		press(h);
+		await h.settle();
+		expect(h.text()).toContain("The approval did not succeed on Base");
+		expect(calls.sends.length).toBe(1);
 	});
 });

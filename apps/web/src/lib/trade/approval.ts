@@ -108,3 +108,30 @@ export function fillIsStale(preparedAt: string | undefined, now: number): boolea
 	if (at > now) return true;
 	return now - at > MAX_FILL_AGE_MS;
 }
+
+/**
+ * M5 (Opus user-flow tester, confirming round). How long either wallet path
+ * waits for an APPROVAL to be mined before it stops waiting and says so.
+ *
+ * Measured on the shipped build: neither `components/market/take-a-side.tsx` nor
+ * `components/agent/trade-execution.tsx` passed a `timeout`, and the tester's
+ * wallet — one that returns a hash which never lands — left the ticket's button
+ * reading "Approving…", disabled, with no message and no way out but a reload,
+ * at t = 30 / 60 / 120 / 185 / 200 / 215 s (`final-j4-stuck-approving.png`).
+ *
+ * NOT VERIFIED, stated plainly: viem's own default is `timeout = 180_000` and it
+ * rejects with `WaitForTransactionReceiptTimeoutError`
+ * (`viem/_esm/actions/public/waitForTransactionReceipt.js:53,73`, read at
+ * viem@2.56.3), so the wait was not literally unbounded at the bytes. I could
+ * not reproduce the tester's 215 s in a browser and do not know which part of
+ * that path swallowed the rejection. What IS reproduced here, in the component
+ * harness, is the state the user is left in while it waits: a disabled button
+ * with no sentence.
+ *
+ * TODO-OWNER: the number. 90 seconds is HALF viem's own default and is this
+ * file's choice, not the owner's and not the PRD's — nothing in `docs/PRD.md`
+ * sets a confirmation-wait budget. It is a display bound only: the wallet keeps
+ * the transaction, the allowance still lands if it lands, and pressing the
+ * button again re-prepares against the on-chain allowance.
+ */
+export const APPROVAL_RECEIPT_TIMEOUT_MS = 90_000;

@@ -456,3 +456,118 @@ test("the farm's shared opening collapses even when the tails differ", () => {
 	const b = "Unlock the power of crypto options! Understand the Greeks. $BTC 23%";
 	expect(dedupeKey(a)).toBe(dedupeKey(b));
 });
+
+// ── several queries, one rail ───────────────────────────────────────────────
+
+import { searchQueriesFor } from "./casts";
+
+test("each query names ONE asset and carries exactly two terms", () => {
+	// MEASURED 2026-09-06: hybrid mode ANDs its terms. `BTC ETH volatility`
+	// returns ZERO casts, and so does any third term. This is the guard.
+	const queries = searchQueriesFor(["BTC", "ETH"], new Date("2026-09-06T00:00:00.000Z"));
+	expect(queries).toEqual([
+		"BTC volatility after:2026-07-23",
+		"BTC price after:2026-07-23",
+		"ETH volatility after:2026-07-23",
+		"ETH price after:2026-07-23",
+	]);
+	for (const query of queries) {
+		expect(query.replace(/ after:.*$/, "").split(" ")).toHaveLength(2);
+	}
+});
+
+test("an empty asset list falls back to the generic query, never to no query", () => {
+	// The book being unreadable, or mock mode having no book, is not a reason
+	// for the rail to go blank.
+	expect(searchQueriesFor([], new Date("2026-09-06T00:00:00.000Z"))).toEqual([
+		"implied volatility after:2026-07-23",
+	]);
+	expect(searchQueriesFor(["   ", ""], new Date("2026-09-06T00:00:00.000Z"))).toHaveLength(1);
+});
+
+test("dedupe and one-per-author apply ACROSS queries, not within each", () => {
+	// `BTC price` and `BTC volatility` overlap heavily; filtering each page on
+	// its own would let the same cast and the same author through twice.
+	const shared = cast();
+	const key = "test-key";
+	let calls = 0;
+	const both = (async () => {
+		calls += 1;
+		return new Response(JSON.stringify({ result: { casts: [shared], next: { cursor: null } } }), {
+			status: 200,
+			headers: { "content-type": "application/json" },
+		});
+	}) as unknown as typeof fetch;
+	return loadFarcasterRail(key, {
+		assets: ["BTC"],
+		now: new Date("2026-09-06T02:00:00.000Z"),
+		fetchImpl: both,
+	}).then((state) => {
+		expect(calls).toBe(2); // one per term
+		expect(state.status).toBe("ready");
+		if (state.status !== "ready") throw new Error(state.status);
+		expect(state.casts).toHaveLength(1); // not two
+	});
+});
+
+test("one failing query still yields the other's casts", async () => {
+	let n = 0;
+	const flaky = (async () => {
+		n += 1;
+		if (n === 1) throw new Error("network down");
+		return new Response(JSON.stringify({ result: { casts: [cast()], next: { cursor: null } } }), {
+			status: 200,
+			headers: { "content-type": "application/json" },
+		});
+	}) as unknown as typeof fetch;
+	const state = await loadFarcasterRail("k", {
+		assets: ["BTC"],
+		now: new Date("2026-09-06T02:00:00.000Z"),
+		fetchImpl: flaky,
+	});
+	// A partial answer is still a true one.
+	expect(state.status).toBe("ready");
+	if (state.status !== "ready") throw new Error(state.status);
+	expect(state.casts).toHaveLength(1);
+});
+
+test("only when EVERY query fails is the feed unreadable", async () => {
+	const dead = (async () => {
+		throw new Error("network down");
+	}) as unknown as typeof fetch;
+	const state = await loadFarcasterRail("k", {
+		assets: ["BTC"],
+		now: new Date("2026-09-06T02:00:00.000Z"),
+		fetchImpl: dead,
+	});
+	expect(state.status).toBe("unavailable");
+});
+
+// ── merging several pages ───────────────────────────────────────────────────
+
+import { interleavePages } from "./casts";
+
+test("pages are round-robined, so a second market is not starved", () => {
+	// MEASURED 2026-09-06: concatenating filled all five rail slots with BTC and
+	// left ETH — a third of the live book — with none.
+	const btc = [0, 1, 2, 3, 4].map((i) => railCast({ hash: `0xbtc${i}`, username: `btc${i}` }));
+	const eth = [0, 1].map((i) => railCast({ hash: `0xeth${i}`, username: `eth${i}` }));
+	expect(interleavePages([btc, eth]).map((c) => c.hash)).toEqual([
+		"0xbtc0", "0xeth0", "0xbtc1", "0xeth1", "0xbtc2", "0xbtc3", "0xbtc4",
+	]);
+});
+
+test("a cast returned by two queries takes one position, not two", () => {
+	const shared = railCast({ hash: "0xsame", username: "both" });
+	const merged = interleavePages([[shared], [shared]]);
+	expect(merged).toHaveLength(1);
+});
+
+test("a short page yields its turn rather than holding a slot", () => {
+	// No per-asset quota: an asset with nothing worth showing does not reserve a
+	// row for a worse cast.
+	const merged = interleavePages([[railCast({ hash: "0xa", username: "a" })], [], [railCast({ hash: "0xb", username: "b" })]]);
+	expect(merged.map((c) => c.hash)).toEqual(["0xa", "0xb"]);
+	expect(interleavePages([])).toEqual([]);
+	expect(interleavePages([[], []])).toEqual([]);
+});

@@ -171,10 +171,11 @@ export interface ThesisDetail {
     shareHeadline: string;
     /** Expiry as rendered in the hero, e.g. "11 Sep 26 08:00 UTC"; null with no market. */
     expiryLabel: string | null;
-    settlementLabel: string;
+    /** Null when no settlement wording is available; the database holds none. */
+    settlementLabel: string | null;
     launchedLabel: string;
     spotUsd: DisplayAmount;
-    /** Spot change as rendered, e.g. "+1.65%"; null when there is no market. */
+    /** Spot change as rendered, e.g. "+1.65%"; null with no market or spot series. */
     spotChangeLabel: string | null;
     maxPayoutUsd: DisplayAmount;
     breakEvenUsd: DisplayAmount;

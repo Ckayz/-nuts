@@ -76,7 +76,12 @@ export type Creator = ThesisAiContext["creator"] & {
 export interface SideStats {
     pct: number;
     count: number;
-    amountUsd: string;
+    /**
+     * Null means the total is unavailable, not zero: a source row that is not a
+     * plain decimal (a `numeric` column can legally hold `NaN`) degrades to "—"
+     * rather than claiming a figure. Never negative.
+     */
+    amountUsd: string | null;
     signed: boolean;
 }
 /** The tradable structure a post names. Optional: a post may be text only. */
@@ -114,15 +119,32 @@ export interface Thesis {
     slug: string;
     creatorUserId: string;
     creator: Creator;
-    thesis: ThesisAiContext["thesis"];
+    /**
+     * `direction` is null when the post names no structure: DB round 7 keeps the
+     * whole structure group (direction included) null-or-complete, so nothing is
+     * invented for a pure text opinion. `ThesisAiContext.thesis` above keeps its
+     * required `direction`; only a structured post can fill the shared contract.
+     */
+    thesis: Omit<ThesisAiContext["thesis"], "direction"> & {
+        direction: ThesisDirection | null;
+    };
     /**
      * Snapshot instant every relative label on this post is measured from. It
      * supplies `ThesisAiContext.market.dataAsOf`, so the shared contract keeps
      * exactly the fields PRD §10.3 lists and there is one source of truth here.
      */
     dataAsOf: string;
-    /** Null for a pure text opinion: the post names no market. */
-    market: Omit<ThesisAiContext["market"], "dataAsOf"> | null;
+    /**
+     * Null for a pure text opinion: the post names no market.
+     *
+     * `expiryAt` is null when the post tags a market but names no structure —
+     * the state DB round 7 allows (`tagged_asset` set, every structure column
+     * null). Only a fully structured post can fill `ThesisAiContext.market`,
+     * whose own `expiryAt` stays required.
+     */
+    market: (Omit<ThesisAiContext["market"], "dataAsOf" | "expiryAt"> & {
+        expiryAt: string | null;
+    }) | null;
     /** Null when the post names no tradable structure. */
     structure: ThesisStructure | null;
     /** Null when the creator has not filled a position behind this post. */
@@ -196,7 +218,9 @@ export interface ThesisDetail {
     thesis: Thesis;
     shareUrl: string;
     shareHeadline: string;
-    settlementLabel: string;
+    /** Null when no settlement wording is available for this thesis. */
+    settlementLabel: string | null;
+    /** Null when no spot series is available; the database holds no price feed. */
     spotChangePct: string | null;
     participants: Participant[];
     comments: Comment[];

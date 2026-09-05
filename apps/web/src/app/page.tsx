@@ -3,14 +3,10 @@ import { NewCalloutsBar } from "@/components/feed/new-callouts-bar";
 import { PositionList, TrendingList } from "@/components/feed/thesis-list";
 import { Leaderboard } from "@/components/creator/leaderboard";
 import { Pill, TodoOwner } from "@/components/primitives";
-import {
-	leaderboard,
-	theses,
-	trending,
-	yourPositions,
-} from "@/lib/view-data";
+import { discoverData } from "@/lib/page-data";
 
-export default function DiscoverPage() {
+export default async function DiscoverPage() {
+	const { leaderboard, theses, trending, yourPositions } = await discoverData();
 	return (
 		<div className="work">
 			<aside className="col l">

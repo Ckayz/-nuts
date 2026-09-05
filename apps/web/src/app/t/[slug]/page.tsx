@@ -12,16 +12,25 @@ import { SharePanel } from "@/components/thesis/share-panel";
 import { SpotChart } from "@/components/thesis/spot-chart";
 import { ThesisTabs } from "@/components/thesis/thesis-tabs";
 import { signedUsd, usd } from "@/lib/format";
-import { thesisDetails, thesisDetailBySlug } from "@/lib/view-data";
+import { thesisDetailData } from "@/lib/page-data";
 
 /**
  * The post thread. Owner 2026-09-05: a thesis is a post, so this page shows the
  * post, what it names, whether the creator backed it, and the replies. There is
  * no ticket here — the right rail links to the market page instead.
  */
-export function generateStaticParams() {
-	return thesisDetails.map((d) => ({ slug: d.thesis.slug }));
-}
+/**
+ * Rendered per request, never from a build-time cache.
+ *
+ * In `DATA_SOURCE=db` the rows behind this page change after the build: new
+ * comments and participants arrive, and a thesis first requested while it is a
+ * `draft` 404s — a cached 404 would then outlive publication and the page would
+ * never appear. Segment config has to be a static string (Next refuses a
+ * computed one), so this applies in mock mode too, where it costs a render of
+ * fixtures that cannot change. A `revalidate` interval would be an owner's
+ * number and is deliberately not used.
+ */
+export const dynamic = "force-dynamic";
 
 export default async function ThesisPage({
 	params,
@@ -29,7 +38,7 @@ export default async function ThesisPage({
 	params: Promise<{ slug: string }>;
 }) {
 	const { slug } = await params;
-	const detail = thesisDetailBySlug(slug);
+	const detail = await thesisDetailData(slug);
 	if (!detail) notFound();
 	const t = detail.thesis;
 	const backing = t.backing;
@@ -89,8 +98,12 @@ export default async function ThesisPage({
 									</span>
 								</>
 							) : null}
-							<span>·</span>
-							<span>{detail.settlementLabel}</span>
+							{detail.settlementLabel !== null ? (
+								<>
+									<span>·</span>
+									<span>{detail.settlementLabel}</span>
+								</>
+							) : null}
 							<button
 								type="button"
 								className="acts ai"

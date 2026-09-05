@@ -106,12 +106,14 @@ export function thesis(value: Domain.Thesis): View.Thesis {
     if (settled) {
         status = "settled";
         statusLabel = `SETTLED · ${value.backing?.mock.settledWinner?.toUpperCase() ?? "—"} WON`;
-    } else if (value.market !== null) {
+    } else if (value.market !== null && value.market.expiryAt !== null) {
         status = value.endingSoon ? "ending" : "live";
         const hours = Math.max(0, Math.floor((Date.parse(value.market.expiryAt) - Date.parse(value.dataAsOf)) / 3600000));
         statusLabel = `${status.toUpperCase()} · ${Math.floor(hours / 24)}d ${String(hours % 24).padStart(2, "0")}h`;
     }
-    const struct = value.structure === null || value.market === null ? null : structure(value.structure, value.market.expiryAt);
+    // A structure always carries its own expiry (the database keeps the whole
+    // structure group null-or-complete), so no expiry means no structure chip.
+    const struct = value.structure === null || value.market === null || value.market.expiryAt === null ? null : structure(value.structure, value.market.expiryAt);
     return { id: value.id, slug: value.slug, headline: value.thesis.headline, note: value.thesis.rationale,
         asset: value.market?.underlyingAsset ?? null, creator: creator(value.creator), status, statusLabel,
         postedLabel: settled ? `· settled ${value.backing?.mock.settledAgoMinutes ?? "—"}m` : `· ${elapsed(value.thesis.createdAt, value.dataAsOf)}`,
@@ -134,7 +136,7 @@ export function ticket(value: Domain.Ticket): View.Ticket {
 export function detail(value: Domain.ThesisDetail): View.ThesisDetail {
     const back = value.thesis.backing;
     return { thesis: thesis(value.thesis), shareUrl: value.shareUrl, shareHeadline: value.shareHeadline,
-        expiryLabel: value.thesis.market === null ? null : expiryLabel(value.thesis.market.expiryAt, true),
+        expiryLabel: value.thesis.market?.expiryAt == null ? null : expiryLabel(value.thesis.market.expiryAt, true),
         settlementLabel: value.settlementLabel, launchedLabel: `launched ${elapsed(value.thesis.thesis.createdAt, value.thesis.dataAsOf)} ago`,
         spotUsd: amount(value.thesis.market?.currentSpotPriceUsd ?? null),
         spotChangeLabel: value.spotChangePct === null ? null : pctLabel(value.spotChangePct),

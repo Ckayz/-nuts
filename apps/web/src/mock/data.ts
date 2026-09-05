@@ -1,15 +1,22 @@
 // Base mainnet chainId 8453 is pinned by docs/PRD.md §10.3 (not a mockup number).
 // EXAMPLE DATA: financial values and copy transcribed from docs/mockups/thesis-fun-mockup.html.
-// TODO-OWNER: IDs prefixed mock-, non-BTC slugs and the wh handle are fixture identifiers, not DB IDs.
-// TODO-OWNER: no full wallet/transaction/option addresses are supplied. Empty required wallet strings
+// IDs prefixed mock-, non-BTC slugs and the wh handle are fixture identifiers, not DB IDs.
+// No full wallet/transaction/option addresses are supplied. Empty required wallet strings
 // are incomplete fixtures; fragments are presentation evidence only. Never validate these as onchain contexts.
-// TODO-OWNER: ISO dataAsOf/createdAt are reconstructed solely to reproduce mockup relative labels.
+// ISO dataAsOf/createdAt are reconstructed solely to reproduce mockup relative labels.
 // Non-BTC expiry times reuse the mockup's 08:00 UTC; position timestamps/lifecycle are illustrative.
-// TODO-OWNER: endingSoon flags reproduce chips, not an approved time window. Unknown contracts,
-// collateralSymbol and pooledUsd remain null; unknown economics remain null, never zero.
+// Null provenance: rationale has no copy in the mockup; settledAgoMinutes/settledWinner
+// are null before settlement; soldStructure and activity side are not applicable to those rows.
+// Missing creator identity/statistics (displayName, mockWalletFragment, sinceLabel, winRatePct,
+// thesesCount, followers, netPnlUsd, verifiedPnl30dUsd, creatorPayoutsUsd, biggestLossUsd),
+// contracts, collateralSymbol, pooledUsd, currentSpotPriceUsd, entrySpotPriceUsd and economics
+// remain null where the mockup supplies no value. This includes entryPremiumUsd, entryFeesUsd,
+// maximumPayoutUsd, estimatedPnlUsd, finalPnlUsd and settlementPriceUsd; never substitute zero.
+// Missing maxPayoutMultiple, premiumPerContractUsd, payoutPerContractUsd, transactionFragment,
+// mockTransactionFragment, transactionHash and optionAddress likewise remain null.
+// TODO-OWNER: endingSoon flags reproduce chips, not an approved time window.
 // TODO-OWNER: fixture directions follow headlines; only BTC direction is explicitly owner-specified.
 // TODO-OWNER: preset amounts reproduce the mockup, not approved product defaults.
-// TODO-OWNER: sinceLabel and followers remain null where the mockup supplies no value.
 // Creator rates, ranking, trending, remaining thesis details and connected-user identity stay TODO-OWNER.
 import type { Creator, Thesis, Position, ThesisDetail, TrendingItem } from "@/types";
 export const merkleMike: Creator = {
@@ -910,9 +917,7 @@ export const btcNfpDetail: ThesisDetail = {
         "orderLabel": "78000/74000-PS",
         "contracts": "0.0031",
         "maximumPayoutUsd": "1153",
-        "breakEvenPricesUsd": [
-            "76090"
-        ],
+        "breakEvenPricesUsd": btcNfp.economics.breakEvenPricesUsd,
         "liquidityLeftUsd": "41200"
     }
 };

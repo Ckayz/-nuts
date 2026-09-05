@@ -16,7 +16,7 @@
     [hidden]{display:none!important}
     .todo{display:inline-block;font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:9.5px;letter-spacing:.06em;color:#ff6fb5;border:1px dashed #ff6fb5;border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:middle}
     .note{font-size:11.5px;color:var(--tn-m);line-height:1.4}
-  
+
     /* ===== shell: icon rail + header + ticker + 3 columns + footer ===== */
     .app{min-height:100vh;display:grid;grid-template-columns:64px 1fr;grid-template-rows:56px 38px 1fr 30px}
     .nav{grid-row:1/5;border-right:1px solid var(--tn-l);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:6px;background:var(--tn-g)}
@@ -60,7 +60,7 @@
     .h2 .alt{color:var(--tn-m);font-weight:600;margin-left:12px}
     .foot{grid-column:2;display:flex;align-items:center;gap:24px;padding:0 18px;border-top:1px solid var(--tn-l);font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--tn-m);white-space:nowrap;overflow:hidden}
     .foot b{color:var(--tn-k);font-weight:500} .foot .src{margin-left:auto;color:var(--tn-dim)}
-  
+
     /* ===== lists ===== */
     .av{width:28px;height:28px;border-radius:50%;background:var(--tn-s2);border:1px solid var(--tn-l2);display:grid;place-items:center;font-size:10px;font-weight:600;color:var(--tn-m);flex:none}
     .av.s{width:20px;height:20px;font-size:9px}
@@ -82,7 +82,7 @@
     .tabs button{padding:8px 12px;color:var(--tn-m);font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px}
     .tabs button[aria-selected="true"]{color:var(--tn-k);border-bottom-color:var(--tn-acc)}
     .tabs .count{font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--tn-dim);margin-left:6px;font-weight:400}
-  
+
     /* ===== callout post ===== */
     .newbar{display:flex;align-items:center;justify-content:center;gap:10px;background:var(--tn-s);border:1px solid var(--tn-l);border-radius:10px;padding:8px 12px;font-size:12px;color:var(--tn-m);cursor:pointer}
     .newbar .st{display:flex} .newbar .st .av{margin-left:-7px;border:2px solid var(--tn-s)} .newbar .st .av:first-child{margin-left:0}
@@ -126,7 +126,7 @@
     .acts .ai:hover{border-color:var(--tn-acc);background:var(--tn-acc-soft);color:var(--tn-k)}
     .earn{font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--tn-m)}
     .earn b{color:var(--tn-k);font-weight:500} .earn::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--tn-acc);margin-right:6px;vertical-align:middle}
-  
+
     /* ===== right rail: theses list ===== */
     .tl{display:flex;flex-direction:column}
     .tl .it{display:grid;grid-template-columns:44px 1fr;gap:10px;padding:9px 0;border-bottom:1px solid var(--tn-l);align-items:start}
@@ -137,7 +137,7 @@
     .tl .b .n{font-family:var(--tn-disp);font-weight:700;font-size:13.5px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .tl .b .d{font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--tn-m);display:flex;gap:10px}
     .tl .bar{height:4px}
-  
+
     /* ===== side panels (thesis page) ===== */
     .panel{background:var(--tn-s);border:1px solid var(--tn-l);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:11px}
     .panel h3{margin:0;font-family:var(--tn-disp);font-weight:800;font-size:16px;letter-spacing:-.01em}
@@ -155,7 +155,7 @@
     .kv dt{color:var(--tn-m);margin:0} .kv dd{margin:0;text-align:right;font-family:var(--tn-mono);font-variant-numeric:tabular-nums;color:var(--tn-k)}
     .kv .big{font-size:16px;font-weight:600}
     .share{border:1px solid var(--tn-l2);background:var(--tn-g);border-radius:10px;padding:12px}
-  
+
     /* ===== thesis page ===== */
     .hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:end;padding-bottom:16px;border-bottom:1px solid var(--tn-l)}
     .hero .h{font-size:36px;line-height:1.04}

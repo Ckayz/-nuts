@@ -19,7 +19,6 @@ export const marketPrices = data.marketPrices.map(display.price);
 export const marketsSource = data.marketsSource;
 export const footerSource = data.footerSource;
 export function creatorByHandle(handle: string) { return allCreators.find(c => c.handle === handle); }
-export function thesisBySlug(slug: string) { return theses.find(t => t.slug === slug); }
 export function thesisDetailBySlug(slug: string) { return thesisDetails.find(d => d.thesis.slug === slug); }
 export function thesesByCreator(handle: string) { return theses.filter(t => t.creator.handle === handle); }
 export function participantsByCreator(handle: string) { return thesisDetails.flatMap(d => d.participants.filter(p => p.creator.handle === handle)); }

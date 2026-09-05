@@ -92,3 +92,26 @@ test("no raw HTML is ever rendered, whatever the model writes", () => {
 	expect(html).not.toContain("<img");
 	expect(html).not.toContain("<script");
 });
+
+/**
+ * D-minor (lane D pass 2). A model reply owns no heading.
+ *
+ * `/m/<asset>` renders the page's only `<h1>` and the agent panel beside it
+ * renders an `<h2>` (`agent-heading.test.tsx`). A reply beginning "# BTC" put a
+ * SECOND `<h1>` on that page — measured by the reviewer as `page {"h1":2}` —
+ * undoing that fold from inside the conversation. Measured here before the fix:
+ *
+ *   "# BTC\n\nA market reply." -> <div class="agent-md"><h1>BTC</h1>...
+ */
+test("D-minor: no heading level a model writes reaches the document outline", () => {
+	for (const [hashes, text] of [["#", "BTC"], ["##", "Sub"], ["###", "Three"], ["####", "Four"]] as const) {
+		const html = render(`${hashes} ${text}\n\nA market reply.`);
+		expect(html, hashes).not.toMatch(/<h[1-6][\s>]/);
+		// The words are still shown, emphasised, as their own block.
+		expect(html, hashes).toContain(`<p class="agent-md-heading"><strong>${text}</strong></p>`);
+	}
+});
+
+test("D-minor: a market path inside a heading is still linked", () => {
+	expect(render("## Sub /m/btc")).toContain('<a class="agent-md-link" href="/m/btc">/m/btc</a>');
+});

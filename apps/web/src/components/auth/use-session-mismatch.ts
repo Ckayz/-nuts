@@ -38,6 +38,19 @@ export function accountMismatch(
 }
 
 /**
+ * What one sign-out attempt is FOR: this session, contradicted by this account.
+ *
+ * B-R2 (lane B pass 2). The guard used to remember only the connected address,
+ * so a DIFFERENT signed-in session under the same connected wallet — sign in as
+ * A while connected to B, the sign-out fires; sign in as C, still connected to
+ * B — matched the old mark and was never signed out (measured:
+ * `NEW_SESSION_SAME_ADDRESS 1`). Both halves identify the work.
+ */
+export function mismatchKey(sessionWallet: string | null, address: string): string {
+	return `${(sessionWallet ?? "").toLowerCase()}->${address.toLowerCase()}`;
+}
+
+/**
  * The effect body, extracted so it can be exercised without a DOM.
  *
  * `handled` is written BEFORE the await, so re-renders during the in-flight
@@ -58,26 +71,28 @@ export function accountMismatch(
  * branch, and the branch does no work.
  *
  * A FAILED sign-out clears `handled` too, so the NEXT run of this function
- * retries instead of pretending the session was cleared. At hook level that
- * next run needs the effect to fire again — its deps are `[mismatched,
- * address]` — so the retry happens on the next account or mismatch change, not
- * on an arbitrary re-render. `use-session-mismatch.test.ts` pins both.
+ * retries instead of pretending the session was cleared. B-R2: at hook level
+ * that next run used to need `[mismatched, address]` to change, so a network
+ * failure left the old identity usable until the person switched accounts
+ * again. The hook below now runs this on every render while unresolved.
  */
 export async function syncSessionToAccount(input: {
 	mismatched: boolean;
+	sessionWallet: string | null;
 	address: string | undefined;
 	handled: { current: string | null };
 	signOut: () => Promise<void>;
 	onSignedOut: () => void;
 }): Promise<void> {
-	const { mismatched, address, handled } = input;
+	const { mismatched, sessionWallet, address, handled } = input;
 	if (!mismatched) {
 		handled.current = null;
 		return;
 	}
 	if (address === undefined) return;
-	if (handled.current === address) return;
-	handled.current = address;
+	const key = mismatchKey(sessionWallet, address);
+	if (handled.current === key) return;
+	handled.current = key;
 	try {
 		await input.signOut();
 	} catch {
@@ -113,14 +128,32 @@ export function useSessionMismatch(
 	signedOut.current = onSignedOut;
 	const signOutRef = useRef(signOut);
 	signOutRef.current = signOut;
+	// B-R2: NO dependency array. The deps used to be `[mismatched, address]`, so
+	// a sign-out that failed (offline, a 500) was retried only if the person
+	// switched accounts again — the old identity stayed usable for likes,
+	// comments and follows indefinitely. Running on every render covers both
+	// gaps the reviewer measured: a later render after the network recovers, and
+	// a NEW mismatched session under the same connected address (the session
+	// wallet is part of `mismatchKey`, so that case is a different unit of work
+	// rather than a dependency-array entry).
+	//
+	// Why this is bounded and cannot spin: the failure path sets no state, so it
+	// never schedules the render that would run it again — at most ONE attempt
+	// per render, and renders come from elsewhere. `handled` is written BEFORE
+	// the await, so concurrent renders cannot overlap two attempts. On success
+	// `onSignedOut` renders once, after which `mismatched` is false and the body
+	// only clears the mark. TODO-OWNER: whether a persistently failing sign-out
+	// should back off or surface a retry button is the owner's call; no delay or
+	// attempt ceiling is invented here.
 	useEffect(() => {
 		void syncSessionToAccount({
 			mismatched,
+			sessionWallet,
 			address,
 			handled,
 			signOut: () => signOutRef.current(),
 			onSignedOut: () => signedOut.current(),
 		});
-	}, [mismatched, address]);
+	});
 	return mismatched;
 }

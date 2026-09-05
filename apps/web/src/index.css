@@ -216,7 +216,16 @@ em{font-style:normal}
 .post > a:first-child{flex:none;line-height:0}
 .post-main{min-width:0;flex:1;display:flex;flex-direction:column;gap:10px}
 .p-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;line-height:1.2}
-.p-name{font-size:15px;font-weight:700;letter-spacing:-.01em}
+/* D-minor (lane D pass 2): the SAME long-token rule `.p-handle,.p-time` above
+   already carry, on the two places a person's own words land in a post. A
+   display name or headline with no space in it — 400 `W`s in the reviewer's
+   probe — pushed the whole document sideways (measured in a headless browser
+   at 390px on a db-mode feed: documentElement.scrollWidth 5869 before, 390
+   after; `.post` scrollWidth 5855 against clientWidth 362). `min-width:0`
+   because a flex item's automatic minimum is its min-content width, and
+   `.p-name` is an item of the `.p-head` row. No content limit is invented
+   here: what a person may type is the owner's number. */
+.p-name{font-size:15px;font-weight:700;letter-spacing:-.01em;min-width:0;overflow-wrap:anywhere}
 .p-name:hover{color:var(--accent-lift)}
 /* Adaptation: a user who has not set a handle is routed by their WALLET ADDRESS
    (lib/data/identity.ts `creatorHandle`), so `@0x…` is a 43-character unbreakable
@@ -225,7 +234,7 @@ em{font-style:normal}
    before, 390 after). `min-width:0` because a flex item's automatic minimum is
    its min-content width. */
 .p-handle,.p-time{font-size:13px;color:var(--muted);font-weight:500;min-width:0;overflow-wrap:anywhere}
-.p-body{font-size:16px;line-height:1.5;max-width:62ch;font-weight:400}
+.p-body{font-size:16px;line-height:1.5;max-width:62ch;font-weight:400;min-width:0;overflow-wrap:anywhere}
 .p-body .second{display:block;margin-top:8px;color:#c9c9d4}
 .p-acts{display:flex;align-items:center;gap:4px;margin-top:2px;flex-wrap:wrap}
 .act{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px;border-radius:var(--r-chip);
@@ -324,7 +333,9 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 .frame{background:var(--accent);border-radius:var(--r-frame);padding:18px 18px 14px}
 .sc{background:#0a0a0f;border-radius:var(--r-card);padding:20px 22px 18px}
 .sc-top{display:flex;align-items:center;gap:12px}
-.sc-name{font-size:19px;font-weight:800;letter-spacing:-.02em}
+/* Same rule, on the share card's owner name: `.sc-top` is a flex row and the
+   card is the post's, the position page's and the dialog's hero. */
+.sc-name{font-size:19px;font-weight:800;letter-spacing:-.02em;min-width:0;overflow-wrap:anywhere}
 .sc-date{margin-left:auto;font-size:13px;color:var(--muted);font-weight:500}
 .sc-inst{margin-top:22px;display:flex;align-items:center;gap:10px}
 .sc-inst b{font-size:16px;font-weight:700;letter-spacing:-.01em}

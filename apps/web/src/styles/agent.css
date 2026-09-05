@@ -16,10 +16,16 @@
 .agent-md em{font-style:italic}
 
 /* The model writes headings because it was given a markdown prompt; they are
-   sized down to a label rather than competing with the page's own headings. */
-.agent-md h1,.agent-md h2,.agent-md h3,.agent-md h4{
+   sized down to a label rather than competing with the page's own headings.
+   D-minor (lane D pass 2): a reply's "# BTC" used to render a real <h1>, giving
+   /m/<asset> two of them. `agent-markdown.tsx` now rewrites every reply heading
+   to <p class="agent-md-heading"><strong>, so this selector keeps the SAME
+   appearance for that paragraph; the element selectors are kept beside it so
+   nothing regresses if a heading element ever reaches the markup again. */
+.agent-md h1,.agent-md h2,.agent-md h3,.agent-md h4,.agent-md .agent-md-heading{
   font-size:13px;font-weight:700;letter-spacing:.01em;color:var(--muted);
   margin:14px 0 0;text-transform:none}
+.agent-md .agent-md-heading strong{color:inherit;font-weight:inherit}
 
 .agent-md ul,.agent-md ol{margin:0;padding-left:18px}
 .agent-md li{margin:4px 0}

@@ -12,7 +12,7 @@ Table derived from `packages/env/src/server.ts` and `packages/env/src/web.ts` at
 | DATA_SOURCE | Defaulted; set for deployment | Operator selects the database read path |
 | NODE_ENV | Defaulted | Runtime/build environment |
 | OPENROUTER_API_KEY | Yes | OpenRouter account API keys |
-| AGENT_MODEL | Defaulted | Schema default (`minimax/minimax-m3:free`, a free-tier OpenRouter model) or operator's model configuration |
+| AGENT_MODEL | Defaulted | Schema default (`anthropic/claude-haiku-4.5`) or operator's model configuration. The id must match the provider the deployment routes through: a `:free` OpenRouter id is not served by Vercel AI Gateway |
 | AGENT_GATE_MODEL | Defaulted | Schema default (`anthropic/claude-haiku-4.5`, paid) or operator's scope-gate model configuration |
 | BASE_RPC_URL | Defaulted | Base mainnet RPC provider |
 | THESIS_REFERRER | Defaulted | Owner-approved platform wallet; override only with owner direction |

@@ -11,15 +11,32 @@ import { marketBySlug, thesesByMarket } from "@/lib/view-data";
 
 const market = marketBySlug("btc")!;
 
-test("the row is the four values the page already holds, in fomo's order", () => {
+test("without book stats the row is only what the page already holds", () => {
 	const tiles = marketStatTiles(market, 7);
+	expect(tiles.map((tile) => tile.label)).toEqual(["Spot", "Structures", "Expiries", "Theses"]);
+});
+
+test("implied vol and calls/puts appear only when the book supplies them", () => {
+	const tiles = marketStatTiles(market, 7, { impliedVol: 0.385, calls: 86, puts: 61 });
 	expect(tiles.map((tile) => tile.label)).toEqual([
 		"Spot",
+		"Implied vol",
 		"Structures",
 		"Expiries",
-		"Tagged posts",
+		"Calls / Puts",
+		"Theses",
 	]);
-	expect(tiles).toHaveLength(4);
+	expect(tiles.find((tile) => tile.label === "Implied vol")?.value).toBe("38.5%");
+	expect(tiles.find((tile) => tile.label === "Calls / Puts")?.value).toBe("86 / 61");
+});
+
+test("a market with no quoted volatility shows no tile, never 0.0%", () => {
+	// "0.0%" would read as "this market has no volatility", which the book does
+	// not claim. MEASURED: PAXG reports curVol 0 and quotes no orders.
+	for (const iv of [null, undefined, 0]) {
+		const tiles = marketStatTiles(market, 7, { impliedVol: iv as number | null });
+		expect(tiles.some((tile) => tile.label === "Implied vol")).toBe(false);
+	}
 });
 
 test("every value is read from the market, never recomputed", () => {

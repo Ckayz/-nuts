@@ -94,6 +94,37 @@ export function PriceChart({
 			const { createChart, CandlestickSeries, LineStyle, ColorType } = await import("lightweight-charts");
 			if (disposed || host.current === null) return;
 
+			/**
+			 * D-R3-m2 (Astra lane D, pass 3). The canvas draws its own text and
+			 * inherits nothing from CSS: `lightweight-charts` falls back to
+			 * `defaultFontFamily` — measured in the installed 5.2.1 bundle,
+			 * `dist/lightweight-charts.development.mjs:263`:
+			 *   `-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif`
+			 * — so every axis and crosshair label was rendered in the system face
+			 * while the mockup allows Manrope only.
+			 *
+			 * The family is READ from the page rather than restated: `body` carries
+			 * `font-family: var(--sans)` (`index.css:51`), and a computed style
+			 * resolves the `var(--font-manrope)` hashed family name that
+			 * `next/font` generates — which a literal string here could not know.
+			 * The literal stack is the fallback for a body that has not been
+			 * styled yet.
+			 *
+			 * `document.fonts.ready` first, because a canvas can only paint a web
+			 * font that is already loaded; with `display: "swap"` an unloaded face
+			 * would be drawn in the fallback and never repainted. Guarded: a
+			 * browser without the Font Loading API must still get a chart.
+			 */
+			try {
+				await document.fonts?.ready;
+			} catch {
+				// A font that cannot be awaited is still drawn, in the fallback.
+			}
+			if (disposed || host.current === null) return;
+			const chartFont =
+				getComputedStyle(document.body).fontFamily ||
+				'Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+
 			chart = createChart(host.current, {
 				height: CHART_HEIGHT,
 				// The chart must follow its container, not the width it was born at.
@@ -104,6 +135,8 @@ export function PriceChart({
 				layout: {
 					background: { type: ColorType.Solid, color: "transparent" },
 					textColor: token("--muted", "#9899a3"),
+					// D-R3-m2: the app's own face, not the library's system stack.
+					fontFamily: chartFont,
 					attributionLogo: false,
 				},
 				grid: {

@@ -84,8 +84,15 @@ export interface DiscoverData {
 	signedIn: boolean;
 	databaseMode: boolean;
 	leaderboard: LeaderboardEntry[];
-	following: View.Thesis[];
-	top: View.Thesis[];
+	/**
+	 * B-P3-1 (pass 3). Each audience carries its OWN three ranked lists, so the
+	 * feed renders `audience[ranking]` directly. These used to be one open-only
+	 * list each, which the tabs then intersected with the globally limited
+	 * ranking: a followed author's eligible post outside the global top N
+	 * disappeared, and Following/Top + Settled were always empty.
+	 */
+	following: RankedTheses;
+	top: RankedTheses;
 	ranked: RankedTheses;
 	yourPositions: View.Position[];
 }
@@ -198,6 +205,27 @@ function rankFixtures(rows: readonly Domain.Thesis[], kind: "trending" | "ending
 	).map((entry) => entry.row);
 }
 
+/** The three rankings of one fixture cohort, in view shape. */
+async function rankedFixtures(rows: readonly Domain.Thesis[]): Promise<RankedTheses> {
+	return {
+		trending: await toPosts(rankFixtures(rows, "trending")),
+		ending: await toPosts(rankFixtures(rows, "ending")),
+		settled: await toPosts(rankFixtures(rows, "settled")),
+	};
+}
+
+/** One audience's three ranked lists, enriched and mapped, order untouched. */
+async function toRanked(
+	feed: { trending: Domain.Thesis[]; ending: Domain.Thesis[]; settled: Domain.Thesis[] },
+	withLinks: (rows: readonly Domain.Thesis[]) => Domain.Thesis[],
+): Promise<RankedTheses> {
+	return {
+		trending: await toPosts(withLinks(feed.trending)),
+		ending: await toPosts(withLinks(feed.ending)),
+		settled: await toPosts(withLinks(feed.settled)),
+	};
+}
+
 export async function discoverData(): Promise<DiscoverData> {
 	if (!usingDatabase()) {
 		const rows = mockPostsWithTradeLinks();
@@ -206,15 +234,14 @@ export async function discoverData(): Promise<DiscoverData> {
 			posts.map((post) => bySlug.get(post.slug) ?? post);
 		return {
 			signedIn: false, databaseMode: false,
-			following: await toPosts(cohort(mockSource.following)),
-			top: await toPosts(cohort(mockSource.top)),
+			// Mock mode has no follow graph and no Top cohort rule, so both
+			// audiences are the fixtures ranked by the product's own rule,
+			// restricted to the fixture cohorts. TODO-OWNER, as before.
+			following: await rankedFixtures(cohort(mockSource.following)),
+			top: await rankedFixtures(cohort(mockSource.top)),
 			// Mock mode has no viewer, so nobody is followed yet.
 			leaderboard: mock.leaderboard.map((creator) => ({ creator, following: false })),
-			ranked: {
-				trending: await toPosts(rankFixtures(rows, "trending")),
-				ending: await toPosts(rankFixtures(rows, "ending")),
-				settled: await toPosts(rankFixtures(rows, "settled")),
-			},
+			ranked: await rankedFixtures(rows),
 			yourPositions: mock.yourPositions,
 		};
 	}
@@ -228,7 +255,7 @@ export async function discoverData(): Promise<DiscoverData> {
 	// the positions behind them. A post that links nothing costs nothing, and the
 	// three rankings plus the two cohorts are enriched in ONE lookup because they
 	// are overlapping views of the same posts.
-	const [trendingRows, endingRows, settledRows, followingRows, topRows] = await Promise.all([
+	const [trendingRows, endingRows, settledRows, followingFeed, topFeed] = await Promise.all([
 		trending(options),
 		endingSoon(options),
 		settled(options),
@@ -238,7 +265,11 @@ export async function discoverData(): Promise<DiscoverData> {
 	const enriched = new Map(
 		(
 			await enrichWithTradeLinks(
-				[...trendingRows, ...endingRows, ...settledRows, ...followingRows, ...topRows].filter(
+				[
+					...trendingRows, ...endingRows, ...settledRows,
+					...followingFeed.trending, ...followingFeed.ending, ...followingFeed.settled,
+					...topFeed.trending, ...topFeed.ending, ...topFeed.settled,
+				].filter(
 					(row, index, all) => all.findIndex((other) => other.id === row.id) === index,
 				),
 				(ids) => listPositionsByIds(ids),
@@ -256,8 +287,8 @@ export async function discoverData(): Promise<DiscoverData> {
 			creator: display.creator(row),
 			following: row.followingByViewer,
 		})),
-		following: await toPosts(withLinks(followingRows)),
-		top: await toPosts(withLinks(topRows)),
+		following: await toRanked(followingFeed, withLinks),
+		top: await toRanked(topFeed, withLinks),
 		ranked: {
 			trending: await toPosts(withLinks(trendingRows)),
 			ending: await toPosts(withLinks(endingRows)),

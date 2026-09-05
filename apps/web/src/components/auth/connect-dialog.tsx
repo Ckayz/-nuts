@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Connector } from "wagmi";
 
 import { TodoOwner } from "@/components/primitives";
@@ -76,6 +77,32 @@ export function walletChoices(connectors: readonly Connector[]): Connector[] {
 	return choices;
 }
 
+/**
+ * D-R3-2 (Astra lane D, pass 3). WHERE the dialog is mounted, not just how it is
+ * styled.
+ *
+ * It used to render inside `WalletBar`, which is inside the sticky top bar. That
+ * header is `position:sticky; z-index:30` (`index.css:75`), so it creates its
+ * own stacking context and the scrim's `z-index:60` (`index.css:512`) could only
+ * ever compete INSIDE it. The agent launcher and its panel are `position:fixed;
+ * z-index:38` (`styles/agent.css:84,91`) at document level, so they painted
+ * above the "modal" and stayed clickable through it. Measured by the reviewer:
+ *   {"modalInsideHeader":true,"launcherOutsideHeader":true,
+ *    "headerZ":30,"scrimZ":60,"launcherZ":38}
+ *
+ * `#modal-root` is the last child of `<body>` (`app/layout.tsx`), so the scrim
+ * lands in the ROOT stacking context, where 60 does beat 38. `document.body` is
+ * the fallback for any tree that does not render the layout.
+ *
+ * Null with no document at all — server rendering, and `renderToStaticMarkup` in
+ * the tests — and the dialog is then returned in place exactly as before, which
+ * is also the only correct answer there: there is nothing to portal INTO.
+ */
+function modalHost(): Element | null {
+	if (typeof document === "undefined") return null;
+	return document.getElementById("modal-root") ?? document.body;
+}
+
 export function ConnectDialog({
 	connectors,
 	pending,
@@ -126,7 +153,11 @@ export function ConnectDialog({
 
 	const choices = walletChoices(connectors);
 
-	return (
+	// Resolved on the FIRST client render, not in an effect: an effect runs after
+	// paint, which would show one frame of the dialog trapped in the header.
+	const [host] = useState(modalHost);
+
+	const scrim = (
 		<div
 			className="scrim"
 			onKeyDown={onKeyDown}
@@ -183,4 +214,6 @@ export function ConnectDialog({
 			</div>
 		</div>
 	);
+
+	return host === null ? scrim : createPortal(scrim, host);
 }

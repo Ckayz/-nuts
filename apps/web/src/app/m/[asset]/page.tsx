@@ -241,7 +241,11 @@ export default async function MarketPage({
 					<div className="stats">
 						{marketStatTiles(market, tagged.length, bookStats).map((tile) => (
 							<span className="tile" key={tile.label}>
-								<i>{tile.label}</i>
+								{/* D-R3-3: a tile whose aggregation rule is not the
+								    owner's carries the marker every other unapproved
+								    number carries. `lib/market/stat-tiles.ts` decides
+								    which; nothing new is worded here. */}
+								<i>{tile.label}{tile.todoOwner ? <TodoOwner /> : null}</i>
 								<b className="num">{tile.value}</b>
 							</span>
 						))}

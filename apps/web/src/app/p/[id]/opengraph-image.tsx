@@ -22,10 +22,20 @@ export const alt = "Thesis.fun position";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-/** docs/mockups/thesis-fun-mockup.html `:root`, lines 34-57. */
-const BG = "#070511";
-const CARD = "#181623";
-const SURFACE_2 = "#201d2d";
+/**
+ * `apps/web/src/index.css` `:root`, which is itself the mockup's
+ * (`docs/mockups/thesis-fun-mockup.html` lines 34-57). Written out literally
+ * because Satori resolves no CSS variables.
+ *
+ * D-R3-m3 (Astra lane D, pass 3): the ground, the card and the second surface
+ * had drifted to an older palette (the 070511 / 181623 / 201d2d set) while
+ * the app moved to the values below, so a shared card did not match the page it
+ * linked to. `og-palette.test.ts` reads both files against `index.css` and
+ * fails on any future drift — including a stale hex in a comment.
+ */
+const BG = "#060510";
+const CARD = "#12111a";
+const SURFACE_2 = "#1a1922";
 const LINE = "#282438";
 const TEXT = "#f7f7f7";
 const MUTED = "#9899a3";

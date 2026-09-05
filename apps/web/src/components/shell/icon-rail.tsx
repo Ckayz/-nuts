@@ -6,14 +6,17 @@ import {
 	ExploreIcon,
 	HomeIcon,
 	LeaderboardIcon,
+	MarketIcon,
 	PlusIcon,
 	PortfolioIcon,
 	TapeIcon,
 } from "@/components/icons";
-import { CURRENT_USER_HANDLE, currentUser } from "@/lib/view-data";
+import { CURRENT_USER_HANDLE, currentUser, marketSummaries } from "@/lib/view-data";
 
 export function IconRail() {
 	const pathname = usePathname();
+	// The rail opens the first market the book lists; never a hardcoded asset.
+	const firstMarket = marketSummaries[0];
 
 	return (
 		<nav className="nav" aria-label="Primary">
@@ -28,6 +31,16 @@ export function IconRail() {
 			>
 				<HomeIcon />
 			</Link>
+			{firstMarket ? (
+				<Link
+					className="navbtn"
+					href={`/m/${firstMarket.slug}`}
+					title="Markets"
+					aria-current={pathname.startsWith("/m/") ? "page" : undefined}
+				>
+					<MarketIcon />
+				</Link>
+			) : null}
 			<button type="button" aria-label="Explore theses" title="Explore theses">
 				<ExploreIcon />
 			</button>

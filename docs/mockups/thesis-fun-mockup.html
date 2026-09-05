@@ -14,7 +14,7 @@
   button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
   .mono,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
   .mut{color:var(--m)} .dim{color:var(--dim)}
-  .bull{color:var(--bull)} .bear{color:var(--bear)} .acc{color:var(--acc)}
+  .bull{color:var(--bull)} .bear{color:var(--bear)}
   .lbl{font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--m)}
   [hidden]{display:none!important}
   .todo{display:inline-block;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;color:#ff6fb5;border:1px dashed #ff6fb5;border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:middle}
@@ -117,12 +117,18 @@
   .acts{display:flex;align-items:center;gap:18px;font-family:var(--mono);font-size:12px;color:var(--m)}
   .acts button{display:inline-flex;align-items:center;gap:5px;color:var(--m)} .acts button:hover{color:var(--k)}
   .acts svg{width:14px;height:14px}
-  .acts .sides{display:flex;gap:6px;margin-left:auto}
-  .acts .sides button{border:1px solid var(--l2);border-radius:999px;padding:4px 11px;font-weight:700;font-family:var(--sans);font-size:12px}
-  .acts .sides button{color:var(--k)} .acts .sides .b1:hover{background:var(--bull-soft);border-color:var(--bull-fill);color:var(--bull)}
-  .acts .sides .b2:hover{background:var(--bear-soft);border-color:var(--bear-fill);color:var(--bear)}
   .acts .ai{border:1px solid var(--l2);border-radius:999px;padding:3px 9px;font-family:var(--sans);font-weight:600}
   .acts .ai:hover{border-color:var(--acc);background:var(--acc-soft);color:var(--k)}
+  .acts .liked{color:var(--bear)}
+  /* Post states: a post carries no trade button. It may tag a market and/or a
+     structure (.tags), and a backed post adds .verified plus the .poscard. */
+  .tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .tag{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--l2);border-radius:999px;padding:3px 10px;font-family:var(--mono);font-size:11px;color:var(--m)}
+  .tag b{color:var(--k);font-weight:500}
+  .tag:hover{border-color:var(--m);color:var(--k)}
+  .tag.mkt b{font-family:var(--disp);font-weight:800;font-size:12px;letter-spacing:.01em}
+  .verified{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10.5px;color:var(--bull)}
+  .verified svg{width:12px;height:12px}
 
   /* ===== right rail: theses list ===== */
   .tl{display:flex;flex-direction:column}
@@ -181,13 +187,30 @@
   .tx{font-family:var(--mono);font-size:11px;color:var(--m)} .tx:hover{color:var(--acc)}
   .cmt{display:grid;grid-template-columns:28px 1fr;gap:10px;padding:10px 0;border-bottom:1px solid var(--l)}
   .cmt .b{display:flex;flex-direction:column;gap:3px} .cmt .m{font-family:var(--mono);font-size:11px;color:var(--dim)}
-  @media (max-width:1180px){.work{grid-template-columns:1fr}.col.l,.col.r{border:0;border-bottom:1px solid var(--l)}.charts{grid-template-columns:1fr}.hero{grid-template-columns:1fr}}
+  /* ===== market page (/m/[asset]) ===== */
+  .mkthead{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:14px;align-items:center;padding-bottom:14px;border-bottom:1px solid var(--l)}
+  .mkthead .thumb{width:48px;height:48px;border-radius:12px;background:var(--s2);border:1px solid var(--l2);display:grid;place-items:center;font-family:var(--disp);font-weight:800;font-size:13px}
+  .mkthead .thumb.btc{color:#f7931a} .mkthead .thumb.eth{color:#8aa4ff} .mkthead .thumb.sol{color:#9be0a5}
+  .mkthead h1{font-family:var(--disp);font-weight:800;font-size:26px;letter-spacing:-.02em;margin:0;line-height:1.1}
+  .mkthead .sub{font-family:var(--mono);font-size:11.5px;color:var(--m);display:flex;gap:10px;margin-top:3px}
+  .mkthead .px{font-family:var(--mono);font-size:28px;font-weight:600;line-height:1;text-align:right}
+  .mkthead .px .ch{display:block;font-size:12px;font-weight:500;margin-top:5px}
+  .tfs{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+  .tfs button{border:1px solid transparent;border-radius:7px;padding:4px 10px;font-family:var(--mono);font-size:11px;color:var(--m)}
+  .tfs button[aria-pressed="true"]{background:var(--s2);border-color:var(--l2);color:var(--k)}
+  .tfs button:hover{color:var(--k)}
+  .chartwrap{height:300px;width:100%}
+  tr.sel td{background:var(--acc-soft)}
+  tbody tr:hover td{background:var(--s2)}
+  .bookmeta{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  @media (max-width:1180px){.work{grid-template-columns:1fr}.col.l,.col.r{border:0;border-bottom:1px solid var(--l)}.charts{grid-template-columns:1fr}.hero{grid-template-columns:1fr}.mkthead{grid-template-columns:48px minmax(0,1fr)}.mkthead .px{grid-column:2;text-align:left}}
 </style>
 
 <div class="app">
   <nav class="nav" aria-label="Primary">
     <span class="logo" aria-hidden="true"><i></i></span>
     <button aria-current="page" title="Home" data-view="discover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg></button>
+    <button title="Markets" data-view="market"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v3M7 17v3M17 4v3M17 17v3"/><rect x="4" y="7" width="6" height="10" rx="1.5"/><rect x="14" y="7" width="6" height="10" rx="1.5"/></svg></button>
     <button title="Explore theses"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M15 9l-2 6-4 2 2-6z"/></svg></button>
     <button title="Live tape"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2.5"/><path d="M7 7a7 7 0 0 0 0 10M17 7a7 7 0 0 1 0 10M4 4a11 11 0 0 0 0 16M20 4a11 11 0 0 1 0 16"/></svg></button>
     <button title="Portfolio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l5-6 4 4 4-7 5 5"/><path d="M3 21h18"/></svg></button>
@@ -238,6 +261,11 @@
       <div class="sec-h"><h2 class="h2">Callouts<span class="alt">Following</span><span class="alt">Top</span></h2><div style="display:flex;gap:6px"><span class="pill on">All</span><span class="pill">BTC</span><span class="pill">ETH</span><span class="pill">SOL</span></div></div>
       <div class="newbar"><span class="st"><span class="av s">TB</span><span class="av s">JL</span><span class="av s">NS</span></span><b>+9 new callouts</b><span>· show</span></div>
 
+      <!-- Post states. A post never carries a trade button: trading lives on the
+           market page. (1) text-only: headline + rationale + like/comment/share.
+           (2) tagged: adds a market chip, and a structure chip when the post names
+           one. (3) backed: the creator filled it themselves, so it also carries the
+           verified badge and the live position card. -->
       <div class="feed">
         <article class="post">
           <div class="thread"><span class="av lg">MK</span></div>
@@ -245,18 +273,36 @@
             <div class="who2"><b>merkle_mike</b><span class="mono">@merkle_mike</span><span>· 18m</span><span class="live">LIVE · 6d 14h</span></div>
             <p class="h">BTC bleeds after NFP. Jobs print is hot, cuts get pushed, risk unwinds into the weekend.</p>
             <p class="t">Skew is already paying for the downside wing. I want defined risk into Monday. If we open above 80.5k I'm wrong, and it stays on the chain.</p>
+            <div class="tags">
+              <a class="tag mkt" href="#" data-view="market"><b>BTC</b>market</a>
+              <a class="tag" href="#" data-view="market">78,000 / 74,000 P · 11 SEP</a>
+            </div>
             <div class="poscard">
-              <div class="nm"><span class="a">BTC put spread <span class="chip">78,000 / 74,000 P</span><span class="chip">11 SEP</span></span><span class="d">Spot 79,607 · 0.0126 ct · max payout 4.6× · Base · OptionBook</span></div>
+              <div class="nm"><span class="a">BTC put spread <span class="verified"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>verified</span></span><span class="d">Spot 79,607 · 0.0126 ct · max payout 4.6× · Base · OptionBook</span></div>
               <div class="kv2"><span class="l">Risked</span><span class="v">$1,000</span></div>
               <div class="kv2"><span class="l">Live P&amp;L</span><span class="v bull">+$612</span></div>
               <div class="sent"><div class="row2"><span class="bull">78% Bull · 31 · $7,920</span><span class="bear">22% Bear · 9 · $1,500</span></div><div class="bar"><i style="width:78%"></i></div></div>
             </div>
             <div class="acts">
-              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>142</button>
+              <button class="liked" aria-pressed="true"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>142</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>17</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
               <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
-              <span class="sides"><button class="b1">Bull</button><button class="b2">Bear</button></span>
+            </div>
+          </div>
+        </article>
+
+        <article class="post">
+          <div class="thread"><span class="av lg">TB</span></div>
+          <div class="bd">
+            <div class="who2"><b>tailbet</b><span class="mono">@tailbet</span><span>· 7m</span></div>
+            <p class="h">Nobody is pricing a hot NFP into the weekend. The whole board is short vol.</p>
+            <p class="t">No position on this one yet. Just saying the setup out loud so it's on the record.</p>
+            <div class="acts">
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>34</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>2</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
+              <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
             </div>
           </div>
         </article>
@@ -266,8 +312,12 @@
           <div class="bd">
             <div class="who2"><b>nutsauce</b><span class="mono">@nutsauce</span><span>· 2m</span><span class="live ending">ENDING · 1d 02h</span></div>
             <p class="h">SOL loses 100 before the weekend. Nobody is bidding this chop.</p>
+            <div class="tags">
+              <a class="tag mkt" href="#" data-view="market"><b>SOL</b>market</a>
+              <a class="tag" href="#" data-view="market">100 P · 06 SEP</a>
+            </div>
             <div class="poscard">
-              <div class="nm"><span class="a">SOL put <span class="chip">100 P</span><span class="chip">06 SEP</span></span><span class="d">Spot 101.46 · premium 2.14 / ct · break-even 97.86 · Base · OptionBook</span></div>
+              <div class="nm"><span class="a">SOL put <span class="verified"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>verified</span></span><span class="d">Spot 101.46 · premium 2.14 / ct · break-even 97.86 · Base · OptionBook</span></div>
               <div class="kv2"><span class="l">Risked</span><span class="v">$300</span></div>
               <div class="kv2"><span class="l">Live P&amp;L</span><span class="v bear">−$38</span></div>
               <div class="sent"><div class="row2"><span class="bull">40% Bull · 4 · $440</span><span class="bear">60% Bear · 6 · $670</span></div><div class="bar"><i style="width:40%"></i></div></div>
@@ -277,7 +327,26 @@
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>3</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
               <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
-              <span class="sides"><button class="b1">Bull</button><button class="b2">Bear</button></span>
+            </div>
+          </div>
+        </article>
+
+        <article class="post">
+          <div class="thread"><span class="av lg">JL</span></div>
+          <div class="bd">
+            <div class="who2"><b>jlin</b><span class="mono">@jlin</span><span>· 41m</span></div>
+            <p class="h">ETH calls are the cheapest they have been all quarter. Vol is asleep into Fusaka.</p>
+            <p class="t">Watching the 2,600 / 2,800 spread on the board. Nothing filled yet — if I take it, it shows up under this post.</p>
+            <div class="tags">
+              <a class="tag mkt" href="#" data-view="market"><b>ETH</b>market</a>
+              <a class="tag" href="#" data-view="market">2,600 / 2,800 C · 25 SEP</a>
+              <span class="tag">no position yet</span>
+            </div>
+            <div class="acts">
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>21</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>2</button>
+              <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
+              <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
             </div>
           </div>
         </article>
@@ -288,8 +357,12 @@
             <div class="who2"><b>gamma.eth</b><span class="mono">@gamma.eth</span><span>· 3h</span><span class="live">LIVE · 20d 09h</span></div>
             <p class="h">ETH reclaims 2,600 into the Fusaka upgrade. Every dip has been bought for a month.</p>
             <p class="t">Cheap upside because vol got crushed after the last range. Call spread caps it but I only need 2,800.</p>
+            <div class="tags">
+              <a class="tag mkt" href="#" data-view="market"><b>ETH</b>market</a>
+              <a class="tag" href="#" data-view="market">2,600 / 2,800 C · 25 SEP</a>
+            </div>
             <div class="poscard">
-              <div class="nm"><span class="a">ETH call spread <span class="chip">2,600 / 2,800 C</span><span class="chip">25 SEP</span></span><span class="d">Spot 2,450 · 0.71 ct · max payout 3.1× · Base · OptionBook</span></div>
+              <div class="nm"><span class="a">ETH call spread <span class="verified"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>verified</span></span><span class="d">Spot 2,450 · 0.71 ct · max payout 3.1× · Base · OptionBook</span></div>
               <div class="kv2"><span class="l">Risked</span><span class="v">$500</span></div>
               <div class="kv2"><span class="l">Live P&amp;L</span><span class="v bull">+$204</span></div>
               <div class="sent"><div class="row2"><span class="bull">61% Bull · 22 · $4,205</span><span class="bear">39% Bear · 14 · $2,670</span></div><div class="bar"><i style="width:61%"></i></div></div>
@@ -299,7 +372,6 @@
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>12</button>
               <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
               <button class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain</button>
-              <span class="sides"><button class="b1">Bull</button><button class="b2">Bear</button></span>
             </div>
           </div>
         </article>
@@ -309,8 +381,12 @@
           <div class="bd">
             <div class="who2"><b>delta_vega</b><span class="mono">@delta_vega</span><span>· settled 9m</span><span class="live settled">SETTLED · BULL WON</span></div>
             <p class="h">ETH prints 2,500 by Friday close. Funding reset, shorts are crowded.</p>
+            <div class="tags">
+              <a class="tag mkt" href="#" data-view="market"><b>ETH</b>market</a>
+              <a class="tag" href="#" data-view="market">2,400 / 2,500 C · 04 SEP</a>
+            </div>
             <div class="poscard">
-              <div class="nm"><span class="a">ETH call spread <span class="chip">2,400 / 2,500 C</span><span class="chip">04 SEP</span></span><span class="d">Settled 2,512.40 · payout 1,120 / ct · tx <a class="tx" href="#">0x91ab…4f2e ↗</a></span></div>
+              <div class="nm"><span class="a">ETH call spread <span class="verified"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>verified</span></span><span class="d">Settled 2,512.40 · payout 1,120 / ct · tx <a class="tx" href="#">0x91ab…4f2e ↗</a></span></div>
               <div class="kv2"><span class="l">Risked</span><span class="v">$800</span></div>
               <div class="kv2"><span class="l">Result</span><span class="v bull">+$1,920</span></div>
               <div class="sent"><div class="row2"><span class="bull">71% Bull · 27 · +$3,455</span><span class="mut">29% Bear · 11 · −$1,580</span></div><div class="bar"><i style="width:71%"></i></div></div>
@@ -324,6 +400,7 @@
           </div>
         </article>
       </div>
+
     </main>
 
     <aside class="col r">
@@ -350,7 +427,137 @@
     </aside>
   </div>
 
-  <!-- ================= THESIS PAGE ================= -->
+  <!-- ================= MARKET PAGE  /m/[asset] ================= -->
+  <!-- Trading lives here, not in a post: price chart, the live structures the
+       OptionBook has liquidity for, the Bull/Bear ticket, and the posts tagged
+       to this market. Layout follows the fomo coin page: chart centre, ticket
+       right, social under the chart. -->
+  <div class="work" id="view-market" hidden>
+    <aside class="col l">
+      <div class="sec">
+        <div class="sec-h"><h2 class="h2">Markets</h2><span class="mono dim" style="font-size:11px">3 live</span></div>
+        <div class="tl">
+          <div class="it"><span class="thumb btc">BTC</span><div class="b"><span class="n">Bitcoin</span><span class="d"><span>79,607.32</span><span class="bull">+1.65%</span></span></div></div>
+          <div class="it"><span class="thumb eth">ETH</span><div class="b"><span class="n">Ether</span><span class="d"><span>2,450.21</span><span class="bull">+2.46%</span></span></div></div>
+          <div class="it"><span class="thumb sol">SOL</span><div class="b"><span class="n">Solana</span><span class="d"><span>101.46</span><span class="bull">+3.18%</span></span></div></div>
+        </div>
+        <span class="note">Assets, strikes and expiries come from live OptionBook orders. Nothing here is a hardcoded list.</span>
+      </div>
+      <div class="sec">
+        <div class="sec-h"><span class="lbl">Your BTC positions</span><span class="mono dim" style="font-size:11px">1 open</span></div>
+        <div class="tl">
+          <div class="it"><span class="thumb btc">BTC</span><div class="b"><span class="n">78,000 / 74,000 P · 11 SEP</span><span class="d"><span class="bull">Bull</span><span>$250</span><span class="bull">+$96</span></span></div></div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="col">
+      <header class="mkthead">
+        <span class="thumb btc">BTC</span>
+        <div>
+          <h1>Bitcoin</h1>
+          <span class="sub"><span>BTC</span><span>Base · Thetanuts OptionBook</span><span>6 structures · 3 expiries</span></span>
+        </div>
+        <span class="px">$79,607.32<span class="ch bull">+1.65% · 24h</span></span>
+      </header>
+
+      <div class="board">
+        <div><span class="lbl">Spot</span><span class="v">$79,607</span></div>
+        <div><span class="lbl">24h</span><span class="v bull">+1.65%</span></div>
+        <div><span class="lbl">Structures</span><span class="v">6</span></div>
+        <div><span class="lbl">Tagged posts</span><span class="v">2</span></div>
+      </div>
+
+      <div class="chartbox">
+        <div class="hh">
+          <span class="lbl">BTC spot</span>
+          <span class="tfs" role="group" aria-label="Chart window">
+            <button aria-pressed="false">1H</button><button aria-pressed="false">4H</button><button aria-pressed="false">1D</button><button aria-pressed="true">7D</button><button aria-pressed="false">1M</button><button aria-pressed="false">ALL</button>
+          </span>
+        </div>
+        <div class="chartwrap"><canvas id="mktchart" width="800" height="300" aria-label="BTC spot price, 7 days"></canvas></div>
+        <span class="note">Chart windows on offer <span class="todo">TODO-OWNER</span></span>
+      </div>
+
+      <div class="sec">
+        <div class="bookmeta">
+          <h2 class="h2">Live structures</h2>
+          <span class="note">From OptionBook orders · prices move every block</span>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Expiry</th><th>Structure</th><th>Strikes</th><th class="num">Premium / ct</th><th class="num">Max payout</th><th class="num">Liquidity left</th><th></th></tr></thead>
+            <tbody>
+              <tr class="sel"><td class="mono">11 SEP</td><td>Put spread</td><td class="mono">78,000 / 74,000 P</td><td class="num">$79.40</td><td class="num bull">4.6×</td><td class="num">$41,200</td><td><span class="pill on">Selected</span></td></tr>
+              <tr><td class="mono">11 SEP</td><td>Put</td><td class="mono">76,000 P</td><td class="num">$1,204.00</td><td class="num bull">2.1×</td><td class="num">$18,900</td><td><button class="btn sm">Select</button></td></tr>
+              <tr><td class="mono">11 SEP</td><td>Call spread</td><td class="mono">82,000 / 86,000 C</td><td class="num">$61.10</td><td class="num bull">5.5×</td><td class="num">$22,750</td><td><button class="btn sm">Select</button></td></tr>
+              <tr><td class="mono">18 SEP</td><td>Put spread</td><td class="mono">76,000 / 70,000 P</td><td class="num">$112.80</td><td class="num bull">3.9×</td><td class="num">$9,400</td><td><button class="btn sm">Select</button></td></tr>
+              <tr><td class="mono">18 SEP</td><td>Call</td><td class="mono">85,000 C</td><td class="num">$742.00</td><td class="num bull">3.2×</td><td class="num">$31,060</td><td><button class="btn sm">Select</button></td></tr>
+              <tr><td class="mono">26 SEP</td><td>Ranger</td><td class="mono">72,000 / 88,000</td><td class="num">$318.50</td><td class="num bull">2.4×</td><td class="num">$6,800</td><td><button class="btn sm">Select</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <span class="note">How structures are ordered and which of them are surfaced first <span class="todo">TODO-OWNER</span></span>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><h2 class="h2">Tagged posts<span class="alt">All</span><span class="alt">Backed</span></h2><span class="mono dim" style="font-size:11px">2</span></div>
+        <div class="feed">
+          <article class="post">
+            <div class="thread"><span class="av lg">MK</span></div>
+            <div class="bd">
+              <div class="who2"><b>merkle_mike</b><span class="mono">@merkle_mike</span><span>· 18m</span><span class="live">LIVE · 6d 14h</span></div>
+              <p class="h" style="font-size:17px">BTC bleeds after NFP. Jobs print is hot, cuts get pushed, risk unwinds into the weekend.</p>
+              <div class="tags"><a class="tag" href="#">78,000 / 74,000 P · 11 SEP</a><span class="verified"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>verified · $1,000 risked</span></div>
+              <div class="acts">
+                <button class="liked" aria-pressed="true"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>142</button>
+                <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>17</button>
+                <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
+              </div>
+            </div>
+          </article>
+          <article class="post">
+            <div class="thread"><span class="av lg">TB</span></div>
+            <div class="bd">
+              <div class="who2"><b>tailbet</b><span class="mono">@tailbet</span><span>· 7m</span></div>
+              <p class="h" style="font-size:17px">Nobody is pricing a hot NFP into the weekend. The whole board is short vol.</p>
+              <p class="t">No position on this one yet. Just saying the setup out loud so it's on the record.</p>
+              <div class="acts">
+                <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>34</button>
+                <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>2</button>
+                <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </main>
+
+    <aside class="col r">
+      <div class="panel">
+        <h3>Take a side</h3>
+        <span class="note">BTC put spread <b class="mono">78,000 / 74,000 P</b> · expires <b class="mono">11 Sep 26 08:00 UTC</b></span>
+        <div class="seg" role="tablist"><button class="bull" role="tab" aria-selected="true">Bull · buy it</button><button class="bear" role="tab" aria-selected="false">Bear · sell it</button></div>
+        <span class="note">Bull buys the 78k / 74k put spread and pays premium. Bear sells it and posts collateral. Both are live OptionBook fills sized to your budget.</span>
+        <div class="field"><span class="lbl">Your max loss</span>
+          <div class="inp"><span>$</span><span>250</span><span class="u">USDC</span></div>
+          <div class="presets"><button>$50</button><button>$100</button><button>$500</button><button>$1,000</button></div>
+          <span class="note">Preset values <span class="todo">TODO-OWNER</span></span></div>
+        <dl class="kv"><dt>Order</dt><dd>78000/74000-PS</dd><dt>Contracts</dt><dd>0.0031</dd><dt>Max loss</dt><dd class="bear">$250.00</dd><dt>Max payout</dt><dd class="big bull">+$1,153</dd><dt>Break-even</dt><dd>$77,287</dd><dt>Liquidity left</dt><dd>$41,200</dd></dl>
+        <button class="btn primary block">Sign with wallet</button>
+        <span class="note">Approve USDC once, then one fill on Base. Your fill is public the moment it confirms.</span>
+      </div>
+      <div class="panel">
+        <h3>Post about BTC</h3>
+        <span class="note">Write your read on this market. A post is text first — tag this structure if you want, and it shows the verified badge only once your own fill confirms.</span>
+        <button class="btn block">Write a post</button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ================= POST THREAD  /t/[slug] ================= -->
+  <!-- A thesis is a post. This page is the post, what it is tagged to, whether
+       the creator backed it, and the replies. No ticket: trading is on /m/[asset]. -->
   <div class="work" id="view-thesis" hidden>
     <aside class="col l">
       <div class="sec">
@@ -378,6 +585,16 @@
           <div style="display:flex;gap:6px;margin-bottom:12px;align-items:center"><span class="pill on">BTC</span><span class="pill on">Put spread</span><span class="pill">Base · OptionBook</span><span class="live" style="margin-left:4px">LIVE · 6d 14h</span></div>
           <h1 class="h">BTC bleeds after NFP. Jobs print is hot, cuts get pushed, risk unwinds into the weekend.</h1>
           <div class="meta"><span class="av s">MK</span><b>merkle_mike</b><span>launched 18m ago</span><span>·</span><span>expires <b class="mono">11 Sep 26 08:00 UTC</b></span><span>·</span><span>settles on Thetanuts TWAP</span><button class="acts ai" style="display:inline-flex;gap:6px;color:var(--m)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Explain this thesis</button></div>
+          <div class="tags" style="margin-top:12px">
+            <a class="tag mkt" href="#" data-view="market"><b>BTC</b>market</a>
+            <a class="tag" href="#" data-view="market">78,000 / 74,000 P · 11 SEP</a>
+            <span class="verified"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>verified · creator risked $1,000</span>
+          </div>
+          <div class="acts" style="margin-top:12px">
+            <button class="liked" aria-pressed="true"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>142</button>
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>17</button>
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></svg>share</button>
+          </div>
         </div>
         <div class="board">
           <div><span class="lbl">Pooled</span><span class="v">$9,420</span></div>
@@ -428,17 +645,13 @@
     </main>
 
     <aside class="col r">
+      <!-- A post carries no ticket. Trading happens on the market page. -->
       <div class="panel">
-        <h3>Take a side</h3>
-        <div class="seg" role="tablist"><button class="bull" role="tab" aria-selected="true">Bull · with creator</button><button class="bear" role="tab" aria-selected="false">Bear · against</button></div>
-        <span class="note">Bull buys the same 78k / 74k put spread. Bear sells it and posts collateral. Both are live OptionBook fills sized to your budget.</span>
-        <div class="field"><span class="lbl">Your max loss</span>
-          <div class="inp"><span>$</span><span>250</span><span class="u">USDC</span></div>
-          <div class="presets"><button>$50</button><button>$100</button><button>$500</button><button>$1,000</button></div>
-          <span class="note">Preset values <span class="todo">TODO-OWNER</span></span></div>
-        <dl class="kv"><dt>Order</dt><dd>78000/74000-PS</dd><dt>Contracts</dt><dd>0.0031</dd><dt>Max loss</dt><dd class="bear">$250.00</dd><dt>Max payout</dt><dd class="big bull">+$1,153</dd><dt>Break-even</dt><dd>$77,287</dd><dt>Liquidity left</dt><dd>$41,200</dd></dl>
-        <button class="btn primary block">Sign with wallet</button>
-        <span class="note">Approve USDC once, then one fill on Base. You appear in the participants list when it confirms.</span>
+        <h3>Trade this</h3>
+        <span class="note">This post names the BTC put spread <b class="mono">78,000 / 74,000 P</b>, expiring <b class="mono">11 Sep 26 08:00 UTC</b>.</span>
+        <dl class="kv"><dt>Premium / ct</dt><dd>$79.40</dd><dt>Max payout</dt><dd class="big bull">4.6×</dd><dt>Break-even</dt><dd>$77,287</dd><dt>Liquidity left</dt><dd>$41,200</dd></dl>
+        <a class="btn primary block" href="#" data-view="market">Trade this on the BTC market</a>
+        <span class="note">Bull buys the spread, Bear sells it. Both fills happen on the market page.</span>
       </div>
       <div class="panel">
         <h3>Share</h3>
@@ -466,12 +679,23 @@
   function show(v){
     document.getElementById('view-discover').hidden=v!=='discover';
     document.getElementById('view-thesis').hidden=v!=='thesis';
+    document.getElementById('view-market').hidden=v!=='market';
     document.querySelectorAll('.nav [data-view]').forEach(function(b){b.setAttribute('aria-current',b.dataset.view===v?'page':'false')});
     if(v==='thesis') drawSpot();
+    if(v==='market') drawMarket();
   }
   document.querySelectorAll('.nav [data-view]').forEach(function(b){b.addEventListener('click',function(){show(b.dataset.view)})});
-  // open thesis page from any callout headline, trending row, or position row
+  // open the post thread from any callout headline, trending row, or position row
   document.querySelectorAll('#view-discover .post .h, #view-discover .tl .it').forEach(function(el){el.style.cursor='pointer';el.addEventListener('click',function(){show('thesis')})});
+  // every market/structure tag and every "trade this" button opens the market page
+  document.querySelectorAll('a[data-view="market"]').forEach(function(el){el.addEventListener('click',function(e){e.preventDefault();show('market')})});
+  document.querySelectorAll('.tfs button').forEach(function(b){b.addEventListener('click',function(){
+    b.parentNode.querySelectorAll('button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});
+  })});
+  document.querySelectorAll('.acts button[aria-pressed]').forEach(function(b){b.addEventListener('click',function(){
+    var on=b.getAttribute('aria-pressed')!=='true';
+    b.setAttribute('aria-pressed',on?'true':'false');b.classList.toggle('liked',on);
+  })});
   var tt=document.querySelectorAll('#ttabs [data-tab]');
   tt.forEach(function(b){b.addEventListener('click',function(){
     tt.forEach(function(x){x.setAttribute('aria-selected',x===b?'true':'false')});
@@ -509,6 +733,33 @@
       g.lineWidth=2;g.strokeStyle=tok('--s');g.stroke();
       g.fillStyle=e[2]?'#04130a':'#fff';g.font='700 7px '+tok('--sans');g.textAlign='center';g.fillText(e[1],x,y+2.5)});
     g.beginPath();g.arc(X(n-1),Y(pts[n-1]),3.5,0,Math.PI*2);g.fillStyle=tok('--acc');g.fill();
+    g.fillStyle=tok('--dim');g.font='10px '+tok('--mono');g.textAlign='center';
+    ['29 Aug','31 Aug','2 Sep','4 Sep','now'].forEach(function(t,k){g.fillText(t,X(Math.round(k*(n-1)/4)),h-4)});
+  }
+  // Market-page chart. In the app this canvas is TradingView lightweight-charts;
+  // here it is the same seeded walk as drawSpot(), taller and without entry pins,
+  // so the mockup shows the space the real chart occupies.
+  var mdrawn=false;
+  function drawMarket(){
+    if(mdrawn) return; mdrawn=true;
+    var c=document.getElementById('mktchart');var w=c.clientWidth||800,h=300;c.width=w*2;c.height=h*2;
+    var g=c.getContext('2d');g.scale(2,2);
+    var n=168,pts=[],p=78100,s=7;
+    function rnd(){s=(s*9301+49297)%233280;return s/233280-0.5}
+    for(var i=0;i<n;i++){p+=rnd()*420+(i>110?18:-2);pts.push(p)}
+    var shift=79607-pts[n-1];for(var j=0;j<n;j++)pts[j]+=shift;
+    var lo=77500,hi=83000,padL=8,padR=60,padT=12,padB=20;
+    function X(i){return padL+(w-padL-padR)*i/(n-1)}
+    function Y(v){return padT+(h-padT-padB)*(1-(v-lo)/(hi-lo))}
+    g.strokeStyle=tok('--l');g.lineWidth=1;
+    [78000,79000,80000,81000,82000].forEach(function(v){g.beginPath();g.moveTo(padL,Y(v));g.lineTo(w-padR,Y(v));g.stroke();
+      g.fillStyle=tok('--dim');g.font='10px '+tok('--mono');g.textAlign='left';g.fillText((v/1000)+'k',w-padR+6,Y(v)+3)});
+    var grad=g.createLinearGradient(0,padT,0,h);grad.addColorStop(0,'rgba(245,197,66,.16)');grad.addColorStop(1,'rgba(245,197,66,0)');
+    g.beginPath();g.moveTo(X(0),Y(pts[0]));for(var i=1;i<n;i++)g.lineTo(X(i),Y(pts[i]));g.lineTo(X(n-1),h-padB);g.lineTo(X(0),h-padB);g.closePath();g.fillStyle=grad;g.fill();
+    g.beginPath();g.moveTo(X(0),Y(pts[0]));for(i=1;i<n;i++)g.lineTo(X(i),Y(pts[i]));g.strokeStyle=tok('--k');g.lineWidth=1.6;g.stroke();
+    g.save();g.setLineDash([4,4]);g.strokeStyle=tok('--acc');g.beginPath();g.moveTo(padL,Y(79607));g.lineTo(w-padR,Y(79607));g.stroke();g.restore();
+    g.fillStyle=tok('--acc');g.fillRect(w-padR+2,Y(79607)-8,54,16);
+    g.fillStyle=tok('--acc-ink');g.font='600 10px '+tok('--mono');g.textAlign='center';g.fillText('79,607',w-padR+29,Y(79607)+3.5);
     g.fillStyle=tok('--dim');g.font='10px '+tok('--mono');g.textAlign='center';
     ['29 Aug','31 Aug','2 Sep','4 Sep','now'].forEach(function(t,k){g.fillText(t,X(Math.round(k*(n-1)/4)),h-4)});
   }

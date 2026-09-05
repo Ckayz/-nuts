@@ -10,7 +10,7 @@
     a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--tn-acc);outline-offset:2px}
     .mono,.num{font-family:var(--tn-mono);font-variant-numeric:tabular-nums}
     .mut{color:var(--tn-m)} .dim{color:var(--tn-dim)}
-    .bull{color:var(--tn-bull)} .bear{color:var(--tn-bear)} .acc{color:var(--tn-acc)}
+    .bull{color:var(--tn-bull)} .bear{color:var(--tn-bear)}
     .lbl{font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--tn-m)}
     [hidden]{display:none!important}
     .todo{display:inline-block;font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:9.5px;letter-spacing:.06em;color:#ff6fb5;border:1px dashed #ff6fb5;border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:middle}
@@ -117,12 +117,19 @@
     .acts{display:flex;align-items:center;gap:18px;font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--tn-m)}
     .acts button{display:inline-flex;align-items:center;gap:5px;color:var(--tn-m)} .acts button:hover{color:var(--tn-k)}
     .acts svg{width:14px;height:14px}
-    .acts .sides{display:flex;gap:6px;margin-left:auto}
-    .acts .sides button{border:1px solid var(--tn-l2);border-radius:999px;padding:4px 11px;font-weight:700;font-family:var(--tn-sans);font-size:12px}
-    .acts .sides button{color:var(--tn-k)} .acts .sides .b1:hover{background:var(--tn-bull-soft);border-color:var(--tn-bull-fill);color:var(--tn-bull)}
-    .acts .sides .b2:hover{background:var(--tn-bear-soft);border-color:var(--tn-bear-fill);color:var(--tn-bear)}
     .acts .ai{border:1px solid var(--tn-l2);border-radius:999px;padding:3px 9px;font-family:var(--tn-sans);font-weight:600}
     .acts .ai:hover{border-color:var(--tn-acc);background:var(--tn-acc-soft);color:var(--tn-k)}
+    .acts a,.acts .cnt{display:inline-flex;align-items:center;gap:5px;color:var(--tn-m)} .acts a:hover{color:var(--tn-k)}
+    .acts .liked{color:var(--tn-bear)}
+    /* Post states: a post carries no trade button. It may tag a market and/or a
+       structure (.tags), and a backed post adds .verified plus the .poscard. */
+    .tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+    .tag{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--tn-l2);border-radius:999px;padding:3px 10px;font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--tn-m)}
+    .tag b{color:var(--tn-k);font-weight:500}
+    a.tag:hover{border-color:var(--tn-m);color:var(--tn-k)}
+    .tag.mkt b{font-family:var(--tn-disp);font-weight:800;font-size:12px;letter-spacing:.01em}
+    .verified{display:inline-flex;align-items:center;gap:5px;font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:10.5px;color:var(--tn-bull)}
+    .verified svg{width:12px;height:12px}
 
     /* ===== right rail: theses list ===== */
     .tl{display:flex;flex-direction:column}
@@ -181,7 +188,23 @@
     .tx{font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--tn-m)} .tx:hover{color:var(--tn-acc)}
     .cmt{display:grid;grid-template-columns:28px 1fr;gap:10px;padding:10px 0;border-bottom:1px solid var(--tn-l)}
     .cmt .b{display:flex;flex-direction:column;gap:3px} .cmt .m{font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--tn-dim)}
-    @media (max-width:1180px){.work,.work.profile{grid-template-columns:1fr}.col.l,.col.r{border:0;border-bottom:1px solid var(--tn-l)}.charts{grid-template-columns:1fr}.hero{grid-template-columns:1fr}}
+    /* ===== market page (/m/[asset]) ===== */
+    .mkthead{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:14px;align-items:center;padding-bottom:14px;border-bottom:1px solid var(--tn-l)}
+    .mkthead .thumb{width:48px;height:48px;border-radius:12px;background:var(--tn-s2);border:1px solid var(--tn-l2);display:grid;place-items:center;font-family:var(--tn-disp);font-weight:800;font-size:13px}
+    .mkthead .thumb.btc{color:#f7931a} .mkthead .thumb.eth{color:#8aa4ff} .mkthead .thumb.sol{color:#9be0a5}
+    .mkthead h1{font-family:var(--tn-disp);font-weight:800;font-size:26px;letter-spacing:-.02em;margin:0;line-height:1.1}
+    .mkthead .sub{font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:11.5px;color:var(--tn-m);display:flex;flex-wrap:wrap;gap:10px;margin-top:3px}
+    .mkthead .px{font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:28px;font-weight:600;line-height:1;text-align:right}
+    .mkthead .px .ch{display:block;font-size:12px;font-weight:500;margin-top:5px}
+    .tfs{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+    .tfs button{border:1px solid transparent;border-radius:7px;padding:4px 10px;font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--tn-m)}
+    .tfs button[aria-pressed="true"]{background:var(--tn-s2);border-color:var(--tn-l2);color:var(--tn-k)}
+    .tfs button:hover{color:var(--tn-k)}
+    .chartwrap{height:300px;width:100%}
+    tr.sel td{background:var(--tn-acc-soft)}
+    tbody tr:hover td{background:var(--tn-s2)}
+    .bookmeta{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+    @media (max-width:1180px){.work,.work.profile{grid-template-columns:1fr}.col.l,.col.r{border:0;border-bottom:1px solid var(--tn-l)}.charts{grid-template-columns:1fr}.hero{grid-template-columns:1fr}.mkthead{grid-template-columns:48px minmax(0,1fr)}.mkthead .px{grid-column:2;text-align:left}}
 
   /* Applied by the mockup's script (line 485): callout headlines, trending rows
      and position rows open the thesis page. */

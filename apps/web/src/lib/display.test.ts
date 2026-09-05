@@ -2,8 +2,8 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { amount, quantity } from "./display";
 import { signedUsd } from "./format";
-import { btcNfp, btcNfpDetail, currentUser } from "../mock/data";
-import { creator } from "./display";
+import { btcNfp, btcNfpDetail, currentUser, ethCallsCheap, markets, nfpSetup } from "../mock/data";
+import { creator, market, thesis } from "./display";
 
 describe("decimal-string presentation", () => {
     for (const [input, usd, usd2, contracts] of [
@@ -39,6 +39,54 @@ describe("decimal-string presentation", () => {
         assert.equal(signedUsd(creator(currentUser).netPnlUsd), "—");
     });
     test("creator position joins to the creator participant", () => {
-        assert.equal(btcNfpDetail.participants.find(row => row.id === btcNfp.creatorPositionId)?.role, "creator");
+        assert.equal(btcNfpDetail.participants.find(row => row.id === btcNfp.backing?.creatorPositionId)?.role, "creator");
+    });
+});
+describe("post states", () => {
+    test("a text-only post shows no market, structure, tag, backing or chip", () => {
+        const view = thesis(nfpSetup);
+        assert.equal(view.asset, null);
+        assert.equal(view.structure, null);
+        assert.equal(view.tag, null);
+        assert.equal(view.backing, null);
+        assert.equal(view.status, null);
+        assert.equal(view.statusLabel, null);
+    });
+    test("a tagged post links to its market and names its structure, without a position", () => {
+        const view = thesis(ethCallsCheap);
+        assert.equal(view.tag?.slug, "eth");
+        assert.equal(view.tag?.asset, "ETH");
+        assert.equal(view.tag?.structureLabel, "2,600 / 2,800 C · 25 SEP");
+        assert.equal(view.backing, null);
+        assert.equal(view.statusLabel, "LIVE · 20d 09h");
+    });
+    test("a backed post carries the position card and the sides", () => {
+        const view = thesis(btcNfp);
+        assert.equal(view.tag?.structureLabel, "78,000 / 74,000 P · 11 SEP");
+        assert.equal(view.backing?.creatorRiskedUsd.usd, "$1,000");
+        assert.equal(view.backing?.creatorPnlLabel, "Live P&L");
+        assert.equal(view.backing?.bull.amountLabel, "$7,920");
+        assert.equal(view.backing?.settled, false);
+    });
+});
+describe("market page", () => {
+    test("every market prices its selected structure and counts its own book", () => {
+        for (const source of markets) {
+            const view = market(source);
+            assert.equal(view.structureCount, source.structures.length);
+            assert.equal(view.expiryCount, new Set(source.structures.map(s => s.expiryAt)).size);
+            assert.equal(view.structures.filter(s => s.selected).length, 1);
+            assert.equal(view.series.length, 168);
+            assert.equal(view.series.at(-1)?.value.toFixed(2), source.currentSpotPriceUsd);
+            assert.equal(view.series.at(-1)?.time, Math.floor(Date.parse(source.dataAsOf) / 1000));
+            // Hourly, oldest first, and every point a real positive price.
+            assert.ok(view.series.every((p, i) => i === 0 || p.time - view.series[i - 1]!.time === 3600));
+            assert.ok(view.series.every(p => Number.isFinite(p.value) && p.value > 0));
+        }
+    });
+    test("a market that selects a structure it does not list is rejected", () => {
+        const [first] = markets;
+        assert.ok(first);
+        assert.throws(() => market({ ...first, selectedStructureId: "not-in-the-book" }), /selects a structure it does not list/);
     });
 });

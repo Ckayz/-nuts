@@ -53,6 +53,10 @@ function expiryLabel(value: string, full = false) {
         return `${day} ${month.toUpperCase()}`;
     return `${day} ${month} ${String(date.getUTCFullYear()).slice(-2)} ${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")} UTC`;
 }
+function pctLabel(value: string) { return `${decimal(value).sign > 0 ? "+" : ""}${value}%`; }
+function strikesLabel(strikesUsd: string[], isCall: boolean) { return `${strikesUsd.map(v => group(v)).join(" / ")} ${isCall ? "C" : "P"}`; }
+/** Market slugs are derived from the asset: the book, not a hardcoded list. */
+export function marketSlug(asset: string) { return asset.toLowerCase(); }
 export function creator(value: Domain.Creator): View.Creator {
     return { handle: value.handle, displayName: value.displayName ?? "—", initials: value.initials,
         walletAddress: value.walletAddress ? fragment(value.walletAddress) : value.mockWalletFragment ?? undefined,
@@ -60,36 +64,60 @@ export function creator(value: Domain.Creator): View.Creator {
         followers: value.followers === null ? undefined : new Intl.NumberFormat("en-US").format(value.followers),
         netPnlUsd: optionalAmount(value.netPnlUsd), verifiedPnl30dUsd: optionalAmount(value.verifiedPnl30dUsd), biggestLossUsd: optionalAmount(value.biggestLossUsd) };
 }
+function structure(value: Domain.ThesisStructure, expiryAt: string): View.Structure {
+    return { ...value, expiryAt, expiryLabel: expiryLabel(expiryAt), strikesLabel: strikesLabel(value.strikesUsd, value.isCall), side: "bull", venueLabel: "Base · OptionBook" };
+}
+/** The position card's sub-line and side stats; only a backed post has one. */
+function backing(value: Domain.Thesis, settled: boolean): View.Backing {
+    const back = value.backing!;
+    const details: string[] = [];
+    if (settled && back.economics.settlementPriceUsd !== null)
+        details.push(`Settled ${group(back.economics.settlementPriceUsd, 2)}`);
+    else if (value.market?.currentSpotPriceUsd != null)
+        details.push(`Spot ${group(value.market.currentSpotPriceUsd, value.market.currentSpotPriceUsd.includes(".") ? value.market.currentSpotPriceUsd.split(".")[1]!.length : 0)}`);
+    if (back.mock.payoutPerContractUsd !== null)
+        details.push(`payout ${group(back.mock.payoutPerContractUsd)} / ct`);
+    else if (value.structure?.contracts != null)
+        details.push(`${value.structure.contracts} ct`);
+    else if (back.mock.premiumPerContractUsd !== null)
+        details.push(`premium ${back.mock.premiumPerContractUsd} / ct`);
+    if (back.mock.maxPayoutMultiple !== null)
+        details.push(`max payout ${back.mock.maxPayoutMultiple}×`);
+    else if (!settled && back.economics.breakEvenPricesUsd[0])
+        details.push(`break-even ${back.economics.breakEvenPricesUsd[0]}`);
+    if (!settled)
+        details.push("Base · OptionBook");
+    const stats = (v: Domain.SideStats): View.SideStats => ({ pct: v.pct, count: v.count, amountLabel: v.signed ? amount(v.amountUsd).signed : amount(v.amountUsd).usd });
+    return { detailParts: details, detailTx: tx(back.verification.transactionHash, back.mock.transactionFragment),
+        creatorRiskedUsd: amount(back.economics.maximumLossUsd),
+        creatorLivePnlUsd: amount(settled ? back.economics.finalPnlUsd : back.economics.estimatedPnlUsd),
+        creatorPnlLabel: settled ? "Result" : "Live P&L", pooledUsd: amount(back.pooledUsd),
+        bull: stats(back.bull), bear: stats(back.bear), settled };
+}
 export function thesis(value: Domain.Thesis): View.Thesis {
     // TODO-OWNER: the mockup specifies no presentation for other PRD lifecycle states.
     if (value.thesis.status !== "open" && value.thesis.status !== "settled")
         throw new Error(`No mockup presentation for ${value.thesis.status}`);
     const settled = value.thesis.status === "settled";
-    const status = value.thesis.status === "open" ? value.endingSoon ? "ending" : "live" : value.thesis.status;
-    const hours = Math.max(0, Math.floor((Date.parse(value.market.expiryAt) - Date.parse(value.market.dataAsOf)) / 3600000));
-    const statusLabel = settled ? `SETTLED · ${value.mock.settledWinner?.toUpperCase() ?? "—"} WON` : value.thesis.status === "open" ? `${status.toUpperCase()} · ${Math.floor(hours / 24)}d ${String(hours % 24).padStart(2, "0")}h` : status.toUpperCase();
-    const details: string[] = [];
-    if (settled && value.economics.settlementPriceUsd !== null)
-        details.push(`Settled ${group(value.economics.settlementPriceUsd, 2)}`);
-    else if (value.market.currentSpotPriceUsd !== null)
-        details.push(`Spot ${group(value.market.currentSpotPriceUsd, value.market.currentSpotPriceUsd.includes(".") ? value.market.currentSpotPriceUsd.split(".")[1]!.length : 0)}`);
-    if (value.mock.payoutPerContractUsd !== null)
-        details.push(`payout ${group(value.mock.payoutPerContractUsd)} / ct`);
-    else if (value.structure.contracts !== null)
-        details.push(`${value.structure.contracts} ct`);
-    else if (value.mock.premiumPerContractUsd !== null)
-        details.push(`premium ${value.mock.premiumPerContractUsd} / ct`);
-    if (value.mock.maxPayoutMultiple !== null)
-        details.push(`max payout ${value.mock.maxPayoutMultiple}×`);
-    else if (!settled && value.economics.breakEvenPricesUsd[0])
-        details.push(`break-even ${value.economics.breakEvenPricesUsd[0]}`);
-    if (!settled)
-        details.push("Base · OptionBook");
-    const stats = (v: Domain.SideStats): View.SideStats => ({ pct: v.pct, count: v.count, amountLabel: v.signed ? amount(v.amountUsd).signed : amount(v.amountUsd).usd });
-    return { id: value.id, slug: value.slug, headline: value.thesis.headline, note: value.thesis.rationale, asset: value.market.underlyingAsset, chainId: value.market.chainId, creator: creator(value.creator), status, statusLabel,
-        postedLabel: settled ? `· settled ${value.mock.settledAgoMinutes}m` : `· ${elapsed(value.thesis.createdAt, value.market.dataAsOf)}`,
-        structure: { ...value.structure, expiryAt: value.market.expiryAt, expiryLabel: expiryLabel(value.market.expiryAt), strikesLabel: `${value.structure.strikesUsd.map(v => group(v)).join(" / ")} ${value.structure.isCall ? "C" : "P"}`, side: "bull", venueLabel: "Base · OptionBook" },
-        detailParts: details, detailTx: tx(value.verification.transactionHash, value.mock.transactionFragment), creatorRiskedUsd: amount(value.economics.maximumLossUsd), creatorLivePnlUsd: amount(settled ? value.economics.finalPnlUsd : value.economics.estimatedPnlUsd), creatorPnlLabel: settled ? "Result" : "Live P&L", pooledUsd: amount(value.pooledUsd), bull: stats(value.bull), bear: stats(value.bear), fills: value.fills, likes: value.likes, commentCount: value.commentCount };
+    // The LIVE / ENDING / SETTLED chip is counted off the expiry, so a post that
+    // names no market carries no chip at all rather than an invented one.
+    let status: View.ThesisStatus | null = null;
+    let statusLabel: string | null = null;
+    if (settled) {
+        status = "settled";
+        statusLabel = `SETTLED · ${value.backing?.mock.settledWinner?.toUpperCase() ?? "—"} WON`;
+    } else if (value.market !== null) {
+        status = value.endingSoon ? "ending" : "live";
+        const hours = Math.max(0, Math.floor((Date.parse(value.market.expiryAt) - Date.parse(value.dataAsOf)) / 3600000));
+        statusLabel = `${status.toUpperCase()} · ${Math.floor(hours / 24)}d ${String(hours % 24).padStart(2, "0")}h`;
+    }
+    const struct = value.structure === null || value.market === null ? null : structure(value.structure, value.market.expiryAt);
+    return { id: value.id, slug: value.slug, headline: value.thesis.headline, note: value.thesis.rationale,
+        asset: value.market?.underlyingAsset ?? null, creator: creator(value.creator), status, statusLabel,
+        postedLabel: settled ? `· settled ${value.backing?.mock.settledAgoMinutes ?? "—"}m` : `· ${elapsed(value.thesis.createdAt, value.dataAsOf)}`,
+        tag: value.market === null ? null : { slug: marketSlug(value.market.underlyingAsset), asset: value.market.underlyingAsset, structureLabel: struct === null ? null : `${struct.strikesLabel} · ${struct.expiryLabel}` },
+        structure: struct, backing: value.backing === null ? null : backing(value, settled),
+        likes: value.likes, likedByViewer: value.likedByViewer, commentCount: value.commentCount };
 }
 export function position(value: Domain.Position): View.Position {
     return { thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(value.status === "settled" ? value.economics.finalPnlUsd : value.economics.estimatedPnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled: value.status === "settled" };
@@ -104,7 +132,16 @@ export function ticket(value: Domain.Ticket): View.Ticket {
     return { sideNote: value.sideNote, maxLossUsd: amount(value.maximumLossUsd), collateralSymbol: value.collateralSymbol, presetsUsd: value.presetsUsd.map(amount), orderLabel: value.orderLabel, contracts: quantity(value.contracts)!, maxPayoutUsd: amount(value.maximumPayoutUsd), breakEvenUsd: amount(value.breakEvenPricesUsd[0] ?? null), liquidityLeftUsd: amount(value.liquidityLeftUsd) };
 }
 export function detail(value: Domain.ThesisDetail): View.ThesisDetail {
-    return { thesis: thesis(value.thesis), shareUrl: value.shareUrl, shareHeadline: value.shareHeadline, expiryLabel: expiryLabel(value.thesis.market.expiryAt, true), settlementLabel: value.settlementLabel, launchedLabel: `launched ${elapsed(value.thesis.thesis.createdAt, value.thesis.market.dataAsOf)} ago`, spotUsd: amount(value.thesis.market.currentSpotPriceUsd), spotChangeLabel: `${decimal(value.spotChangePct).sign > 0 ? "+" : ""}${value.spotChangePct}%`, maxPayoutUsd: amount(value.thesis.economics.maximumPayoutUsd), breakEvenUsd: amount(value.thesis.economics.breakEvenPricesUsd[0] ?? null), participants: value.participants.map(participant), comments: value.comments.map(v => ({ creator: creator(v.creator), postedLabel: `· ${elapsed(v.createdAt, value.thesis.market.dataAsOf)}`, body: v.body })), activity: value.activity.map(activity), activityCount: value.activityCount, participantCount: value.participantCount, ticket: ticket(value.ticket) };
+    const back = value.thesis.backing;
+    return { thesis: thesis(value.thesis), shareUrl: value.shareUrl, shareHeadline: value.shareHeadline,
+        expiryLabel: value.thesis.market === null ? null : expiryLabel(value.thesis.market.expiryAt, true),
+        settlementLabel: value.settlementLabel, launchedLabel: `launched ${elapsed(value.thesis.thesis.createdAt, value.thesis.dataAsOf)} ago`,
+        spotUsd: amount(value.thesis.market?.currentSpotPriceUsd ?? null),
+        spotChangeLabel: value.spotChangePct === null ? null : pctLabel(value.spotChangePct),
+        maxPayoutUsd: amount(back?.economics.maximumPayoutUsd ?? null), breakEvenUsd: amount(back?.economics.breakEvenPricesUsd[0] ?? null),
+        participants: value.participants.map(participant),
+        comments: value.comments.map(v => ({ creator: creator(v.creator), postedLabel: `· ${elapsed(v.createdAt, value.thesis.dataAsOf)}`, body: v.body })),
+        activity: value.activity.map(activity), activityCount: value.activityCount, participantCount: value.participantCount };
 }
 export function trending(value: Domain.TrendingItem): View.TrendingItem {
     return { slug: value.slug, asset: value.underlyingAsset, headline: value.headline, creatorHandle: value.creatorHandle, timeLabel: `${value.remainingDays}d`, pnlUsd: amount(value.estimatedPnlUsd), bullPct: value.bullPct };
@@ -114,5 +151,29 @@ export function price(value: {
     currentSpotPriceUsd: string;
     changePct: string;
 }) {
-    return { asset: value.underlyingAsset, price: group(value.currentSpotPriceUsd, 2), change: `${decimal(value.changePct).sign > 0 ? "+" : ""}${value.changePct}%` };
+    return { asset: value.underlyingAsset, price: group(value.currentSpotPriceUsd, 2), change: pctLabel(value.changePct) };
+}
+function marketStructure(value: Domain.MarketStructure, selectedId: string): View.MarketStructure {
+    return { id: value.id, expiryLabel: expiryLabel(value.expiryAt), productType: `${value.productType.charAt(0).toUpperCase()}${value.productType.slice(1)}`,
+        strikesLabel: strikesLabel(value.strikesUsd, value.isCall), premiumPerContractUsd: amount(value.premiumPerContractUsd),
+        maxPayoutLabel: `${value.maxPayoutMultiple}×`, liquidityLeftUsd: amount(value.liquidityLeftUsd), selected: value.id === selectedId };
+}
+export function marketSummary(value: Domain.Market): View.MarketSummary {
+    return { slug: value.slug, asset: value.underlyingAsset, name: value.name, spotUsd: amount(value.currentSpotPriceUsd),
+        changeLabel: pctLabel(value.changePct), changeClass: amount(value.changePct).pnlClass };
+}
+export function market(value: Domain.Market): View.Market {
+    const selected = value.structures.find(s => s.id === value.selectedStructureId);
+    if (!selected) throw new Error(`Market ${value.slug} selects a structure it does not list: ${value.selectedStructureId}`);
+    const expiries = new Set(value.structures.map(s => s.expiryAt));
+    return { ...marketSummary(value), venueLabel: "Base · Thetanuts OptionBook",
+        bookLabel: `${value.structures.length} structures · ${expiries.size} expiries`,
+        structureCount: value.structures.length, expiryCount: expiries.size,
+        // Number() only after the same decimal validation every other value gets:
+        // the chart library plots pixels from it, nothing else reads it.
+        series: value.series.map(p => { decimal(p.priceUsd); return { time: p.time, value: Number(p.priceUsd) }; }),
+        structures: value.structures.map(s => marketStructure(s, value.selectedStructureId)),
+        ticket: ticket(value.ticket),
+        selectedLabel: `${value.underlyingAsset} ${selected.productType} ${strikesLabel(selected.strikesUsd, selected.isCall)}`,
+        selectedExpiryLabel: expiryLabel(selected.expiryAt, true) };
 }

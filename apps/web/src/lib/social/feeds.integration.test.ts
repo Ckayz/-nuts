@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { follows, likes, comments, theses, users } from "@nuts/db/schema/index";
-import { following, top } from "./feeds";
+import { EMPTY_FEED, following, top } from "./feeds";
 import { trending } from "../data/reads";
 if (!process.env.DATABASE_URL) {
  console.log("feeds integration skipped: DATABASE_URL is not set");
@@ -26,18 +26,27 @@ if (!process.env.DATABASE_URL) {
    ]);
    await tx.execute(sql`SET CONSTRAINTS ALL IMMEDIATE`);
    const options = { database: tx, viewerUserId: viewer };
-   expect(await following(options)).toEqual([]);
+   expect(await following(options)).toEqual(EMPTY_FEED);
    await tx.insert(follows).values({ followerUserId: viewer, followedUserId: creator });
-   expect((await following(options)).map(row => row.id)).toEqual([recent, old]);
-   expect(await following({ database: tx })).toEqual([]);
+   // B-P3-1: the order is the RANKING's, not a second sort of its own. Both of
+   // this creator's open posts have zero engagement here, so `rankTheses` ties
+   // and breaks by id — asserted as a set, then pinned by the engagement case
+   // below where the order is decided by real likes and comments.
+   expect(new Set((await following(options)).trending.map(row => row.id))).toEqual(new Set([recent, old]));
+   expect((await following(options)).settled).toEqual([]);
+   expect(await following({ database: tx })).toEqual(EMPTY_FEED);
    await tx.insert(likes).values({ userId: viewer, thesisId: recent });
    await tx.insert(comments).values([{ userId: viewer, thesisId: old, body: "One" }, { userId: creator, thesisId: old, body: "Two" }]);
    const ids = (rows: { id: string }[]) => rows.filter(row => [old, recent, draft, other].includes(row.id)).map(row => row.id);
-   const ranked = await top(options);
+   const ranked = (await top(options)).trending;
    expect(ids(ranked)).toEqual([old, recent, other]);
    expect(ids(ranked)).toEqual(ids(await trending(options)));
    expect(ranked.find(row => row.id === recent)?.likedByViewer).toBe(true);
-   expect((await following(options)).find(row => row.id === recent)?.likedByViewer).toBe(true);
+   // The engagement order reaches Following too: `old` has two comments,
+   // `recent` one like, and Following no longer re-sorts what the reader ranked.
+   const followed = (await following(options)).trending;
+   expect(ids(followed)).toEqual([old, recent]);
+   expect(followed.find(row => row.id === recent)?.likedByViewer).toBe(true);
    throw rollback;
   }); } catch (error) { if (error !== rollback) throw error; }
  });
@@ -63,9 +72,15 @@ if (!process.env.DATABASE_URL) {
    const trendingIds = (await trending(options)).map(r => r.id);
    expect(trendingIds).toHaveLength(6);
    expect(trendingIds).not.toContain(ids[6]!);
-   expect((await following(options)).map(r => r.id)).toEqual([ids[6]!]);
+   expect((await following(options)).trending.map(r => r.id)).toEqual([ids[6]!]);
    await tx.execute(sql`update theses set status = 'settled' where creator_user_id = ${viewer}`);
-   expect((await top(options)).map(r => r.id)).toContain(ids[6]!);
+   expect((await top(options)).trending.map(r => r.id)).toContain(ids[6]!);
+   // B-P3-1's second half: a SETTLED post reaches the Settled pill of both
+   // audiences. Following + Settled and Top + Settled used to be always empty,
+   // because both audience reads asked for `statuses: ["open"]`.
+   await tx.execute(sql`update theses set status = 'settled', settled_at = now() where id = ${ids[6]!}`);
+   expect((await following(options)).settled.map(r => r.id)).toEqual([ids[6]!]);
+   expect((await top(options)).settled.map(r => r.id)).toContain(ids[6]!);
    throw rollback;
   }); } catch (error) { if (error !== rollback) throw error; }
  });

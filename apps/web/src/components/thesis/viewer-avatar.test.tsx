@@ -34,7 +34,7 @@ test("signed-out composer renders question mark without viewer image", () => {
 });
 
 test("participant row has a single 34px person avatar", () => {
- const html = renderToStaticMarkup(<PositionRows rows={[{ creator: creator(currentUser), side: "bull", riskedUsd: amount("1"), livePnlUsd: amount("0"), says: "" }]} />);
+ const html = renderToStaticMarkup(<PositionRows rows={[{ creator: creator(currentUser), side: "bull", sideLabel: "Bull", riskedUsd: amount("1"), livePnlUsd: amount("0"), says: "" }]} />);
  expect(html.match(/class="av /g)).toHaveLength(1);
  expect(html).toMatch(/<span class="av av-34 [^"]*"[^>]*><img/);
 });

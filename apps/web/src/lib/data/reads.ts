@@ -591,9 +591,17 @@ async function rankedTheses(kind: "trending" | "ending" | "settled", options: Ra
 	}), kind);
 	return ranked.map(row => mapThesis({ ...row, aggregates: aggregates.get(row.id) ?? { ...emptyAggregates }, dataAsOf: new Date() }));
 }
+/**
+ * B-P3-1 (pass 3): all three take `RankedReadOptions`. `endingSoon` and
+ * `settled` used to take only `{ limit }`, so the Following audience could not
+ * be read for them at all and the tabs intersected instead — which dropped a
+ * followed author's post whenever it sat outside the GLOBAL top `limit`.
+ * `rankedTheses` has always applied `creatorIds` inside the same query as the
+ * limit; only these two signatures were narrower than the implementation.
+ */
 export async function trending(options: RankedReadOptions = {}) { return rankedTheses("trending", options); }
-export async function endingSoon(options: ReadOptions & { limit?: number } = {}) { return rankedTheses("ending", options); }
-export async function settled(options: ReadOptions & { limit?: number } = {}) { return rankedTheses("settled", options); }
+export async function endingSoon(options: RankedReadOptions = {}) { return rankedTheses("ending", options); }
+export async function settled(options: RankedReadOptions = {}) { return rankedTheses("settled", options); }
 
 /**
  * One position and its owner, for `/p/[id]` and for the trade cards a post's

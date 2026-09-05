@@ -155,7 +155,10 @@ export interface Thesis {
 }
 export interface Participant {
     creator: Creator;
-    side: Side;
+    /** D-R3-1: the MARKET direction, same rule as `Position.side`. */
+    side: Side | null;
+    /** "Bull"/"Bear" from `directionLabel()`; null exactly when `side` is. */
+    sideLabel: string | null;
     riskedUsd: DisplayAmount;
     /** Optional: a row can exist before the indexer has the fill detail. */
     contracts?: string;
@@ -173,7 +176,15 @@ export interface Position {
     /** Null for a standalone position. */
     thesisHeadline: string | null;
     asset: string;
-    side: Side;
+    /**
+     * D-R3-1 (pass 3). The MARKET direction of the option, from
+     * `positionDirection()` — the same value the share card's `direction` and
+     * `/p/<id>` carry. Null when the order snapshot could not be decoded, and a
+     * null direction is printed as nothing rather than guessed.
+     */
+    side: Side | null;
+    /** "Bull"/"Bear" from `directionLabel()`; null exactly when `side` is. */
+    sideLabel: string | null;
     riskedUsd: DisplayAmount;
     livePnlUsd: DisplayAmount;
     contracts?: string;

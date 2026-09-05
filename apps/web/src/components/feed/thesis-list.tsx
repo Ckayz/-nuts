@@ -24,7 +24,15 @@ export function PositionRow({ position }: { position: Position }) {
 			<span className="t">
 				<b>{position.thesisHeadline ?? `${position.asset} position`}</b>
 				<i>
-					{position.side === "bull" ? "Bull" : "Bear"} · {usd(position.riskedUsd)} risked ·{" "}
+					{/*
+					 * D-R3-1 (pass 3). The direction comes from the option, via
+					 * `positionDirection()`, so this row and the same position's
+					 * share card cannot disagree. A row whose order snapshot could
+					 * not be decoded carries no direction and prints none, rather
+					 * than the participant's side of a post relabelled "Bull".
+					 */}
+					{position.sideLabel === null ? null : <>{position.sideLabel} · </>}
+					{usd(position.riskedUsd)} risked ·{" "}
 					<StatusChip status={position.statusTone} label={position.statusLabel} />
 				</i>
 			</span>

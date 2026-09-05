@@ -2,7 +2,6 @@
 
 import { useId, useState } from "react";
 import Link from "next/link";
-import type { Thesis } from "@/lib/display-types";
 import type { RankedTheses } from "@/lib/page-data";
 import { TodoOwner } from "@/components/primitives";
 import { CalloutPost } from "./callout-post";
@@ -25,9 +24,9 @@ const RANKING = ["Trending", "Ending", "Settled"] as const;
  * `TODO-OWNER`), and the tabs pick the audience:
  *
  *   All        the ranking read itself — that IS the whole feed, ranked;
- *   Following  the posts of creators the viewer follows, kept in the ranking's
- *              order and dropping the ones the ranking excludes;
- *   Top        the same, over the Top cohort.
+ *   Following  the SAME ranking read, restricted in SQL to the creators the
+ *              viewer follows, so the limit is applied to that audience;
+ *   Top        the same, over the Top cohort (TODO-OWNER: that cohort's rule).
  *
  * Nothing here sorts or filters on its own: every order is a read's order.
  *
@@ -35,8 +34,8 @@ const RANKING = ["Trending", "Ending", "Settled"] as const;
  */
 export function CalloutTabs({ ranked, following, top, signedIn, databaseMode }: {
 	ranked: RankedTheses;
-	following: Thesis[];
-	top: Thesis[];
+	following: RankedTheses;
+	top: RankedTheses;
 	signedIn: boolean;
 	databaseMode: boolean;
 }) {
@@ -45,10 +44,24 @@ export function CalloutTabs({ ranked, following, top, signedIn, databaseMode }: 
 	const audienceId = useId();
 	const rankingId = useId();
 
-	const order = [ranked.trending, ranked.ending, ranked.settled][ranking] ?? [];
-	const cohort = [null, following, top][audience] ?? null;
-	const posts =
-		cohort === null ? order : order.filter((post) => cohort.some((row) => row.slug === post.slug));
+	/**
+	 * B-P3-1 (Astra lane B, pass 3). ONE list, picked by audience AND ranking —
+	 * never an intersection. These two selections used to be applied one after
+	 * the other: the ranking picked the GLOBAL top N, then the audience filtered
+	 * that N down. Measured with seven eligible posts and a limit of six:
+	 *
+	 *   READER {"global":["post-0",…,"post-5"],"following":["post-6"]}
+	 *   ALL_RENDERED 6      FOLLOWING_RENDERED 0
+	 *
+	 * The followed author's only post ranked seventh globally, so it was never
+	 * in the list the filter ran over. Following + Settled and Top + Settled
+	 * were empty for the same shape of reason: the audience readers asked for
+	 * open posts only. Each audience now carries its own three ranked lists,
+	 * selected and limited together in SQL (`lib/social/feeds.ts`).
+	 */
+	const audiences = [ranked, following, top];
+	const selected = audiences[audience] ?? ranked;
+	const posts = [selected.trending, selected.ending, selected.settled][ranking] ?? [];
 
 	return <>
 		<div className="feed-head">

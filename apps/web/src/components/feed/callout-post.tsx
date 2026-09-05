@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CommentIcon, ShareIcon, SparkIcon } from "@/components/icons";
+import { CopyLink } from "@/components/position/copy-link";
 import { LikeButton } from "@/components/feed/like-button";
 import { PostText, TradeCards } from "@/components/feed/trade-card";
 import { PnlCard } from "@/components/position/pnl-card";
@@ -77,7 +78,7 @@ export function CalloutPost({
 						{thesis.backingCard ? <PnlCard card={thesis.backingCard} compact href /> : null}
 					</>
 				)}
-				<TagRow tag={thesis.tag} backed={thesis.backingCard != null} />
+				<TagRow thesisId={thesis.id} tag={thesis.tag} backed={thesis.backingCard != null} />
 				<div className="p-acts">
 					<LikeButton thesisId={thesis.id} signedIn={signedIn} databaseMode={databaseMode} likes={thesis.likes} liked={thesis.likedByViewer} />
 					<Link
@@ -88,16 +89,13 @@ export function CalloutPost({
 						<CommentIcon />
 						<span className="num">{thesis.commentCount}</span>
 					</Link>
-					<button className="act" type="button">
-						<ShareIcon />
-						Share
-					</button>
+					<CopyLink path={`/t/${thesis.slug}`} className="act" label={<><ShareIcon />Share</>} />
 					{/* Kept from the previous round: the AI lane owns what it does. */}
 					{compact ? null : (
-						<button className="act" type="button">
+						<Link className="act" href={`/agent?thesis=${thesis.id}`}>
 							<SparkIcon />
 							Explain
-						</button>
+						</Link>
 					)}
 				</div>
 			</div>

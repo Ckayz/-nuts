@@ -232,13 +232,6 @@ export interface MarketStructure {
     liquidityLeftUsd: DisplayAmount;
     selected: boolean;
 }
-/** One point of the price chart. Both fields are numbers only because the chart
- *  library draws pixels from them; neither is used for trading math. `time` is a
- *  UTC epoch in seconds. */
-export interface SeriesPoint {
-    time: number;
-    value: number;
-}
 export interface MarketSummary {
     slug: string;
     asset: string;
@@ -255,7 +248,6 @@ export interface Market extends MarketSummary {
     bookLabel: string;
     structureCount: number;
     expiryCount: number;
-    series: SeriesPoint[];
     structures: MarketStructure[];
     ticket: Ticket;
     /** The selected structure, spelled out above the ticket. */

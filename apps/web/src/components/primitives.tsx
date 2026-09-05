@@ -121,16 +121,16 @@ export function TodoOwner({ style }: { style?: CSSProperties }) {
  * structure and the "no position yet" note stay as neutral chips beside it,
  * because a post can carry all three and the mockup only draws the one case.
  */
-export function TagRow({ tag, backed }: { tag: Tag | null; backed?: boolean }) {
+export function TagRow({ tag, backed, thesisId }: { tag: Tag | null; backed?: boolean; thesisId: string }) {
 	if (!tag) return null;
 	return (
 		<div className="tags">
-			<Link className="mtag" href={`/m/${tag.slug}`}>
+			<Link className="mtag" href={`/m/${tag.slug}?thesis=${thesisId}`}>
 				<Avatar initials={tag.asset} tone="asset" size={26} />
 				{tag.asset} market
 			</Link>
 			{tag.structureLabel ? (
-				<Link className="mtag" href={`/m/${tag.slug}`} style={{ paddingLeft: "12px" }}>
+				<Link className="mtag" href={`/m/${tag.slug}?thesis=${thesisId}`} style={{ paddingLeft: "12px" }}>
 					{tag.structureLabel}
 				</Link>
 			) : null}

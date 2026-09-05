@@ -3,7 +3,7 @@ import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import { FeedRail } from "@/components/shell/feed-rail";
 import { PageFrame } from "@/components/shell/page-frame";
-import { Avatar } from "@/components/primitives";
+import { Avatar, TodoOwner } from "@/components/primitives";
 import { YourPositionsRail } from "@/components/market/your-positions-rail";
 import { TaggedPostsTabs } from "@/components/market/tagged-posts-tabs";
 import { getSession } from "@/lib/auth/session";
@@ -54,7 +54,7 @@ interface Loaded {
 	unavailable: string | null;
 }
 
-async function load(asset: string, params: Record<string, string | undefined>): Promise<Loaded | null> {
+async function load(asset: string, params: Record<string, string | undefined>): Promise<Loaded | { error: string } | null> {
 	if (!usingDatabase()) {
 		const market = marketBySlug(asset);
 		if (!market) return null;
@@ -73,14 +73,12 @@ async function load(asset: string, params: Record<string, string | undefined>): 
 		side: params.side ?? null,
 		structureId: params.structure ?? null,
 		budgetInput: params.budget ?? null,
-	});
+	}).catch(() => ({ error: "feed_unavailable", detail: "Live OptionBook data could not be loaded." }));
 	if (data === null) return null;
 	if ("error" in data) {
 		// The book could not be read. Say that, rather than render a page that
 		// looks like Thetanuts has no liquidity for this asset.
-		const fallback = marketBySlug(asset);
-		if (!fallback) return null;
-		return { market: fallback, summaries: [], tagged: [], trade: null, unavailable: data.detail };
+		return { error: data.detail };
 	}
 	return { ...data, unavailable: null };
 }
@@ -105,6 +103,10 @@ export default async function MarketPage({
 		budget: single("budget"),
 	});
 	if (loaded === null) notFound();
+	if ("error" in loaded) {
+		// TODO-OWNER: feed-unavailable copy; no fixture market or ticket on failure.
+		return <PageFrame left={<FeedRail posts={await railTheses()} />}><section className="card pad"><h1>Market unavailable</h1><p>Live OptionBook data could not be loaded. <TodoOwner /></p></section></PageFrame>;
+	}
 	const { market, summaries, tagged, trade, unavailable } = loaded;
 	const databaseMode = usingDatabase();
 	const signedIn = databaseMode && (await getSession()) !== null;
@@ -133,8 +135,8 @@ export default async function MarketPage({
 						<section className="card pad mkt-panel">
 							<h3 style={{ fontSize: "15px" }}>Post about {market.asset}</h3>
 							<p className="fine">
-								Write your read on this market. A post is text first — tag this structure if you
-								want, and it shows the verified badge only once your own fill confirms.
+								{/* TODO-OWNER: standalone trades cannot confer a verified post badge. */}
+								Write your read on this market. You can tag the market or link a trade. Linking a standalone trade does not add a verified badge. <TodoOwner />
 							</p>
 							<Link className="btn sec block" style={{ marginTop: "14px" }} href="/new">
 								Write a post
@@ -206,7 +208,7 @@ export default async function MarketPage({
 									</span>
 									<span className="v">
 										<b className="num">{usd2(m.spotUsd)}</b>
-										<i className={`${m.changeClass} num`}>{m.changeLabel}</i>
+										{m.changeLabel ? <i className={`${m.changeClass} num`}>{m.changeLabel}</i> : null}
 									</span>
 								</Link>
 							))}
@@ -231,19 +233,12 @@ export default async function MarketPage({
 						</div>
 						<span className="px">
 							<b className="num">{usd2(market.spotUsd)}</b>
-							<i className={`${market.changeClass} num`}>
-								{market.changeLabel} <span className="mut">24h</span>
-							</i>
 						</span>
 					</div>
 					<div className="stats">
 						<span className="tile">
 							<i>Spot</i>
 							<b className="num">{usd(market.spotUsd)}</b>
-						</span>
-						<span className="tile">
-							<i>24h</i>
-							<b className={`${market.changeClass} num`}>{market.changeLabel}</b>
 						</span>
 						<span className="tile">
 							<i>Structures</i>

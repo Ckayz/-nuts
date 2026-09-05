@@ -275,12 +275,6 @@ export interface Market {
     currentSpotPriceUsd: string;
     changePct: string;
     dataAsOf: string;
-    /** Hourly closes, oldest first. `time` is a UTC epoch in SECONDS, the unit
-     *  the chart library's `UTCTimestamp` uses. */
-    series: {
-        time: number;
-        priceUsd: string;
-    }[];
     structures: MarketStructure[];
     /** Which structure the ticket is quoting; must be one of `structures`. */
     selectedStructureId: string;

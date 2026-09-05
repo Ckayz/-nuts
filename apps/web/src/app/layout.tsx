@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Manrope } from "next/font/google";
 import "../index.css";
+import { marketSummariesData } from "@/lib/market/summaries";
 import { Nav } from "@/components/shell/nav";
 import { TopBar } from "@/components/shell/top-bar";
 import Providers from "@/components/providers";
@@ -24,17 +25,18 @@ export const metadata: Metadata = {
 	description: "Put your money where your thesis is.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
 	children,
 }: Readonly<{
 	children: React.ReactNode;
 }>) {
+	const markets = await marketSummariesData();
 	return (
 		<html lang="en" className={manrope.variable} suppressHydrationWarning>
 			<body>
 				<Providers>
 					<TopBar />
-					<Nav />
+					<Nav firstMarketSlug={markets.markets[0]?.slug} unavailable={markets.unavailable} />
 					<main className="wrap">{children}</main>
 					{/* The mockup's footer line, minus its "mockup only". The
 					    provenance string is the fixtures' own and is true of them

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { PositionRows } from "@/components/thesis/position-rows";
 import { FeedRail } from "@/components/shell/feed-rail";
 import { PageFrame } from "@/components/shell/page-frame";
@@ -20,8 +21,8 @@ export default async function PortfolioPage() {
   <Leaderboard entries={discover.leaderboard} signedIn={discover.signedIn} databaseMode={discover.databaseMode} />
   <div className="card-f">P&amp;L is 1W, from onchain fills and settlements. Ranking formula<TodoOwner /></div>
  </section>}>
-  {currentUser ? <CreatorStats creator={currentUser} profile self /> : null}
-  <div className="tabs"><span>Positions</span></div>
-  <PositionRows rows={[...openPositions, ...settledPositions]} />
+  {/* TODO-OWNER: own-profile link copy. */}
+  {currentUser ? <><CreatorStats creator={currentUser} profile self /><Link className="btn sec" href={`/u/${currentUser.handle}`}>Your profile</Link></> : null}
+  <PositionRows title="Positions" rows={[...openPositions, ...settledPositions]} />
  </PageFrame>;
 }

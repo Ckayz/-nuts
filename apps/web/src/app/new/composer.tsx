@@ -34,6 +34,8 @@ const INITIAL: PublishFormState = { error: null };
 
 export function Composer({
 	assets,
+	marketsUnavailable,
+	siteOrigin,
 	presetAsset,
 	presetRationale,
 	previewCards,
@@ -42,6 +44,8 @@ export function Composer({
 }: {
 	/** Tag pills; they come from live book data, never a hardcoded list. */
 	assets: AssetTag[];
+	marketsUnavailable?: boolean;
+	siteOrigin?: string;
 	/** `?asset=` from the URL, already validated; null when absent. */
 	presetAsset: string | null;
 	/** `?link=` turned into rationale text, so the card unfurls immediately. */
@@ -53,11 +57,12 @@ export function Composer({
 }) {
 	const [state, formAction, pending] = useActionState(publishPostFromForm, INITIAL);
 	const [tag, setTag] = useState(presetAsset);
+	const [headline, setHeadline] = useState("");
 	const [rationale, setRationale] = useState(presetRationale);
 
 	// The preview only needs to know WHETHER the text still links the position
 	// the page resolved; it never resolves anything itself.
-	const linked = new Set(extractTradeLinks(rationale));
+	const linked = new Set(extractTradeLinks(`${headline}\n${rationale}`, siteOrigin));
 	const cards = previewCards.filter((card) => linked.has(card.id));
 
 	const message = state.error === null ? null : (MESSAGES[state.error] ?? state.error);
@@ -76,6 +81,8 @@ export function Composer({
 				<Textarea
 					id="post-headline"
 					name="headline"
+					value={headline}
+					onChange={event => setHeadline(event.target.value)}
 					rows={4}
 					placeholder="What's your read?"
 					required
@@ -113,6 +120,8 @@ export function Composer({
 
 			<div className="field">
 				<span className="lbl">Tag a market (optional)</span>
+				{/* TODO-OWNER: live market failure copy. */}
+				{marketsUnavailable ? <span className="mut">Markets unavailable. <TodoOwner /></span> : null}
 				<input type="hidden" name="taggedAsset" value={tag ?? ""} />
 				<div className="pills">
 					{assets.map(({ asset, name }) => (

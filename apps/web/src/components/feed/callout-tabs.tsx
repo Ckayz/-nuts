@@ -29,8 +29,7 @@ const RANKING = ["Trending", "Ending", "Settled"] as const;
  *
  * Nothing here sorts or filters on its own: every order is a read's order.
  *
- * ARIA is unchanged — two real tablists with roving tabindex, which the keyboard
- * tests in `lib/social/feeds-tabs.test.tsx` pin attribute by attribute.
+ * Audience tabs control the one panel; ranking pills are aria-pressed filters.
  */
 export function CalloutTabs({ ranked, following, top, signedIn, databaseMode }: {
 	ranked: RankedTheses;
@@ -54,7 +53,8 @@ export function CalloutTabs({ ranked, following, top, signedIn, databaseMode }: 
 			<TabHeading id={audienceId} labels={AUDIENCE} selected={audience} onSelect={setAudience} />
 			<TabHeading id={rankingId} labels={RANKING} selected={ranking} onSelect={setRanking} variant="pills" />
 		</div>
-		<NewCalloutsBar />
+		{/* TODO-OWNER: unseen-post read is not implemented; no fixture banner in db mode. */}
+		{databaseMode ? null : <NewCalloutsBar />}
 		<TabPanel id={audienceId} selected={audience}>
 			{audience === 1 && databaseMode && !signedIn ? <span className="note">Sign in to see posts from creators you follow. <TodoOwner /></span> : null}
 			{/* TODO-OWNER: signed-out Following copy above; Top inherits the trending rule. */}

@@ -1060,39 +1060,8 @@ export const footerSource = "Base · Thetanuts V4 · example data";
  * from docs/mockups/thesis-fun-mockup.html (market view table, "Take a side"
  * panel and the footer ticker). The ETH and SOL rows are example rows in the
  * same shape, reusing the strikes and expiries the mockup's own posts name.
- * TODO-OWNER: how structures are ordered, which are surfaced first, and which
- * chart windows ship are all product rules nobody has decided.
+ * TODO-OWNER: how structures are ordered and surfaced are product rules nobody has decided.
  */
-/**
- * Price history for the market chart: the mockup's own seeded walk, ported
- * point for point — 168 hourly steps, seed 7, s = (s * 9301 + 49297) % 233280,
- * drift -2 below step 110 and +18 above (docs/mockups/thesis-fun-mockup.html,
- * drawSpot / drawMarket), scaled per asset.
- *
- * One deliberate deviation: the mockup overwrites its LAST point with the spot
- * price, which leaves a vertical spike in a real chart. Here the whole walk is
- * shifted so it ENDS at the spot instead, which keeps the mockup's shape and
- * the mockup's closing price without the artifact.
- *
- * EXAMPLE DATA: a shape, not a price feed.
- */
-function walk(startUsd: number, stepUsd: number, driftUsd: number, endsAtUsd: string, lastAt: string) {
-    const points = 168;
-    const lastSeconds = Math.floor(Date.parse(lastAt) / 1000);
-    let s = 7;
-    let price = startUsd;
-    const raw: number[] = [];
-    for (let i = 0; i < points; i++) {
-        s = (s * 9301 + 49297) % 233280;
-        price += (s / 233280 - 0.5) * stepUsd + (i > 110 ? driftUsd : -driftUsd / 9);
-        raw.push(price);
-    }
-    const offset = Number(endsAtUsd) - raw[points - 1]!;
-    return raw.map((value, i) => ({
-        time: lastSeconds - (points - 1 - i) * 3600,
-        priceUsd: (value + offset).toFixed(2),
-    }));
-}
 export const markets: Market[] = [
     {
         "slug": "btc",
@@ -1102,7 +1071,6 @@ export const markets: Market[] = [
         "currentSpotPriceUsd": "79607.32",
         "changePct": "1.65",
         "dataAsOf": "2026-09-04T18:00:00Z",
-        "series": walk(78100, 420, 18, "79607.32", "2026-09-04T18:00:00Z"),
         "selectedStructureId": "btc-11sep-78000-74000-ps",
         "taggedThesisSlugs": ["btc-nfp-4a2c", "nfp-nobody-is-pricing"],
         "structures": [
@@ -1133,7 +1101,6 @@ export const markets: Market[] = [
         "currentSpotPriceUsd": "2450.21",
         "changePct": "2.46",
         "dataAsOf": "2026-09-04T18:00:00Z",
-        "series": walk(2402, 13, 0.55, "2450.21", "2026-09-04T18:00:00Z"),
         "selectedStructureId": "eth-25sep-2600-2800-cs",
         "taggedThesisSlugs": ["eth-calls-cheapest-all-quarter", "eth-reclaims-2600-into-fusaka", "eth-prints-2500-by-friday-close"],
         "structures": [
@@ -1161,7 +1128,6 @@ export const markets: Market[] = [
         "currentSpotPriceUsd": "101.46",
         "changePct": "3.18",
         "dataAsOf": "2026-09-05T06:00:00Z",
-        "series": walk(99.4, 0.55, 0.023, "101.46", "2026-09-05T06:00:00Z"),
         "selectedStructureId": "sol-06sep-100-p",
         "taggedThesisSlugs": ["sol-loses-100-before-the-weekend"],
         "structures": [

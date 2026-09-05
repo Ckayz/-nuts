@@ -245,3 +245,21 @@ test("an absolute link only unfurls when the origin is supplied", () => {
 	expect(linkedPositionIds([post(text)])).toEqual([]);
 	expect(linkedPositionIds([post(text)], "https://thesis.fun")).toEqual([P1]);
 });
+
+test("headline-only same-origin links unfurl; foreign headline URLs do not", async () => {
+	const origin = "https://thesis.fun";
+	const base = post(null);
+	const headline = { ...base, thesis: { ...base.thesis, headline: `${origin}/p/${P1}` } };
+	expect(linkedPositionIds([headline], origin)).toEqual([P1]);
+	const resolved = new Map([[P1, { position: position(), owner }]]);
+	const [enriched] = await enrichWithTradeLinks([headline], async () => resolved, origin);
+	expect(enriched?.linkedPositions?.map(row => row.position.id)).toEqual([P1]);
+	expect(linkedPositionIds([{ ...headline, thesis: { ...headline.thesis, headline: `https://foreign.example/p/${P1}` } }], origin)).toEqual([]);
+});
+
+test("headline and rationale share one deduplicated card cap", () => {
+	const ids = Array.from({ length: 6 }, (_, i) => `9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f0${i}`);
+	const base = post(ids.map(id => `/p/${id}`).join(" "));
+	const row = { ...base, thesis: { ...base.thesis, headline: `/p/${ids[0]} /p/${ids[1]}` } };
+	expect(linkedPositionIds([row])).toEqual(ids.slice(0, 4));
+});

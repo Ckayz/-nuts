@@ -13,6 +13,8 @@
  * foreign host, a `javascript:` URL, junk — is dropped and the composer simply
  * opens empty. `?asset=` must be a ticker shape and is uppercased.
  */
+import { siteOrigin } from "../site-origin";
+import { marketSummariesData } from "../market/summaries";
 import type { PnlCard } from "../display-types";
 import { usingDatabase } from "../data/source";
 import { extractTradeLinks, tradeLinkHref } from "./links";
@@ -26,6 +28,8 @@ export interface AssetTag {
 
 export interface ComposerData {
 	assets: AssetTag[];
+	marketsUnavailable: boolean;
+	siteOrigin: string;
 	presetAsset: string | null;
 	presetRationale: string;
 	previewCards: PnlCard[];
@@ -50,16 +54,12 @@ export async function composerData(
 	searchParams: { [key: string]: string | string[] | undefined },
 ): Promise<ComposerData> {
 	const databaseMode = usingDatabase();
-	// UNCHANGED FROM BEFORE THIS ROUND: the tag pills come from `marketSummaries`
-	// in both modes, because `/new` reads no live book. FLAGGED, not fixed —
-	// swapping the source is a market-page/data decision that belongs to the
-	// worker who owns the book reads, not to the trade-card round.
-	const { marketSummaries } = await import("../view-data");
-	const asset = presetAsset(single(searchParams.asset));
+	const origin = await siteOrigin();
+	const { markets: marketSummaries, unavailable: marketsUnavailable } = await marketSummariesData();
+	const requestedAsset = presetAsset(single(searchParams.asset));
+	const asset = databaseMode && !marketSummaries.some(market => market.asset === requestedAsset) ? null : requestedAsset;
 	const assets: AssetTag[] = marketSummaries.map((market) => ({ asset: market.asset, name: market.name }));
-	// A preselected ticker is always offered, even when it is not in the list
-	// above, so `?asset=` cannot arrive selected but invisible. Its name is the
-	// ticker itself: nothing here knows a name the book has not published.
+	// Mock presets retain their fixture behavior. Db pills contain only the live set.
 	if (asset !== null && !assets.some((tag) => tag.asset === asset)) assets.unshift({ asset, name: asset });
 
 	// The ONE card builder (round-1 fold item 9). Imported here rather than at the
@@ -70,14 +70,14 @@ export async function composerData(
 	const link = single(searchParams.link);
 	// `?link=` is validated by the SAME grammar the post text is read with, so a
 	// link the composer accepts is exactly a link that will unfurl.
-	const [linkedId] = link === null ? [] : extractTradeLinks(link);
+	const [linkedId] = link === null ? [] : extractTradeLinks(link, origin);
 	const presetRationale = linkedId === undefined ? "" : tradeLinkHref(linkedId);
 
 	if (!databaseMode) {
 		const mock = await import("@/mock/data");
 		const found = mock.mockLinkedPositions.filter((entry) => entry.position.id === linkedId);
 		return {
-			assets,
+			assets, marketsUnavailable, siteOrigin: origin,
 			presetAsset: asset,
 			presetRationale,
 			previewCards: found.map((entry) => linkedPositionCard(entry)),
@@ -91,7 +91,7 @@ export async function composerData(
 	const { listPositionsByIds } = await import("../data/reads");
 	const entry = linkedId === undefined ? undefined : (await listPositionsByIds([linkedId])).get(linkedId);
 	return {
-		assets,
+		assets, marketsUnavailable, siteOrigin: origin,
 		presetAsset: asset,
 		presetRationale,
 		previewCards: entry === undefined ? [] : [linkedPositionCard(entry)],

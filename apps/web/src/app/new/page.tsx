@@ -27,14 +27,14 @@ export default async function NewThesisPage({
 	const data = await composerData(await searchParams);
 	return (
 		<div className="wrap">
-			<main className="compose stack lg">
+			<div className="compose stack lg">
 				<Composer {...data} />
 				{/* The mockup puts this line OUTSIDE the card, centred under it. */}
 				<p className="mut compose-foot">
-					A thesis is text first. Tag a market if you want, link one of your positions if
-					you have one — the verified badge only appears once your own fill confirms.
+					{/* TODO-OWNER: standalone trades cannot confer a verified post badge. */}
+					A thesis is text first. Tag a market or link a trade if you want. Linking a standalone trade does not add a verified badge.
 				</p>
-			</main>
+			</div>
 		</div>
 	);
 }

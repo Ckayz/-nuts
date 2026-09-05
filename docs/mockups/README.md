@@ -27,9 +27,9 @@ The top-right wallet chip toggles between the connected and signed-out states wh
 
 ## Design rules the code follows
 
-- **One accent** (`--accent: #6f5cff`). It appears on primary buttons, the active tab
+- **One accent** (`--accent: #3f6fe0`). It appears on primary buttons, the active tab
   underline, the selected side, the share-card frame, the "Open" chip and focus rings —
-  nowhere else. `--accent-lift` (`#a99bff`) is the same hue, lightened only so accent
+  nowhere else. `--accent-lift` (`#7598e9`) is the same hue, lightened only so accent
   text on a dark tint clears 4.5:1.
 - **Colour only on money.** `--gain` / `--loss` are used on numbers. Never on bars,
   backgrounds, labels or names. The percent beside a P&L is neutral text with a coloured

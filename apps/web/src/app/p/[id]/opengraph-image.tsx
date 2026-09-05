@@ -29,9 +29,9 @@ const SURFACE_2 = "#201d2d";
 const LINE = "#282438";
 const TEXT = "#f7f7f7";
 const MUTED = "#9899a3";
-const ACCENT = "#6f5cff";
-const ACCENT_LIFT = "#a99bff";
-const ACCENT_TINT = "rgba(111,92,255,.14)";
+const ACCENT = "#3f6fe0";
+const ACCENT_LIFT = "#7598e9";
+const ACCENT_TINT = "rgba(63,111,224,.14)";
 const GAIN = "#1cce59";
 const LOSS = "#fd6536";
 

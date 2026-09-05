@@ -36,13 +36,18 @@ transitions, the real grid widths in px, empty states, error states, mobile web 
 | panel / row | `#181623` | `--surface #14141b` | same, theirs carries the violet tint |
 | tile / field | `#15141b`, inputs `#13111b` | `--surface2 #1b1b24` | ours lighter than theirs |
 | chip | `#24232a` | — | no direct equivalent |
-| accent | `#596ce9`, badge fill `#394dbd` | `--accent #6f5cff` | theirs is **bluer**; ours more purple |
+| accent | `#596ce9`, badge fill `#394dbd` | `--accent #3f6fe0` | measured hue 232° vs ours 222° — ours now sits a touch **bluer** than theirs (ours was the violet accent at hue 247° until the accent-C swap) |
 | gain | `#1cce59` | `--gain #22c55e` | effectively the same |
 | loss | `#fd6536` | `--loss #f4634f` | effectively the same — note both are **orange-leaning**, not pure red |
 | body text | `#f7f7f7` | `--text #f2f2f5` | same |
 
 The takeaway: our money colours are already right. The two real differences are the
 **violet tint in the dark neutrals** and an accent that sits a step bluer than ours.
+
+> Both of those gaps have since been closed: the neutrals in `b250adb` ("take fomo's
+> palette, keep our accent") and the accent on 2026-09-06, when the owner picked the
+> blue candidate C (`#3f6fe0`). The `ours` column above is the palette as sampled that
+> day; only the accent row has been updated in place.
 
 ## Type
 

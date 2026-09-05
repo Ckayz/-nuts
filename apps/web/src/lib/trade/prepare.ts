@@ -111,7 +111,16 @@ export async function prepareTradeFor(
 	// ticket until it is settled. The browser holds the same fence in
 	// `lib/trade/held-fill.ts`; this one also covers a cleared store, a second
 	// tab and another device. A read failure is NOT treated as "no such row" —
-	// it throws, and the action's own catch turns it into a refusal.
+	// it throws.
+	//
+	// K-1, correcting this comment at the bytes: the sentence used to say "the
+	// action's own catch turns it into a refusal", and `./actions.ts` has NO
+	// catch. What actually happens is that the throw leaves the server action,
+	// the CALLER catches it (`components/market/take-a-side.tsx:850`,
+	// `components/agent/trade-execution.tsx`) and shows a failure — and no
+	// calldata is ever built either way, which is the property that matters. The
+	// chain fence below catches its own read failure so the person is told what
+	// went wrong instead of seeing a generic action error.
 	const unrecorded = await findUnrecordedFill(db, session.walletAddress, new Date());
 	if (unrecorded !== null) {
 		return fail("UNRECORDED_FILL", unrecordedFillReason(unrecorded.txHash));
@@ -144,6 +153,15 @@ export async function prepareTradeFor(
 	//  - a fill this wallet took OUTSIDE this app has no row and never will, so
 	//    it refuses the ticket for the length of the window. It self-heals, the
 	//    same way the pending fence does. Recorded in docs/OPEN-WORK.md §7.
+	//  - the log filter is `buyer OR seller`, which is every party to the fill,
+	//    so a wallet that is a MAKER on the book is refused by its own makers'
+	//    fills too. Kept deliberately WIDE: narrowing the fence on a money path
+	//    is a product decision, and refusing too much costs a wait while
+	//    refusing too little costs a duplicated premium. The discriminator is
+	//    measured and available when the owner wants it — on all three
+	//    chain-verified production fills the TAKER is `sellerWasMaker ? buyer :
+	//    seller` (`0x9c4bb1…` buyer/true, `0xdf3323…` seller/false, `0x3e7417…`
+	//    seller/false). Recorded in docs/OPEN-WORK.md §7.
 	let chainFills: ReadonlyArray<{ txHash: string }>;
 	try {
 		chainFills = await recentFillsByWallet(session.walletAddress as Address, fills);

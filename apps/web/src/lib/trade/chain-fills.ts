@@ -23,6 +23,14 @@ import "server-only";
  * (measured from `OPTION_BOOK_ABI` in the installed SDK 0.3.0), so the filter
  * is a topic filter and costs one cheap `eth_getLogs` per side.
  *
+ * DELIBERATELY WIDE: `buyer OR seller` is every party to the fill, so a wallet
+ * that is also a MAKER on the book matches its own makers' fills. Narrowing it
+ * is a product decision (it changes when the app refuses), so it is not taken
+ * here — but the discriminator is measured and written down: on all three
+ * chain-verified production fills the TAKER is `sellerWasMaker ? buyer : seller`
+ * (`0x9c4bb1…` buyer / `sellerWasMaker: true`; `0xdf3323…` and `0x3e7417…`
+ * seller / `false`, each matching the transaction's own `from`).
+ *
  * Fails LOUD: any RPC failure throws. A read that could not run is never "no
  * fills" — the caller turns the throw into a refusal, never into a pass.
  */

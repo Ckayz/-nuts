@@ -1,5 +1,5 @@
 import { Avatar } from "@/components/primitives";
-import { pnlClass, signedUsd, usd } from "@/lib/format";
+import { pnlClass, signedUsd } from "@/lib/format";
 import type { Creator } from "@/lib/display-types";
 
 export function CreatorStats({ creator }: { creator: Creator }) {
@@ -51,12 +51,6 @@ export function CreatorStats({ creator }: { creator: Creator }) {
 					<>
 						<dt>Followers</dt>
 						<dd>{creator.followers}</dd>
-					</>
-				) : null}
-				{creator.creatorPayoutsUsd !== undefined ? (
-					<>
-						<dt>Creator payouts</dt>
-						<dd className="acc">{usd(creator.creatorPayoutsUsd)}</dd>
 					</>
 				) : null}
 				{creator.biggestLossUsd !== undefined ? (

@@ -13,7 +13,6 @@ export const yourPositions = data.yourPositions.map(display.position);
 export const yourSettledPositions = data.yourSettledPositions.map(display.position);
 export const btcNfpDetail = display.detail(data.btcNfpDetail);
 export const thesisDetails = data.thesisDetails.map(display.detail);
-export const creatorPayouts = { paidToCreatorsUsd: display.amount(data.creatorPayouts.paidToCreatorsUsd), fromFollowerFillsUsd: display.amount(data.creatorPayouts.fromFollowerFillsUsd), topEarner: display.creator(data.creatorPayouts.topEarner), topEarnerUsd: display.amount(data.creatorPayouts.topEarnerUsd) };
 export const newCallouts = { count: data.newCallouts.count, avatars: data.newCallouts.avatars.map(display.creator) };
 export const marketPrices = data.marketPrices.map(display.price);
 export const marketsSource = data.marketsSource;

@@ -66,7 +66,6 @@ export type Creator = ThesisAiContext["creator"] & {
     followers: number | null;
     netPnlUsd: string | null;
     verifiedPnl30dUsd: string | null;
-    creatorPayoutsUsd: string | null;
     biggestLossUsd: string | null;
 };
 export interface SideStats {
@@ -102,7 +101,6 @@ export interface Thesis extends Omit<ThesisAiContext, "creator" | "structure"> {
     pooledUsd: string | null;
     bull: SideStats;
     bear: SideStats;
-    earningsUsd: string;
     fills: number;
     likes: number;
     commentCount: number;

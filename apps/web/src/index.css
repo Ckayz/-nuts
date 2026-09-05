@@ -1,8 +1,7 @@
 @import '@nuts/ui/globals.css';
 
 /* Thesis.fun component styles.
-   Ported verbatim from docs/mockups/thesis-fun-mockup.html lines 10-186;
-   only the design-token names changed (--x -> --tn-x, defined in @nuts/ui/globals.css). */
+   Ported from the mockup, with route-layout, link-focus and radio-selector adaptations. */
 @layer components {
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--tn-g);color:var(--tn-k);font-family:var(--tn-sans);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
@@ -124,8 +123,6 @@
     .acts .sides .b2:hover{background:var(--tn-bear-soft);border-color:var(--tn-bear-fill);color:var(--tn-bear)}
     .acts .ai{border:1px solid var(--tn-l2);border-radius:999px;padding:3px 9px;font-family:var(--tn-sans);font-weight:600}
     .acts .ai:hover{border-color:var(--tn-acc);background:var(--tn-acc-soft);color:var(--tn-k)}
-    .earn{font-family:var(--tn-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--tn-m)}
-    .earn b{color:var(--tn-k);font-weight:500} .earn::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--tn-acc);margin-right:6px;vertical-align:middle}
 
     /* ===== right rail: theses list ===== */
     .tl{display:flex;flex-direction:column}

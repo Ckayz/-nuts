@@ -737,12 +737,22 @@ describe("positionPage", () => {
 		// PRD 7.3: the badge still needs a verified receipt, which this has not.
 		expect(unproven.verified).toBe(false);
 
-		// Every OTHER failure is still a revert, and still says so.
+		// C-R4 (confirming round) CORRECTS this test's last line. It used to
+		// assert `debit_differs_from_prepared` -> "Failed", which was the bug: that
+		// reason is written at `record.ts:288`, AFTER a successful receipt and
+		// after `matchFillEvent` bound this wallet as the taker, so the money
+		// moved. The full reason-by-reason table lives in `lifecycle.test.ts`.
 		const reverted = card("transaction_reverted");
 		expect(reverted.statusLabel).toBe("Failed");
 		expect(reverted.pnlBasisLabel).toBe("This transaction failed, so there is no position.");
 		expect(card(null).statusLabel).toBe("Failed");
-		expect(card("debit_differs_from_prepared").statusLabel).toBe("Failed");
+		expect(card("no_matching_order_filled").statusLabel).toBe("Failed");
+		// A refusal written over a PROVEN fill is not a revert.
+		for (const reason of ["debit_differs_from_prepared", "filled_order_differs_from_prepared"]) {
+			const refused = card(reason);
+			expect(refused.statusLabel).toBe("Not tracked yet");
+			expect(refused.pnlBasisLabel).not.toContain("transaction failed");
+		}
 	});
 
 	test("a settled row reads Result, never Live P&L", () => {

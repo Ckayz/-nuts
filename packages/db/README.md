@@ -20,9 +20,9 @@ USD display values use Postgres `numeric` and cross application interfaces as de
 
 Wallet addresses are normalized to lowercase before persistence. Database checks enforce lowercase values in `users`, `auth_challenges`, and `positions`.
 
-Constraint triggers fence every referenced creator position to the same thesis and creator, creator role, Base mainnet, a confirmed lifecycle status, and a non-null confirmation timestamp. Raw SQL writers must explicitly maintain `users.updated_at`; Drizzle updates apply its `$onUpdate` callback.
+On thesis writes and referenced-position updates or deletes, constraint triggers fence every referenced creator position to the same thesis and creator, creator role, Base mainnet, a confirmed lifecycle status, and a non-null confirmation timestamp. Raw SQL writers must explicitly maintain `users.updated_at`; Drizzle updates apply its `$onUpdate` callback.
 
-The position wallet must also equal the creator user's wallet. A deferred user-wallet trigger rejects a changed wallet while that user has an open, expired, or settled thesis (same-value updates are allowed). This is the simpler rejection policy requested in round 3, rather than reassigning historic positions.
+Those validations also require the position wallet to equal the creator user's wallet. A deferred user-wallet trigger rejects a changed wallet while that user has an open, expired, or settled thesis (same-value updates are allowed). Draft, pending, and cancelled theses may retain a linked position after a later user-wallet change; the user-wallet trigger does not fence those statuses. The AI availability wrapper returns `not_published` for drafts and cancelled theses; the strict builder rejects a wallet mismatch with `POSITION_MISMATCH`. For pending theses with a mismatched position, the wrapper returns `invalid_position`.
 
 `positions.chain_id` and `auth_challenges.chain_id` must be 8453. Confirmed, indexed, expired, and settled positions require a non-null `fill_event` with version 1; write it through `encodeFillEventSnapshot`. SQL NULL, a missing version, and JSON null cannot satisfy the check.
 
@@ -44,6 +44,8 @@ The chain is rebased onto the AI track's migration, which is already applied to 
 - `0000_agent_tables` — the AI track's six `agent_*` tables (`docs/HANDOVER.md` §4). Restored byte-identically from `origin/main`; already applied to production. Never regenerate or edit it.
 - `0001_core_schema` — generated from `src/schema`: the five enums, the seven core tables with their generated checks, the foreign keys, and the unique indexes.
 - `0002_core_triggers` — hand-written: three `plpgsql` trigger functions and the five triggers they back (the creator-position invariant on `theses` and `positions`, the public-creator wallet invariant on `users`, and the two order-snapshot immutability triggers). Drizzle does not model functions or triggers, so this migration has no snapshot of its own; the next `drizzle-kit generate` correctly continues from `meta/0001_snapshot.json`.
+
+`0001_core_schema` and `0002_core_triggers` must always be applied together before any core row exists.
 
 Why the chain was rebased: drizzle-orm's migrator reads only the single most recently applied row (`order by created_at desc limit 1`) and applies a journal entry when `lastDbMigration.created_at < migration.folderMillis` (`drizzle-orm/pg-core/dialect.js`). It never compares tags or hashes. Our original chain carried `when` timestamps *earlier* than the already-applied `0000_agent_tables`, so every one of our migrations would have been skipped silently against production — reporting success while changing nothing. Any migration added from here must carry a `when` greater than every applied entry. `bunx drizzle-kit generate` does this automatically; a hand-written journal entry must be given a fresh `Date.now()`.
 
@@ -73,7 +75,7 @@ Never run `drizzle-kit push` (or `bun run db:push`) against the shared Supabase 
 
 Existing rows must satisfy the checks in `0001_core_schema` before migration can succeed. No backfill values are invented here.
 
-After applying migrations, run `DATABASE_URL='<intended-test-postgres-url>' bun test test/schema.integration.test.ts`. Each integration case seeds its own transaction and rolls it back. Without `DATABASE_URL`, the file emits one skipped test. The isolated trigger tests temporarily drop the overlapping Base CHECK or creator-position FK inside their rollback transaction to prove the trigger itself rejects the invalid relationship. Use a test database whose role owns these tables.
+After applying migrations, run `DATABASE_URL='<intended-test-postgres-url>' bun test test/schema.integration.test.ts`. Each integration case seeds its own transaction and rolls it back. Without `DATABASE_URL`, the file emits one skipped test. The isolated trigger tests temporarily drop the overlapping Base CHECK or creator-position FK inside their rollback transaction to prove the trigger itself rejects the invalid relationship. Use a test database whose role owns these tables. Run `DATABASE_URL='<intended-test-postgres-url>' bun test test/schema.concurrency.test.ts` for the two-connection publication/status and publication/wallet races in both orders. These tests commit unique fixtures and delete them in cleanup, observe blocking with `pg_blocking_pids`, and set a statement timeout on both connections. Without `DATABASE_URL`, the concurrency file also emits one skipped test.
 
 ## AI teammate handoff
 

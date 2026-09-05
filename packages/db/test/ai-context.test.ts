@@ -150,6 +150,18 @@ describe("ThesisAiContext", () => {
     expect(buildThesisAiContextOrUnavailable({ thesis: rows.thesis, creator: rows.creator, creatorPosition: rows.position, dataAsOf: thesisAiContextExamples[0].market.dataAsOf })).toMatchObject({ available: true });
   });
 
+  test("linked draft after a wallet change is unavailable and strict mapping rejects the mismatch", () => {
+    const rows = rowsFromExample(thesisAiContextExamples[0]);
+    rows.thesis.status = "draft";
+    rows.creator.walletAddress = "0xaaa";
+    const input = { thesis: rows.thesis, creator: rows.creator, creatorPosition: rows.position, dataAsOf: new Date() };
+    expect(buildThesisAiContextOrUnavailable(input)).toMatchObject({ available: false, reason: "not_published" });
+    let caught: unknown;
+    try { buildThesisAiContext(input); } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(ThesisAiContextError);
+    expect(caught).toMatchObject({ code: "POSITION_MISMATCH" });
+  });
+
   const guards: [string, (rows: ReturnType<typeof rowsFromExample>) => void, string][] = [
     ["thesisId", (rows) => { rows.position.thesisId = "other"; }, "POSITION_MISMATCH"],
     ["userId", (rows) => { rows.position.userId = "other"; }, "POSITION_MISMATCH"],

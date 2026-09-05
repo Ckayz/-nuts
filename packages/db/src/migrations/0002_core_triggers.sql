@@ -13,8 +13,8 @@ BEGIN
     IF thesis_row.creator_position_id IS NULL THEN
       RETURN NEW;
     END IF;
-    SELECT * INTO creator_user FROM public.users WHERE id = thesis_row.creator_user_id;
-    SELECT * INTO position_row FROM public.positions WHERE id = thesis_row.creator_position_id;
+    SELECT * INTO creator_user FROM public.users WHERE id = thesis_row.creator_user_id FOR SHARE;
+    SELECT * INTO position_row FROM public.positions WHERE id = thesis_row.creator_position_id FOR SHARE;
     IF NOT FOUND
       OR position_row.thesis_id <> thesis_row.id
       OR position_row.user_id <> thesis_row.creator_user_id
@@ -29,8 +29,8 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  FOR thesis_row IN SELECT * FROM public.theses WHERE creator_position_id = OLD.id LOOP
-    SELECT * INTO creator_user FROM public.users WHERE id = thesis_row.creator_user_id;
+  FOR thesis_row IN SELECT * FROM public.theses WHERE creator_position_id = OLD.id FOR SHARE LOOP
+    SELECT * INTO creator_user FROM public.users WHERE id = thesis_row.creator_user_id FOR SHARE;
     IF TG_OP = 'DELETE'
       OR NEW.thesis_id <> thesis_row.id
       OR NEW.user_id <> thesis_row.creator_user_id
@@ -53,10 +53,13 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog, public
 AS $$
 BEGIN
-  IF NEW.wallet_address IS DISTINCT FROM OLD.wallet_address
-    AND EXISTS (SELECT 1 FROM public.theses WHERE creator_user_id = NEW.id AND status IN ('open', 'expired', 'settled'))
-  THEN
-    RAISE EXCEPTION 'cannot change wallet of a public thesis creator' USING ERRCODE = '23514';
+  IF NEW.wallet_address IS DISTINCT FROM OLD.wallet_address THEN
+    PERFORM 1 FROM public.theses
+      WHERE creator_user_id = NEW.id AND status IN ('open', 'expired', 'settled')
+      FOR SHARE;
+    IF FOUND THEN
+      RAISE EXCEPTION 'cannot change wallet of a public thesis creator' USING ERRCODE = '23514';
+    END IF;
   END IF;
   RETURN NEW;
 END;

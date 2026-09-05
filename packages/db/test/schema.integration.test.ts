@@ -3,20 +3,7 @@ import { Client } from "pg";
 import { canonicalFillEvent } from "./fixtures/fill-event";
 
 const databaseUrl = process.env.DATABASE_URL;
-const u1 = "10000000-0000-4000-8000-000000000001";
-const u2 = "10000000-0000-4000-8000-000000000002";
-const t1 = "20000000-0000-4000-8000-000000000001";
-const t2 = "20000000-0000-4000-8000-000000000002";
-const p1 = "30000000-0000-4000-8000-000000000001";
-
-async function seed(client: Client) {
-  await client.query("INSERT INTO public.users(id,wallet_address) VALUES ($1,'0xabc'),($2,'0xdef')", [u1, u2]);
-  await client.query("INSERT INTO public.auth_challenges(wallet_address,nonce,domain,chain_id,expires_at) VALUES ('0xabc','nonce-1','test',8453,now())");
-  await client.query("INSERT INTO public.theses(id,creator_user_id,headline,direction,status,underlying_asset,expiry_at,product_type,is_call,is_long,strikes,strike_decimals,collateral_address,collateral_symbol,collateral_decimals,creator_order_snapshot) VALUES ($1,$2,'h','bull','draft','ETH',now(),'call',true,true,ARRAY[1]::numeric[],8,'0xc','USDC',6,'{}'),($3,$2,'h2','bull','draft','ETH',now(),'call',true,true,ARRAY[1]::numeric[],8,'0xc','USDC',6,'{}')", [t1, u1, t2]);
-  await client.query("INSERT INTO public.positions(id,thesis_id,user_id,role,side,status,chain_id,wallet_address,order_id,order_snapshot,fill_event,tx_hash,budget,budget_decimals,contracts,contract_decimals,premium,premium_decimals,fees,fee_decimals,collateral,collateral_decimals,break_even_prices,break_even_price_decimals,break_even_prices_usd,confirmed_at) VALUES ($1,$2,$3,'creator','back','confirmed',8453,'0xabc','o','{}',$4,$5,1,6,1,8,1,6,0,6,1,6,ARRAY[]::numeric[],8,ARRAY[]::numeric[],now())", [p1, t1, u1, JSON.stringify(canonicalFillEvent), "0x" + "1".repeat(64)]);
-  await client.query("SET CONSTRAINTS ALL IMMEDIATE");
-  await client.query("SET CONSTRAINTS ALL DEFERRED");
-}
+import { seed, u1, u2, t1, t2, p1 } from "./fixtures/schema";
 
 // A connection and rolled-back transaction per test: no shared mutable fixture.
 function probe(name: string, run: (client: Client) => Promise<void>) {
@@ -160,6 +147,15 @@ if (!databaseUrl) {
   probe("same wallet remains accepted for public creator", async (client) => {
     await publish(client);
     await client.query("UPDATE public.users SET wallet_address=wallet_address WHERE id=$1", [u1]);
+  });
+  probe("linked draft allows a later creator wallet change", async (client) => {
+    await client.query("UPDATE public.theses SET creator_position_id=$1 WHERE id=$2", [p1, t1]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query("SET CONSTRAINTS ALL DEFERRED");
+    await client.query("UPDATE public.users SET wallet_address='0xaaa' WHERE id=$1", [u1]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    const result = await client.query("SELECT t.status,p.wallet_address AS position_wallet,u.wallet_address AS creator_wallet FROM public.theses t JOIN public.positions p ON p.id=t.creator_position_id JOIN public.users u ON u.id=t.creator_user_id WHERE t.id=$1", [t1]);
+    expect(result.rows).toEqual([{ status: "draft", position_wallet: "0xabc", creator_wallet: "0xaaa" }]);
   });
   probe("wallet can change without public theses", async (client) => {
     await client.query("UPDATE public.users SET wallet_address='0xaaa' WHERE id=$1", [u1]);

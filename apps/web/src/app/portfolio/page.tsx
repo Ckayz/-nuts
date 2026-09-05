@@ -1,10 +1,11 @@
 import { PositionList } from "@/components/feed/thesis-list";
 import { ParticipantsTable } from "@/components/thesis/participants-table";
-import { currentUser, yourPositions, yourSettledPositions } from "@/lib/view-data";
-import type { Participant, Position } from "@/lib/display-types";
+import { portfolioData } from "@/lib/page-data";
+import type { Creator, Participant, Position } from "@/lib/display-types";
 
 /** The connected wallet's own rows, in the shape the positions table takes. */
-function toRows(positions: Position[]): Participant[] {
+function toRows(positions: Position[], currentUser: Creator | null): Participant[] {
+	if (currentUser === null) return [];
 	return positions.map((p) => ({
 		creator: currentUser,
 		side: p.side,
@@ -17,7 +18,8 @@ function toRows(positions: Position[]): Participant[] {
 	}));
 }
 
-export default function PortfolioPage() {
+export default async function PortfolioPage() {
+	const { openPositions, settledPositions, currentUser } = await portfolioData();
 	return (
 		<div className="work single">
 			<main className="col">
@@ -25,24 +27,24 @@ export default function PortfolioPage() {
 					<div className="sec-h">
 						<span className="lbl">Your positions</span>
 						<span className="mono dim" style={{ fontSize: "11px" }}>
-							{yourPositions.length} open
+							{openPositions.length} open
 						</span>
 					</div>
-					<PositionList positions={yourPositions} />
+					<PositionList positions={openPositions} />
 				</div>
-				<ParticipantsTable rows={toRows(yourPositions)} />
-				{yourSettledPositions.length > 0 ? (
+				<ParticipantsTable rows={toRows(openPositions, currentUser)} />
+				{settledPositions.length > 0 ? (
 					<>
 						<div className="sec">
 							<div className="sec-h">
 								<span className="lbl">Your positions</span>
 								<span className="mono dim" style={{ fontSize: "11px" }}>
-									{yourSettledPositions.length} settled
+									{settledPositions.length} settled
 								</span>
 							</div>
-							<PositionList positions={yourSettledPositions} />
+							<PositionList positions={settledPositions} />
 						</div>
-						<ParticipantsTable rows={toRows(yourSettledPositions)} />
+						<ParticipantsTable rows={toRows(settledPositions, currentUser)} />
 					</>
 				) : null}
 			</main>

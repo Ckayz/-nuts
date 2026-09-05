@@ -147,11 +147,11 @@ export interface ThesisDetail {
     shareHeadline: string;
     /** Expiry as rendered in the hero, e.g. "11 Sep 26 08:00 UTC". */
     expiryLabel: string;
-    settlementLabel: string;
+    settlementLabel: string | null;
     launchedLabel: string;
     spotUsd: DisplayAmount;
-    /** Spot change as rendered, e.g. "+1.65%". */
-    spotChangeLabel: string;
+    /** Spot change as rendered, e.g. "+1.65%"; null when there is no spot series. */
+    spotChangeLabel: string | null;
     maxPayoutUsd: DisplayAmount;
     breakEvenUsd: DisplayAmount;
     participants: Participant[];
@@ -159,7 +159,7 @@ export interface ThesisDetail {
     activity: ActivityItem[];
     activityCount: number;
     participantCount: number;
-    ticket: Ticket;
+    ticket: Ticket | null;
 }
 /** The "Take a side" ticket. */
 export interface Ticket {

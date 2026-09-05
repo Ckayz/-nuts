@@ -11,10 +11,10 @@ import { SpotChart } from "@/components/thesis/spot-chart";
 import { TakeASide } from "@/components/thesis/take-a-side";
 import { ThesisTabs } from "@/components/thesis/thesis-tabs";
 import { signedUsd, usd } from "@/lib/format";
-import { thesisDetails, thesisDetailBySlug } from "@/lib/view-data";
+import { staticThesisSlugs, thesisDetailData } from "@/lib/page-data";
 
 export function generateStaticParams() {
-	return thesisDetails.map((d) => ({ slug: d.thesis.slug }));
+	return staticThesisSlugs();
 }
 
 export default async function ThesisPage({
@@ -23,7 +23,7 @@ export default async function ThesisPage({
 	params: Promise<{ slug: string }>;
 }) {
 	const { slug } = await params;
-	const detail = thesisDetailBySlug(slug);
+	const detail = await thesisDetailData(slug);
 	if (!detail) notFound();
 	const t = detail.thesis;
 
@@ -66,8 +66,12 @@ export default async function ThesisPage({
 							<span>
 								expires <b className="mono">{detail.expiryLabel}</b>
 							</span>
-							<span>·</span>
-							<span>{detail.settlementLabel}</span>
+							{detail.settlementLabel !== null ? (
+								<>
+									<span>·</span>
+									<span>{detail.settlementLabel}</span>
+								</>
+							) : null}
 							<button
 								type="button"
 								className="acts ai"
@@ -115,9 +119,11 @@ export default async function ThesisPage({
 							<span className="lbl">{t.asset} spot · 7d · entries pinned</span>
 							<span className="v">
 								{usd(detail.spotUsd)}{" "}
-								<span className="bull" style={{ fontSize: "12px" }}>
-									{detail.spotChangeLabel}
-								</span>
+								{detail.spotChangeLabel !== null ? (
+									<span className="bull" style={{ fontSize: "12px" }}>
+										{detail.spotChangeLabel}
+									</span>
+								) : null}
 							</span>
 						</div>
 						<SpotChart label="BTC spot price, 7 days, with participant entries marked" />
@@ -189,7 +195,7 @@ export default async function ThesisPage({
 			</main>
 
 			<aside className="col r">
-				<TakeASide ticket={detail.ticket} />
+				{detail.ticket !== null ? <TakeASide ticket={detail.ticket} /> : null}
 				<SharePanel
 					url={detail.shareUrl}
 					headline={detail.shareHeadline}

@@ -1,3 +1,4 @@
+import { WalletBar } from "@/components/auth/wallet-bar";
 import { SearchIcon } from "@/components/icons";
 import { wallet } from "@/lib/view-data";
 
@@ -11,11 +12,9 @@ export function AppHeader() {
 			</div>
 			<div className="r">
 				<span className="ex">EXAMPLE DATA</span>
-				<span className="wallet">
-					<span className="dot" />
-					{wallet.addressLabel}
-					<span className="dim">{wallet.network}</span>
-				</span>
+				{/* The mockup's static `0x7c4a…e10b` chip becomes the real wallet
+				    control; `wallet.network` stays the mockup's "Base" label. */}
+				<WalletBar network={wallet.network} />
 			</div>
 		</header>
 	);

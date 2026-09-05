@@ -167,12 +167,15 @@ export interface ThesisDetail {
     thesis: Thesis;
     shareUrl: string;
     shareHeadline: string;
-    settlementLabel: string;
-    spotChangePct: string;
+    /** Null when no settlement wording is available for this thesis. */
+    settlementLabel: string | null;
+    /** Null when no spot series is available; the database holds no price feed. */
+    spotChangePct: string | null;
     participants: Participant[];
     comments: Comment[];
     activity: ActivityItem[];
     activityCount: number;
     participantCount: number;
-    ticket: Ticket;
+    /** Null when no live quote backs the ticket; the "Take a side" panel is then hidden. */
+    ticket: Ticket | null;
 }

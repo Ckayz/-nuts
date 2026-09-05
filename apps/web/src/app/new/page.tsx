@@ -15,7 +15,10 @@ import { btcNfpDetail } from "@/lib/view-data";
  */
 export default function NewThesisPage() {
 	const t = btcNfpDetail.thesis;
+	// `ThesisDetail.ticket` is nullable because a database-backed thread has no
+	// live quote behind it; the mock detail this composer previews always has one.
 	const ticket = btcNfpDetail.ticket;
+	if (ticket === null) return null;
 
 	return (
 		<div className="work single">

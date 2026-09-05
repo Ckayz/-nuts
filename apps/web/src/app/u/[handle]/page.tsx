@@ -3,16 +3,10 @@ import { ActivityList } from "@/components/creator/activity-list";
 import { CreatorStats } from "@/components/creator/creator-stats";
 import { CalloutPost } from "@/components/feed/callout-post";
 import { ParticipantsTable } from "@/components/thesis/participants-table";
-import {
-	activityByCreator,
-	allCreators,
-	creatorByHandle,
-	participantsByCreator,
-	thesesByCreator,
-} from "@/lib/view-data";
+import { creatorPageData, staticCreatorHandles } from "@/lib/page-data";
 
 export function generateStaticParams() {
-	return allCreators.map((c) => ({ handle: c.handle }));
+	return staticCreatorHandles();
 }
 
 export default async function CreatorPage({
@@ -21,12 +15,9 @@ export default async function CreatorPage({
 	params: Promise<{ handle: string }>;
 }) {
 	const { handle } = await params;
-	const creator = creatorByHandle(handle);
-	if (!creator) notFound();
-
-	const activity = activityByCreator(handle);
-	const callouts = thesesByCreator(handle);
-	const positions = participantsByCreator(handle);
+	const data = await creatorPageData(handle);
+	if (!data) notFound();
+	const { creator, activity, callouts, positions } = data;
 
 	return (
 		<div className="work profile">

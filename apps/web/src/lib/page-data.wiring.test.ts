@@ -223,7 +223,9 @@ const SEED_AND_READ = `
 		const creator = await pageData.creatorPageData(handle);
 
 		const cardOf = (post) => post?.tradeCards?.[0] ?? null;
-		const feedPost = [...discover.ranked.trending, ...discover.top, ...discover.ranked.ending]
+		// B-P3-1: every audience now carries its own three ranked lists, so top
+		// is trending/ending/settled rather than one array.
+		const feedPost = [...discover.ranked.trending, ...discover.top.trending, ...discover.ranked.ending]
 			.find((post) => post.slug === written.slug);
 
 		console.log("RESULT:" + JSON.stringify({

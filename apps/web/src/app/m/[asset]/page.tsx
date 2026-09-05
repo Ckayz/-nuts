@@ -11,7 +11,8 @@ import { MarketRail } from "@/components/market/market-rail";
 import { AgentChat } from "@/components/agent/agent-chat";
 import { StructuresList } from "@/components/market/structures-list";
 import { TakeASide } from "@/components/market/take-a-side";
-import { usd, usd2 } from "@/lib/format";
+import { usd2 } from "@/lib/format";
+import { marketStatTiles } from "@/lib/market/stat-tiles";
 import { usingDatabase } from "@/lib/data/source";
 import { marketBySlug, marketSummaries, thesesByMarket } from "@/lib/view-data";
 import { railTheses } from "@/lib/page-data";
@@ -262,19 +263,17 @@ export default async function MarketPage({
 							<b className="num">{usd2(market.spotUsd)}</b>
 						</span>
 					</div>
+					{/* fomo's stat-tile row under the instrument name
+					    (docs/design/FOMO-DIGEST.md). Which tiles exist, and which are
+					    deliberately absent because nothing honest can fill them, is
+					    `lib/market/stat-tiles.ts`. */}
 					<div className="stats">
-						<span className="tile">
-							<i>Spot</i>
-							<b className="num">{usd(market.spotUsd)}</b>
-						</span>
-						<span className="tile">
-							<i>Structures</i>
-							<b className="num">{market.structureCount}</b>
-						</span>
-						<span className="tile">
-							<i>Tagged posts</i>
-							<b className="num">{tagged.length}</b>
-						</span>
+						{marketStatTiles(market, tagged.length).map((tile) => (
+							<span className="tile" key={tile.label}>
+								<i>{tile.label}</i>
+								<b className="num">{tile.value}</b>
+							</span>
+						))}
 					</div>
 				</section>
 

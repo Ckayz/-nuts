@@ -7,7 +7,7 @@ import { LikeButton } from "@/components/feed/like-button";
 import { PostText, TradeCards } from "@/components/feed/trade-card";
 import { PnlCard } from "@/components/position/pnl-card";
 import { CommentIcon, ShareIcon, SparkIcon } from "@/components/icons";
-import { Avatar, StatusChip } from "@/components/primitives";
+import { Avatar, PostTypeBadge, StatusChip } from "@/components/primitives";
 import { CommentsList } from "@/components/thesis/comments-list";
 import { FeedRail } from "@/components/shell/feed-rail";
 import { PageFrame } from "@/components/shell/page-frame";
@@ -62,7 +62,7 @@ export default async function ThesisPage({ params }: { params: Promise<{ slug: s
    <div className="post-main">
     <div className="p-head"><Link className="p-name" href={`/u/${t.creator.handle}`}>{t.creator.displayName}</Link><span className="p-handle">@{t.creator.handleLabel}</span><span className="p-time">{t.postedLabel}</span>
      {t.status && t.statusLabel ? <StatusChip status={t.status} label={t.statusLabel} /> : null}
-     {t.backingCard ? <span className="chip">Backed</span> : null}
+     <PostTypeBadge thesis={t} />
     </div>
     <div className="p-body"><h1>{t.headline}</h1>{t.note ? <div className="second"><PostText text={t.note} tokens={t.noteTokens} /></div> : null}</div>
     {t.backingCard ? <PnlCard card={t.backingCard} compact href /> : null}

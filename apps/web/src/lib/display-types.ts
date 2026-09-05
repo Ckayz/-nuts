@@ -110,6 +110,18 @@ export interface Thesis {
     creator: Creator;
     /** Null on a pure text opinion: the post names no market. */
     asset: string | null;
+    /**
+     * The direction the author took, from `theses.direction`. Null on a post
+     * that names no structure — the column is part of the null-or-complete
+     * structure group (`lib/data/map.ts`), so "no structure" and "no direction"
+     * are the same state.
+     *
+     * This is the ONLY honest direction a post carries. `structure.side` is
+     * hard-coded `"bull"` by `lib/display.ts`, and `backingCard.side` is
+     * hard-coded `"back"` by `lib/position/view.ts` ("the creator backs their
+     * own thesis"), so neither of those two says anything about the market.
+     */
+    direction: Side | null;
     /** Null when there is no expiry to count a chip down from. */
     status: ThesisStatus | null;
     /** Status chip copy, e.g. "LIVE · 6d 14h". */

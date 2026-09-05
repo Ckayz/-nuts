@@ -63,7 +63,9 @@ export function CalloutTabs({ ranked, following, top, signedIn, databaseMode }: 
 			{posts.length === 0 ? (
 				<FeedEmpty audience={audience} ranking={ranking} />
 			) : (
-				<div className="stack">{posts.map(thesis =>
+				// `.post-rows`, not `.stack`: fomo divides feed posts with a hairline
+				// instead of spacing one card each apart (docs/design/FOMO-DIGEST.md).
+				<div className="post-rows">{posts.map(thesis =>
 					<CalloutPost key={thesis.slug} thesis={thesis} signedIn={signedIn} databaseMode={databaseMode} />)}</div>
 			)}
 			<span className="note">Trending, ending and settled rules <TodoOwner /></span>

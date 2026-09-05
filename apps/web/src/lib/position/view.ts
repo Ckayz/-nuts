@@ -168,6 +168,18 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 	const derived: DerivedRisk | null =
 		derivation.inputs === null ? null : derivedRisk(derivation.inputs);
 
+	/**
+	 * D5. ONE expiry for this position, whichever surface asks.
+	 *
+	 * The page decodes the instrument from the order snapshot; a list row reads
+	 * `position.expiryAt`, decoded from the SAME snapshot by the same reader in
+	 * `map.ts`. Reading only the instrument here meant a card built without one
+	 * (the feed's linked card before its batch reader lands a snapshot, a fixture
+	 * row) fell back to the stored status while the row beside it did not — the
+	 * exact disagreement D5 is about, inverted.
+	 */
+	const expiryAt = instrument?.expiryAt ?? position.expiryAt ?? null;
+
 	const pnl = resolvePnl({
 		status: position.status,
 		// C#9: a `fill_quantity_unproven` row is a fill that IS on chain, not a
@@ -187,7 +199,7 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 				: "No P&L: the recorded fill amounts do not satisfy the risk model's own checks, so any figure would be a guess.",
 		// C7: an expired option is finished, so no live estimate and no spot
 		// derivation may be shown for it.
-		expiryAt: instrument?.expiryAt ?? null,
+		expiryAt,
 		asOf: asOf.toISOString(),
 	});
 
@@ -223,7 +235,7 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 		// "Open · syncing", in the compact card as well as on this page. The
 		// stored status never reaches `indexed`->`expired` on its own because no
 		// reconciliation exists yet.
-		status: lifecycleStatus(position.status, instrument?.expiryAt ?? null, asOf.toISOString()),
+		status: lifecycleStatus(position.status, expiryAt, asOf.toISOString()),
 		// C#9: the chip reads the reason too, so a fill that is on chain is never
 		// styled as a revert.
 		failureReason: position.failureReason,

@@ -2,7 +2,7 @@
 import type * as Domain from "@/types";
 import type * as View from "./display-types";
 import { renderTextWithLinks, tradeLinkHref } from "./thesis/links";
-import { failedButOnChain } from "./position/pnl";
+import { failedButOnChain, lifecycleStatus, resolvePnl } from "./position/pnl";
 /** Validate and split decimal strings without a binary floating-point conversion. */
 function decimal(value: string) {
     if (!/^-?\d+(?:\.\d+)?$/.test(value))
@@ -366,29 +366,63 @@ export function pnlCard(input: PnlCardInput): View.PnlCard {
     };
 }
 
-export function position(value: Domain.Position): View.Position {
-    // D5. The list row carries the SAME lifecycle vocabulary and P&L basis the
-    // share card does, so an expired or failed position no longer renders
-    // identically to an open one and no number is printed without saying where
-    // it came from. The P&L itself follows PRD 14's recorded-value rule: a
-    // finished option shows its recorded result or nothing, never an estimate.
-    const display = POSITION_STATUS_DISPLAY[value.status];
-    const settled = value.status === "settled";
-    const finished = settled || value.status === "expired";
-    const pnlUsd = finished ? value.economics.finalPnlUsd : value.status === "pending" || value.status === "failed" ? null : value.economics.estimatedPnlUsd;
-    const basis: View.PnlBasis = pnlUsd === null ? "unavailable" : settled ? "settled" : "estimate";
-    const pnlBasisLabel =
-        value.status === "failed" ? "This transaction failed, so there is no position."
-        : value.status === "pending" ? "This fill has not been confirmed on Base yet."
-        : pnlUsd === null && finished ? "Settlement pending: Thetanuts has not published this option's settlement yet."
-        : pnlUsd === null ? "No P&L recorded for this fill yet."
-        : settled ? "Final P&L recorded at settlement."
-        : "Estimated P&L recorded with the fill.";
-    return { id: value.id, thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(pnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled,
-        statusLabel: display.label, statusTone: display.tone, pnlLabel: settled ? "Result" : "Live P&L", pnlBasisLabel, basis };
+/**
+ * D5 (lane D confirming pass). ONE lifecycle and ONE P&L resolver for a list
+ * row and for the position page.
+ *
+ * Round 2 gave the row `statusLabel` and `basis`, but derived both from the
+ * PERSISTED status alone — and nothing moves a row to `expired`, because no
+ * settlement reconciliation exists yet. With the reviewer's fixture (confirmed,
+ * expiry 2026-09-01, asOf 2026-09-05) the row and the card disagreed outright:
+ *   row  {"status":"Open · syncing","pnl":"+$612","basis":"estimate"}
+ *   card {"status":"Settlement pending","pnl":"—","basis":"unavailable"}
+ * The row now calls `lifecycleStatus` and `resolvePnl` — the same two functions
+ * `positionPage` calls — over the expiry `map.ts` carries, so the two cannot
+ * disagree by construction.
+ *
+ * No derivation and no spot: a list reads neither, so `resolvePnl` takes its
+ * recorded-value branches, exactly as `linkedPositionCard` does.
+ */
+/**
+ * D5. The P&L basis in a few words, for a row that has no space for the whole
+ * sentence. ONE vocabulary: the share card renders exactly these strings, so a
+ * row and a card never describe the same number two different ways.
+ *
+ * Each says something the `pnlLabel` beside it does not, so the compact line
+ * never repeats itself ("Result · settled result"). TODO-OWNER: the wording.
+ */
+export const PNL_BASIS_SHORT: Record<View.PnlBasis, string> = {
+    settled: "recorded at settlement",
+    estimate: "recorded with the fill",
+    derived: "estimated at the current spot",
+    unavailable: "not available yet",
+};
+
+export function position(value: Domain.Position, asOf: Date = new Date()): View.Position {
+    const status = lifecycleStatus(value.status, value.expiryAt ?? null, asOf.toISOString());
+    const display = positionStatusDisplay(status, value.failureReason);
+    const settled = status === "settled";
+    const pnl = resolvePnl({
+        // The RAW status, exactly as `positionPage` passes it: `resolvePnl` has
+        // its own past-expiry branch with its own sentence, and handing it the
+        // already-rewritten status would route a confirmed-but-expired row down
+        // the SETTLED branch and print a different sentence from the card's.
+        status: value.status,
+        failureReason: value.failureReason,
+        finalPnlUsd: value.economics.finalPnlUsd,
+        estimatedPnlUsd: value.economics.estimatedPnlUsd,
+        settlementPriceUsd: value.economics.settlementPriceUsd,
+        derivation: null,
+        spotUsd8: null,
+        unavailableReason: "No P&L recorded for this fill yet.",
+        expiryAt: value.expiryAt ?? null,
+        asOf: asOf.toISOString(),
+    });
+    return { id: value.id, thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(pnl.pnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled,
+        statusLabel: display.label, statusTone: display.tone, pnlLabel: settled ? "Result" : "Live P&L", pnlBasisLabel: pnl.detail, basis: pnl.basis };
 }
-export function participant(value: Domain.Participant): View.Participant {
-    return { ...position(value), creator: creator(value.creator), says: value.says, isCreator: value.role === "creator" };
+export function participant(value: Domain.Participant, asOf: Date = new Date()): View.Participant {
+    return { ...position(value, asOf), creator: creator(value.creator), says: value.says, isCreator: value.role === "creator" };
 }
 export function activity(value: Domain.ActivityItem): View.ActivityItem {
     if (value.socialDetail !== undefined) return { id: value.id, creator: creator(value.creator), action: value.action, detail: value.socialDetail, offchain: value.transactionHash === null, tx: tx(value.transactionHash, null) ?? { label: "", href: "" } };
@@ -403,7 +437,7 @@ export function detail(value: Domain.ThesisDetail): View.ThesisDetail {
         expiryLabel: value.thesis.market?.expiryAt == null ? null : expiryLabel(value.thesis.market.expiryAt, true),
         settlementLabel: value.settlementLabel, launchedLabel: `launched ${elapsed(value.thesis.thesis.createdAt, value.thesis.dataAsOf)} ago`,
         maxPayoutUsd: amount(back?.economics.maximumPayoutUsd ?? null), breakEvenUsd: amount(back?.economics.breakEvenPricesUsd[0] ?? null),
-        participants: value.participants.map(participant),
+        participants: value.participants.map((row) => participant(row)),
         comments: value.comments.map(v => ({ creator: creator(v.creator), postedLabel: `· ${elapsed(v.createdAt, value.thesis.dataAsOf)}`, body: v.body })),
         activity: value.activity.map(activity), activityCount: value.activityCount, participantCount: value.participantCount };
 }

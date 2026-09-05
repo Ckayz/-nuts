@@ -197,6 +197,18 @@ export interface Position {
      * it and never carry one.
      */
     failureReason?: string | null;
+    /**
+     * D5. When this position's option expires, ISO 8601, or null when the order
+     * snapshot cannot be decoded.
+     *
+     * Decoded by the SAME `positionInstrument` reader `/p/[id]` uses. Without
+     * it a list row could only read the PERSISTED status — and nothing moves a
+     * row to `expired` (no reconciliation exists yet), so the feed showed
+     * "Open · syncing · +$612 (estimate)" for an option whose own page said
+     * "Settlement pending · — (unavailable)". Optional: the typed fixtures
+     * carry no snapshot.
+     */
+    expiryAt?: string | null;
     createdAt: string;
     mockTransactionFragment: string | null;
 }

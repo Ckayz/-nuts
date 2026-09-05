@@ -16,6 +16,19 @@ export const PORTFOLIO_PAGE_SIZE = 100;
 export const CREATOR_PAGE_SIZE = 50;
 
 /**
+ * TODO-OWNER: activity page size.
+ *
+ * `listActivity` had no bound at all (lane B, 2026-09-05 21:50), so a profile
+ * with a long history read every follow, like, comment, post and fill it had
+ * ever produced. There is no pixel to cite for this one: the mockup draws no
+ * activity list on any view (grepped — the string "activity" does not appear in
+ * docs/mockups/thesis-fun-mockup.html), so this mirrors CREATOR_PAGE_SIZE, the
+ * bound on the profile page that reads it. It is a bound, not an approved
+ * number, exactly like the four above.
+ */
+export const ACTIVITY_PAGE_SIZE = 50;
+
+/**
  * Position statuses that represent a real onchain fill. `pending` and `failed`
  * are excluded, matching the `positions_confirmed_fill_event_required` CHECK,
  * which requires a fill event exactly for these four.

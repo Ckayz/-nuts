@@ -19,6 +19,7 @@ function rowsFromExample(example: ThesisAiContext): { thesis: Thesis; creator: U
   const creatorPositionId = "20000000-0000-4000-8000-000000000002";
   const thesis: Thesis = {
     id: example.thesis.id,
+    slug: example.thesis.id,
     creatorUserId: "10000000-0000-4000-8000-000000000001",
     headline: example.thesis.headline,
     rationale: example.thesis.rationale,
@@ -44,6 +45,7 @@ function rowsFromExample(example: ThesisAiContext): { thesis: Thesis; creator: U
   };
   const creator: User = {
     id: thesis.creatorUserId,
+    handle: null,
     walletAddress: example.creator.walletAddress.toUpperCase(),
     displayName: example.creator.displayName,
     bio: null,

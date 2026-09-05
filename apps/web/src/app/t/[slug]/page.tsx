@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActivityList } from "@/components/creator/activity-list";
@@ -19,6 +20,14 @@ import { thesisDetails, thesisDetailBySlug } from "@/lib/view-data";
  * post, what it names, whether the creator backed it, and the replies. There is
  * no ticket here — the right rail links to the market page instead.
  */
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const detail = thesisDetailBySlug((await params).slug);
+  if (!detail) notFound();
+  const title = detail.thesis.headline;
+  const description = detail.thesis.note ?? detail.thesis.headline;
+  return { title, description, openGraph: { title, description, type: "article" }, twitter: { card: "summary_large_image", title, description } };
+}
+
 export function generateStaticParams() {
 	return thesisDetails.map((d) => ({ slug: d.thesis.slug }));
 }

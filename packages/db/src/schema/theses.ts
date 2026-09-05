@@ -16,6 +16,7 @@ export const theses = pgTable(
   "theses",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    slug: text("slug").notNull(),
     creatorUserId: uuid("creator_user_id").notNull().references(() => users.id),
     // TODO-OWNER: content limit
     headline: text("headline").notNull(),
@@ -45,6 +46,8 @@ export const theses = pgTable(
     settledAt: timestamp("settled_at", { withTimezone: true }),
   },
   (table) => [
+    uniqueIndex("theses_slug_unique").on(table.slug),
+    check("theses_slug_format", sql`${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`),
     check("theses_headline_nonblank", sql`btrim(${table.headline}, ${headlineWhitespaceSql}) <> ''`),
     check("theses_structure_all_or_nothing", sql`(${table.direction} is null and ${table.underlyingAsset} is null and ${table.expiryAt} is null and ${table.productType} is null and ${table.isCall} is null and ${table.isLong} is null and ${table.strikes} is null and ${table.strikeDecimals} is null and ${table.collateralAddress} is null and ${table.collateralSymbol} is null and ${table.collateralDecimals} is null and ${table.creatorOrderSnapshot} is null) or (${table.direction} is not null and ${table.underlyingAsset} is not null and ${table.expiryAt} is not null and ${table.productType} is not null and ${table.isCall} is not null and ${table.isLong} is not null and ${table.strikes} is not null and ${table.strikeDecimals} is not null and ${table.collateralAddress} is not null and ${table.collateralSymbol} is not null and ${table.collateralDecimals} is not null and ${table.creatorOrderSnapshot} is not null)`),
     check("theses_tagged_asset_uppercase", sql`${table.taggedAsset} = upper(${table.taggedAsset})`),

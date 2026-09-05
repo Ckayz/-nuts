@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ActivityList } from "@/components/creator/activity-list";
 import { CreatorStats } from "@/components/creator/creator-stats";
@@ -10,6 +11,14 @@ import {
 	participantsByCreator,
 	thesesByCreator,
 } from "@/lib/view-data";
+
+export async function generateMetadata({ params }: { params: Promise<{ handle: string }> }): Promise<Metadata> {
+  const creator = creatorByHandle((await params).handle);
+  if (!creator) notFound();
+  const title = creator.displayName;
+  const description = creator.handle ? `@${creator.handle}` : creator.walletAddress ?? creator.displayName;
+  return { title, description, openGraph: { title, description, type: "profile" }, twitter: { card: "summary_large_image", title, description } };
+}
 
 export function generateStaticParams() {
 	return allCreators.map((c) => ({ handle: c.handle }));

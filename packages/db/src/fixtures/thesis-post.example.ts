@@ -4,6 +4,7 @@ import { openThesisAiContext } from "./thesis-ai-context.example";
 
 export const textOnlyThesis: Thesis = {
   id: "20000000-0000-4000-8000-000000000003",
+  slug: "btc-nfp-2000",
   creatorUserId: "10000000-0000-4000-8000-000000000001",
   headline: openThesisAiContext.thesis.headline,
   rationale: null,
@@ -31,5 +32,6 @@ export const textOnlyThesis: Thesis = {
 export const taggedUnbackedThesis: Thesis = {
   ...textOnlyThesis,
   id: "20000000-0000-4000-8000-000000000004",
+  slug: "btc-nfp-20000",
   taggedAsset: openThesisAiContext.market.underlyingAsset,
 };

@@ -23,20 +23,22 @@ import { chargeTurn, subjectFor } from "@/lib/agent/usage";
 // The request shape lives outside this file: a Next route handler may only
 // export its verbs and its route config, so a schema exported here would fail
 // the build, and it has to be importable by a test.
-import { agentChatBodySchema } from "@/lib/agent/request";
+import { MAX_MESSAGE_CHARS, MESSAGE_TOO_LONG, agentChatBodySchema, messageText } from "@/lib/agent/request";
 
 export const maxDuration = 60;
 
-/** Plain text of the newest user message, for the scope gate. */
+/**
+ * Plain text of the newest user message, for the scope gate.
+ *
+ * C-P2-3: the join/trim lives in `lib/agent/request.ts` and is the SAME code
+ * the schema measures against `MAX_MESSAGE_CHARS`, so what was validated and
+ * what is classified cannot drift.
+ */
 function latestUserText(messages: UIMessage[]): string {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
 		if (m?.role !== "user") continue;
-		return m.parts
-			.filter((p): p is { type: "text"; text: string } => p.type === "text")
-			.map((p) => p.text)
-			.join("\n")
-			.trim();
+		return messageText(m.parts as Array<{ type?: unknown; text?: unknown }>);
 	}
 	return "";
 }
@@ -64,7 +66,19 @@ export async function POST(request: Request) {
 
 	const body = agentChatBodySchema.safeParse(parsed);
 	if (!body.success) {
-		return agentError("Expected a messages array.", 400);
+		/**
+		 * C-P2-3. An over-long message gets its own sentence, because "expected a
+		 * messages array" would be a lie about what the person did wrong. Both
+		 * answers are 400s decided here, BEFORE `chargeTurn` and before any model
+		 * call. TODO-OWNER: the wording and the 2,000-character limit itself.
+		 */
+		const tooLong = body.error.issues.some((issue) => issue.message === MESSAGE_TOO_LONG);
+		return agentError(
+			tooLong
+				? `That message is too long. Please keep it under ${MAX_MESSAGE_CHARS.toLocaleString("en-US")} characters and send it again.`
+				: "Expected a messages array.",
+			400,
+		);
 	}
 
 	const messages = body.data.messages as unknown as UIMessage[];

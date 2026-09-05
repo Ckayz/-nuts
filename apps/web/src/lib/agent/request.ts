@@ -74,6 +74,63 @@ const toolPart = z
 	.passthrough();
 
 /**
+ * C-P2-3 (lane C pass 2, MAJOR). The longest user message this route accepts,
+ * and — deliberately the SAME number — the window the scope gate classifies
+ * (`scope.ts`'s `gateWindowText`).
+ *
+ * The gate is PRD 10.8's authoritative layer, and it classified
+ * `trimmed.slice(0, 2000)` while `streamText` received the whole message. The
+ * reviewer sent an options question, 2,100 spaces, then an unrelated coding
+ * request:
+ *
+ *   REVIEW_GATE_TRUNCATION {"status":200,"charges":1,"modelCalls":1,
+ *                           "gateSeesScraper":false,"mainSeesScraper":true}
+ *
+ * So an over-long message is refused here — at validation time, which runs
+ * before `chargeTurn` and before any model call — rather than silently split
+ * between two different readers.
+ *
+ * MEASURED, not assumed: the length checked is the RAW joined text, NOT a
+ * whitespace-collapsed one. Collapsing first would let a 100,000-space message
+ * through, and `gateWindowText` would then truncate it again — re-opening the
+ * exact hole. Padding cannot hide text precisely because the padding counts
+ * toward the limit.
+ *
+ * Only USER text is bounded. Assistant text and reasoning parts are the MODEL's
+ * own output replayed by `useChat`, and `maxOutputTokens: 1200` can exceed 2,000
+ * characters, so bounding those would refuse ordinary conversations.
+ *
+ * TODO-OWNER: 2,000 is not the owner's number. It is the gate window that was
+ * already in the code; the two are pinned together so they cannot drift.
+ */
+export const MAX_MESSAGE_CHARS = 2000;
+
+/** The issue message the route matches to answer with a useful sentence. */
+export const MESSAGE_TOO_LONG = "agent:message-too-long";
+
+/**
+ * The text of one message, exactly as the route's `latestUserText` and the
+ * scope gate read it. One implementation so the validated string and the
+ * classified string cannot drift apart.
+ */
+export function messageText(parts: ReadonlyArray<{ type?: unknown; text?: unknown }>): string {
+	return parts
+		.filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
+		.map((part) => part.text)
+		.join("\n")
+		.trim();
+}
+
+/**
+ * What the scope gate is given. A no-op for every message the schema accepts —
+ * which is the whole point, and is asserted as an executable property in
+ * `request.test.ts` rather than by reading this line.
+ */
+export function gateWindowText(trimmed: string): string {
+	return trimmed.slice(0, MAX_MESSAGE_CHARS);
+}
+
+/**
  * C-R5. A CLOSED allowlist of part shapes.
  *
  * Anything outside it — a `file`, a `data-*`, a `dynamic-tool`, a
@@ -104,7 +161,14 @@ const messageSchema = z
 		role: z.enum(["user", "assistant"]),
 		parts: z.array(messagePartSchema),
 	})
-	.passthrough();
+	.passthrough()
+	// C-P2-3. A user message longer than the gate's window is refused outright,
+	// so the text layer 1 classifies is always the text the primary model gets.
+	.superRefine((message, ctx) => {
+		if (message.role !== "user") return;
+		if (messageText(message.parts as Array<{ type?: unknown; text?: unknown }>).length <= MAX_MESSAGE_CHARS) return;
+		ctx.addIssue({ code: "custom", message: MESSAGE_TOO_LONG, path: ["parts"] });
+	});
 
 /** Exported so the shape can be pinned by a test rather than by a request. */
 export const agentChatBodySchema = z.object({

@@ -1,0 +1,51 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { marketSummaries } from "@/lib/view-data";
+
+/**
+ * The horizontal nav under the top bar: Feed · Markets · Leaderboard ·
+ * Portfolio, with the accent underline on the current page
+ * (docs/mockups/thesis-fun-mockup.html, `.nav`).
+ *
+ * Markets opens the first market the book lists, never a hardcoded asset —
+ * carried over from the icon rail this replaces.
+ *
+ * TODO-OWNER: there is no `/leaderboard` route. The top-traders card on the
+ * feed IS the leaderboard today, so the item jumps to it rather than being a
+ * button that does nothing; the owner decides whether Leaderboard gets its own
+ * page. The same item was a dead `<button>` in the icon rail this replaces.
+ *
+ * DIVERGENCE from the mockup: its nav ends with mockup-only view switchers
+ * (Thread / Compose). The icon rail this replaces carried the only route to
+ * `/new`, so the Create button takes that slot — without it the composer would
+ * be unreachable.
+ */
+export function Nav() {
+	const pathname = usePathname();
+	const firstMarket = marketSummaries[0];
+	return (
+		<nav className="nav" aria-label="Primary">
+			<Link href="/" aria-current={pathname === "/" ? "page" : undefined}>
+				Feed
+			</Link>
+			{firstMarket ? (
+				<Link
+					href={`/m/${firstMarket.slug}`}
+					aria-current={pathname.startsWith("/m/") ? "page" : undefined}
+				>
+					Markets
+				</Link>
+			) : null}
+			<Link href={{ pathname: "/", hash: "top-traders" }}>Leaderboard</Link>
+			<Link href="/portfolio" aria-current={pathname === "/portfolio" ? "page" : undefined}>
+				Portfolio
+			</Link>
+			<span className="spacer" />
+			<Link href="/new" className="btn acc">
+				Create
+			</Link>
+		</nav>
+	);
+}

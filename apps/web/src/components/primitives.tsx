@@ -141,7 +141,24 @@ export function StatusChip({
 	);
 }
 
+/**
+ * Marks a value the OWNER decides — a preset, a ranking rule, a limit, a line of
+ * copy. CLAUDE.md: "Product numbers and copy are the owner's … Never invent a
+ * value." The marker is how an unset value stays visible instead of being
+ * quietly guessed.
+ *
+ * It renders only OUTSIDE production. 38 of these were rendering on the
+ * deployed site, where a grey "TODO-OWNER" badge on the feed is the first thing
+ * a visitor reads and says the product is unfinished. In `next dev` every one is
+ * still on screen, so the outstanding decisions stay in front of the team.
+ *
+ * This hides the marker, NOT the decision: the value underneath is still a
+ * placeholder, and the `TODO-OWNER` comment beside it in the source is what the
+ * team works from. Deleting the call sites would lose that record, which is why
+ * they stay.
+ */
 export function TodoOwner({ style }: { style?: CSSProperties }) {
+	if (process.env.NODE_ENV === "production") return null;
 	return (
 		<span className="todo" style={style}>
 			TODO-OWNER

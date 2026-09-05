@@ -216,6 +216,55 @@ export async function listFeed(
 	);
 }
 
+/**
+ * Every open thesis tagged to one asset, newest first.
+ *
+ * The market page used to build this list by taking `listFeed()` — the newest
+ * FEED_PAGE_SIZE posts ACROSS EVERY MARKET — and filtering by asset in JS. A
+ * thesis about BTC that was older than 50 site-wide posts therefore never
+ * appeared on the BTC page at all, however few BTC posts existed. The filter
+ * belongs in SQL, which is what this is.
+ *
+ * `taggedAsset` is stored uppercase (the `theses_tagged_asset_uppercase` check
+ * in the schema enforces it), so the asset is uppercased here rather than
+ * lowered on the column, which would defeat the index.
+ */
+export async function listThesesByAsset(
+	asset: string,
+	options: ReadOptions & { limit?: number } = {},
+): Promise<Domain.Thesis[]> {
+	const wanted = asset.trim().toUpperCase();
+	if (wanted === "") return [];
+	const database = options.database ?? defaultDb;
+	const dataAsOf = new Date();
+	const rows = await database
+		.select({ thesis: theses, creator: users, creatorPosition: positions })
+		.from(theses)
+		.innerJoin(users, eq(users.id, theses.creatorUserId))
+		.leftJoin(positions, eq(positions.id, theses.creatorPositionId))
+		// Same status predicate as `listFeed`, deliberately: the market page's
+		// list and the feed must not disagree about what is public.
+		.where(and(eq(theses.status, "open"), eq(theses.taggedAsset, wanted)))
+		.orderBy(desc(theses.createdAt))
+		// TODO-OWNER: the market page's own page size.
+		.limit(options.limit ?? FEED_PAGE_SIZE);
+
+	const aggregates = await aggregatesByThesis(
+		database,
+		rows.map((row) => row.thesis.id),
+		viewerId(options),
+	);
+	return rows.map((row) =>
+		mapThesis({
+			thesis: row.thesis,
+			creator: row.creator,
+			creatorPosition: row.creatorPosition,
+			aggregates: aggregates.get(row.thesis.id) ?? { ...emptyAggregates },
+			dataAsOf,
+		}),
+	);
+}
+
 export interface Thread {
 	thesis: Domain.Thesis;
 	participants: Domain.Participant[];

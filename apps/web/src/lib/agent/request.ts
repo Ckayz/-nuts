@@ -11,17 +11,20 @@ import { z } from "zod";
  * C-R5 / C-rm1 (lane C confirming pass). The tool names this app registers, and
  * therefore the only `tool-<name>` parts a genuine history can carry.
  *
- * Kept beside the schema rather than imported from `lib/agent/tools.ts` and
- * `lib/agent/execute.ts`: both are `server-only`/`"use server"` modules that
- * pull the Thetanuts SDK and the database in, and this schema is also imported
- * by tests that must not need either. `request.test.ts` greps those two files
- * for their `tool({...})` names and fails if this list drifts.
+ * Kept beside the schema rather than imported from `lib/agent/tools.ts`,
+ * `lib/agent/positions.ts` and `lib/agent/execute.ts`: all three are
+ * `server-only`/`"use server"` modules that pull the Thetanuts SDK and the
+ * database in, and this schema is also imported by tests that must not need
+ * either. `request.test.ts` greps those three files for their `tool({...})`
+ * names and fails if this list drifts.
  */
 export const AGENT_TOOL_NAMES = [
 	"searchOptionBookOrders",
 	"getMarketData",
 	"previewOptionBookTrade",
 	"getThesisContext",
+	"getUserPositions",
+	"whatIfAtExpiry",
 	"requestOptionBookExecution",
 ] as const;
 
@@ -123,9 +126,9 @@ const executionOutput = z.union([
 ]);
 
 /**
- * The four READ tools each return an object (`tools.ts:183, 221, 267-286,
- * 324-349`), never a primitive or an array, so that much is checked and no
- * more.
+ * Every READ tool returns an object — the four in `tools.ts` and the two in
+ * `positions.ts` — never a primitive or an array, so that much is checked and
+ * no more.
  */
 const readToolOutput = z.record(z.string(), z.unknown());
 

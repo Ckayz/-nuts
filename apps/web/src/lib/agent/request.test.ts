@@ -503,7 +503,7 @@ describe("the tool allowlist cannot drift from the tools the app registers", () 
 	test("AGENT_TOOL_NAMES is exactly what tools.ts and execute.ts define", () => {
 		const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 		const found = new Set<string>();
-		for (const source of [read("./tools.ts"), read("./execute.ts")]) {
+		for (const source of [read("./tools.ts"), read("./positions.ts"), read("./execute.ts")]) {
 			for (const match of source.matchAll(/^(?:export const|\tconst) (\w+) = tool\(\{/gm)) {
 				if (match[1] !== undefined) found.add(match[1]);
 			}
@@ -511,6 +511,8 @@ describe("the tool allowlist cannot drift from the tools the app registers", () 
 		// `scopedSearch` is `searchOptionBookOrders` re-bound with a default asset,
 		// registered under the same key (`tools.ts` `createReadTools`).
 		found.delete("scopedSearch");
+		// The two position tools are declared inside `createPositionTools` with
+		// `const <name> = tool({`, which the same expression matches.
 		expect([...found].sort()).toEqual([...AGENT_TOOL_NAMES].sort());
 	});
 });

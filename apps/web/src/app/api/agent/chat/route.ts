@@ -7,6 +7,7 @@ import {
 } from "ai";
 import { z } from "zod";
 
+import { getSession } from "@/lib/auth/session";
 import { readTools } from "@/lib/agent/tools";
 import { createExecutionTools } from "@/lib/agent/execute";
 import { agentModel } from "@/lib/agent/model";
@@ -24,6 +25,15 @@ const bodySchema = z.object({
 	walletAddress: z
 		.string()
 		.regex(/^0x[0-9a-fA-F]{40}$/)
+		.optional(),
+	/**
+	 * The post this conversation is about (`/agent?thesis=<uuid>`). It only ever
+	 * decides which post a prepared fill attaches to; every economic value is
+	 * still re-read server-side.
+	 */
+	thesisId: z
+		.string()
+		.regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
 		.optional(),
 });
 
@@ -56,6 +66,11 @@ export async function POST(request: Request) {
 
 	const messages = body.data.messages as UIMessage[];
 	const account = (body.data.walletAddress as `0x${string}` | undefined) ?? null;
+	// Read from the cookie, NEVER from the body: the ticket `prepareTradeFor`
+	// issues is bound to this session, so it decides which wallet may ever
+	// record the fill.
+	const session = await getSession();
+	const thesisId = body.data.thesisId?.toLowerCase() ?? null;
 
 	// PRD 10.8 layer 1. Runs before the primary model, so an out-of-scope
 	// request costs one small model call rather than a full agent turn.
@@ -77,7 +92,7 @@ export async function POST(request: Request) {
 		model: agentModel,
 		system: SYSTEM_PROMPT,
 		messages: await convertToModelMessages(messages),
-		tools: { ...readTools, ...createExecutionTools({ account }) },
+		tools: { ...readTools, ...createExecutionTools({ account, session, thesisId }) },
 		/**
 		 * PRD 10.1 and 14: no transaction is prepared without an explicit answer from
 		 * the user. The runtime suspends the tool call and emits an approval request,

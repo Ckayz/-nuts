@@ -27,7 +27,22 @@ const STARTERS = [
 	"Show me the simplest bet you have on BTC.",
 ];
 
-export function AgentChat() {
+/**
+ * The opening message when the page was reached from a post's "Explain".
+ *
+ * It names the id and asks for the two things the owner asked for — what the
+ * thesis says, and whether it can be traded — so the agent calls its own
+ * `getThesisContext` tool. Nothing about the post is embedded here: the tool
+ * reads it server-side, so a post the viewer may not see cannot leak through
+ * the URL.
+ *
+ * TODO-OWNER: the wording of this opening message.
+ */
+function thesisOpener(thesisId: string): string {
+	return `Explain the thesis with id ${thesisId}: what is it saying, and what would it take to trade the same view? If it names a structure, end with the link to its market page.`;
+}
+
+export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 	const [input, setInput] = useState("");
 	const { address } = useAccount();
 
@@ -37,6 +52,11 @@ export function AgentChat() {
 	useEffect(() => {
 		addressRef.current = address;
 	}, [address]);
+
+	const thesisRef = useRef<string | null>(thesisId);
+	useEffect(() => {
+		thesisRef.current = thesisId;
+	}, [thesisId]);
 
 	const [transport] = useState(
 		() =>
@@ -60,6 +80,16 @@ export function AgentChat() {
 
 	const busy = status === "submitted" || status === "streaming";
 
+	// `/agent?thesis=<uuid>` opens the conversation with that post. The ref makes
+	// it fire exactly once: React runs effects twice in development, and a second
+	// send would ask the same question again on the user's bill.
+	const openedFor = useRef<string | null>(null);
+	useEffect(() => {
+		if (thesisId === null || openedFor.current === thesisId) return;
+		openedFor.current = thesisId;
+		void sendMessage({ text: thesisOpener(thesisId) });
+	}, [sendMessage, thesisId]);
+
 	function submit(text: string) {
 		const trimmed = text.trim();
 		if (!trimmed || busy) return;
@@ -68,7 +98,15 @@ export function AgentChat() {
 	}
 
 	return (
-		<div className="mx-auto flex h-[100dvh] w-full max-w-3xl flex-col px-4">
+		// F16: this used to be `h-[100dvh]`, the VIEWPORT height, while it renders
+		// inside the shell's `<main class="wrap">` BELOW two sticky bars — so the
+		// heading and the first messages sat underneath them and the page grew a
+		// second scrollbar. The chrome above `<main>` is 126px, measured from
+		// `src/index.css`: `.top` is 60px (line 74) and the nav sticks at
+		// `top:60px` (line 97), which the file's own `.sticky{top:126px}` (line
+		// 127) already states as the combined height. `min-h-0` keeps the message
+		// list the only scrolling element.
+		<div className="mx-auto flex h-[calc(100dvh-126px)] min-h-0 w-full max-w-3xl flex-col px-4">
 			<header className="border-b py-4">
 				<h1 className="font-medium text-lg">Agent</h1>
 				<p className="text-muted-foreground text-sm">

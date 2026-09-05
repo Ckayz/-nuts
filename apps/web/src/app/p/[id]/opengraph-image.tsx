@@ -3,145 +3,174 @@ import { notFound } from "next/navigation";
 import { positionPageData } from "@/lib/page-data";
 
 /**
- * The same P&L card, as a share image: owner + status + date, the instrument,
- * the big signed figure with its percent, three tiles.
+ * The share card, as a picture: the accent frame, the near-black inner card,
+ * owner + status chip + date, the instrument, the big signed figure with its
+ * percent, three tiles, and the `thesis.fun` watermark on the frame's footer.
  *
  * It is drawn here rather than imported from `components/position/pnl-card.tsx`
  * because `ImageResponse` renders through Satori, which supports a small subset
  * of CSS — no CSS variables, no class names, and every element with more than
  * one child needs an explicit `display`. The VALUES are the same ones the page
  * renders: both read `positionPageData`, so the picture cannot disagree with the
- * page. The palette is the mockup's, written out literally for the same reason.
+ * page. The palette below is the mockup's `:root`, written out literally for the
+ * same reason.
  *
- * TODO: load Bricolage Grotesque and JetBrains Mono at runtime when available;
- * offline generation uses ImageResponse's bundled default font, exactly as
- * `/t/[slug]`'s card does.
+ * TODO: load Manrope at runtime when available; offline generation uses
+ * ImageResponse's bundled default font, exactly as `/t/[slug]`'s card does.
  */
 export const alt = "Thesis.fun position";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-const GROUND = "#0e0e11";
-const SURFACE = "#15151a";
-const SURFACE_2 = "#1c1c22";
-const HAIRLINE = "#26262e";
-const TEXT = "#f4f4f5";
-const MUTED = "#a1a1aa";
-const GOLD = "#F5C542";
-const BULL = "#5ee39a";
-const BEAR = "#ff7a8a";
+/** docs/mockups/thesis-fun-mockup.html `:root`, lines 34-57. */
+const BG = "#0b0b10";
+const CARD = "#0a0a0f";
+const SURFACE_2 = "#1b1b24";
+const LINE = "#25252f";
+const TEXT = "#f2f2f5";
+const MUTED = "#8d8d9c";
+const ACCENT = "#6f5cff";
+const ACCENT_LIFT = "#a99bff";
+const ACCENT_TINT = "rgba(111,92,255,.14)";
+const GAIN = "#22c55e";
+const LOSS = "#f4634f";
 
 export default async function Image({ params }: { params: Promise<{ id: string }> }) {
 	const page = await positionPageData((await params).id);
 	if (!page) notFound();
 	const { card } = page;
-	const pnlColor = card.pnl.pnlClass === "bull" ? BULL : card.pnl.pnlClass === "bear" ? BEAR : TEXT;
+	const pnlColor = card.pnl.pnlClass === "bull" ? GAIN : card.pnl.pnlClass === "bear" ? LOSS : TEXT;
+	const settled = card.statusTone === "settled";
 	return new ImageResponse(
 		<div
 			style={{
 				display: "flex",
-				flexDirection: "column",
 				width: "100%",
 				height: "100%",
-				background: GROUND,
+				background: BG,
 				color: TEXT,
-				padding: 48,
-				gap: 24,
+				padding: 40,
 			}}
 		>
-			<div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 30 }}>
-				<div
-					style={{
-						display: "flex",
-						alignItems: "center",
-						justifyContent: "center",
-						width: 52,
-						height: 52,
-						borderRadius: 15,
-						background: GOLD,
-					}}
-				>
-					<div
-						style={{
-							display: "flex",
-							width: 21,
-							height: 21,
-							borderRadius: 5,
-							background: GROUND,
-							transform: "rotate(45deg)",
-						}}
-					/>
-				</div>
-				<span>Thesis.fun</span>
-			</div>
-
 			<div
 				style={{
 					display: "flex",
 					flexDirection: "column",
 					flex: 1,
-					background: SURFACE,
-					border: `1px solid ${HAIRLINE}`,
-					borderRadius: 20,
-					padding: 32,
-					gap: 18,
+					background: ACCENT,
+					borderRadius: 32,
+					padding: "26px 26px 18px",
 				}}
 			>
-				<div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 24 }}>
-					<span>{card.owner.displayName}</span>
-					<span style={{ color: MUTED }}>@{card.owner.handle}</span>
-					<span
-						style={{
-							display: "flex",
-							border: `1px solid ${HAIRLINE}`,
-							borderRadius: 999,
-							padding: "6px 14px",
-							fontSize: 20,
-							color: MUTED,
-						}}
-					>
-						{card.statusLabel}
-					</span>
-					<span style={{ marginLeft: "auto", color: MUTED }}>{card.dateLabel}</span>
-				</div>
-
-				<div style={{ display: "flex", fontSize: 26, color: TEXT }}>{card.instrumentLabel}</div>
-
-				<div style={{ display: "flex", alignItems: "baseline", gap: 20 }}>
-					<span style={{ fontSize: 86, fontWeight: 700, color: pnlColor }}>{card.pnl.signed2}</span>
-					{card.pnlPctLabel ? (
-						<span style={{ fontSize: 30, color: MUTED }}>({card.pnlPctLabel})</span>
-					) : null}
-				</div>
-				<div style={{ display: "flex", fontSize: 22, color: MUTED }}>
-					{card.pnlLabel} · {card.sideLabel}
-				</div>
-
 				<div
 					style={{
 						display: "flex",
-						marginTop: "auto",
-						background: SURFACE_2,
-						border: `1px solid ${HAIRLINE}`,
-						borderRadius: 14,
+						flexDirection: "column",
+						flex: 1,
+						background: CARD,
+						borderRadius: 24,
+						padding: "28px 38px 22px",
 					}}
 				>
-					{card.stats.map((stat, index) => (
+					{/* Satori lays flex children out with no collapsing and no wrapping
+					    help: every block below carries `flexShrink: 0` so a long
+					    instrument can never squash the rows into each other, and the
+					    sizes are chosen to fit 630px with the frame and its footer. */}
+					<div style={{ display: "flex", alignItems: "center", gap: 18, flexShrink: 0 }}>
 						<div
-							key={stat.label}
 							style={{
 								display: "flex",
-								flexDirection: "column",
-								gap: 8,
-								flex: 1,
-								padding: "18px 24px",
-								borderLeft: index === 0 ? "none" : `1px solid ${HAIRLINE}`,
+								alignItems: "center",
+								justifyContent: "center",
+								width: 60,
+								height: 60,
+								flexShrink: 0,
+								borderRadius: 999,
+								background: SURFACE_2,
+								border: `1px solid ${LINE}`,
+								fontSize: 22,
+								fontWeight: 700,
 							}}
 						>
-							<span style={{ fontSize: 20, color: MUTED }}>{stat.label}</span>
-							<span style={{ fontSize: 32 }}>{stat.value}</span>
+							{card.owner.initials}
 						</div>
-					))}
+						<div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+							<span style={{ fontSize: 32, fontWeight: 700 }}>{card.owner.displayName}</span>
+							<span
+								style={{
+									display: "flex",
+									alignSelf: "flex-start",
+									borderRadius: 999,
+									padding: "4px 13px",
+									fontSize: 19,
+									fontWeight: 700,
+									background: settled ? "transparent" : ACCENT_TINT,
+									border: settled ? `1px solid ${LINE}` : "1px solid transparent",
+									color: settled ? MUTED : ACCENT_LIFT,
+								}}
+							>
+								{card.statusLabel}
+							</span>
+						</div>
+						<span style={{ marginLeft: "auto", fontSize: 22, color: MUTED }}>{card.dateLabel}</span>
+					</div>
+
+					<div style={{ display: "flex", marginTop: 18, fontSize: 30, fontWeight: 700, flexShrink: 0 }}>
+						{card.instrumentLabel}
+					</div>
+					<div style={{ display: "flex", marginTop: 8, fontSize: 22, color: MUTED, flexShrink: 0 }}>
+						{card.sideLabel} · Base · Thetanuts OptionBook
+					</div>
+
+					<div style={{ display: "flex", alignItems: "baseline", gap: 20, marginTop: 14, flexShrink: 0 }}>
+						<span style={{ fontSize: 64, fontWeight: 700, letterSpacing: "-0.035em", color: pnlColor }}>
+							{card.pnl.signed2}
+						</span>
+						{card.pnlPctLabel ? (
+							<span style={{ fontSize: 28, fontWeight: 700 }}>({card.pnlPctLabel})</span>
+						) : null}
+					</div>
+					<div style={{ display: "flex", marginTop: 6, fontSize: 20, color: MUTED, flexShrink: 0 }}>
+						{card.pnlLabel}
+					</div>
+
+					<div
+						style={{
+							display: "flex",
+							// Pinned to the card's foot: short content puts the space above
+							// the tiles, never between the figure and its label.
+							marginTop: "auto",
+							paddingTop: 14,
+							flexShrink: 0,
+							borderTop: `1px solid ${LINE}`,
+						}}
+					>
+						{card.stats.map((stat, index) => (
+							<div
+								key={stat.label}
+								style={{
+									display: "flex",
+									flexDirection: "column",
+									gap: 6,
+									flex: 1,
+									paddingLeft: index === 0 ? 0 : 24,
+									paddingRight: 24,
+									borderLeft: index === 0 ? "none" : `1px solid ${LINE}`,
+								}}
+							>
+								<span style={{ fontSize: 21, color: MUTED }}>{stat.label}</span>
+								<span style={{ fontSize: 28, fontWeight: 700 }}>{stat.value}</span>
+							</div>
+						))}
+					</div>
+				</div>
+
+				<div style={{ display: "flex", alignItems: "center", padding: "14px 10px 2px", color: "#ffffff", flexShrink: 0 }}>
+					<span style={{ fontSize: 30, fontWeight: 700, letterSpacing: "-0.03em" }}>thesis.fun</span>
+					{/* Says "verified" only when the receipt says so (PRD 7.3). */}
+					<span style={{ marginLeft: "auto", fontSize: 22, fontWeight: 600, color: "rgba(255,255,255,.72)" }}>
+						{card.verified ? "Verified onchain · Base" : "Base · not confirmed yet"}
+					</span>
 				</div>
 			</div>
 		</div>,

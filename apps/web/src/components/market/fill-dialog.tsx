@@ -1,29 +1,37 @@
 "use client";
 
 /**
- * What pops up the moment a fill confirms: the position's card, a link to copy,
- * and a way to write a post about it.
+ * What pops up the moment a fill confirms: the share card, a link to copy, and a
+ * way to write a post about it.
  *
- * Shape from the owner's fomo reference (`.demo/fomo-share-card.png`,
- * 2026-09-05): owner name, status chip, instrument, one big signed P&L with a
- * percentage, three stat tiles. No price line — the owner removed charts.
+ * Layout from the mockup's post-trade dialog (lines 1037-1049 and the shot
+ * `.research/thetanuts/design-r1-shots/design-r1-4-dialog.png`): a dimmed
+ * backdrop, a 520px panel with a title row and a close ×, the accent-framed
+ * share card as the whole body, then "Copy link" and "Write a post about it"
+ * side by side.
  *
- * HANDOVER: the card itself is being built as
- * `src/components/position/pnl-card.tsx` by the position-page writer. This is
- * the minimal stand-in, and its props are a plain View type (`FillCard`) so the
- * orchestrator can swap the component at merge without touching this dialog.
+ * WHY NOT `PnlCard`: the brief asks for the position card here if its view type
+ * can be built from the fill result. It cannot. `FillCard` (`lib/trade/types.ts`
+ * 158-176, produced by `lib/trade/record.ts:231`) carries a truncated wallet and
+ * three label/value tiles; `PnlCard` (`lib/display-types.ts` 322-354) needs a
+ * whole `Creator`, a `dateLabel`, a `DisplayAmount` P&L, a `PnlBasis` and a
+ * verification flag, and none of them exists at the moment a fill confirms.
+ * Widening `FillCard` means editing `src/lib/trade`, which is outside this
+ * round's fence. So the same markup is rendered from what the fill result does
+ * have, and the gap is in the report.
  *
  * `packages/ui/src/components` has no dialog (checked 2026-09-05: attachment,
  * bubble, button, card, checkbox, dropdown-menu, empty, input-group, input,
  * label, marker, message-scroller, message, skeleton, sonner, textarea,
  * tooltip), so this is a plain accessible one: `role="dialog"`, `aria-modal`,
  * labelled by its heading, focus moved in on open, Escape and backdrop close,
- * focus cycled inside, and focus returned to the opener.
+ * focus cycled inside, and focus returned to the opener. None of that changed.
  */
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { TodoOwner } from "@/components/primitives";
 import type { FillCard } from "@/lib/trade/types";
+import "@/styles/position.css";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -82,74 +90,87 @@ export function FillDialog({
 			.catch(() => setCopied(false));
 	}, [card.positionPath]);
 
+	const tone = card.pnlClass;
+	const arrow = tone === "bull" ? "▲" : tone === "bear" ? "▼" : null;
+
 	return (
-		// Inline styles, not new CSS: `src/index.css` is outside this round's
-		// fence. The backdrop click is a convenience; Escape and the Close button
-		// are the keyboard paths, and both are wired above.
+		// The backdrop click is a convenience; Escape and the close button are the
+		// keyboard paths, and both are wired above.
 		<div
-			style={{
-				position: "fixed",
-				inset: 0,
-				background: "rgba(0,0,0,.66)",
-				display: "grid",
-				placeItems: "center",
-				padding: "24px",
-				zIndex: 50,
-			}}
+			className="scrim"
 			onKeyDown={onKeyDown}
 			onClick={(event) => {
 				if (event.target === event.currentTarget) onClose();
 			}}
 		>
-			<div
-				className="panel"
-				style={{ maxWidth: "420px", width: "100%", maxHeight: "90vh", overflowY: "auto" }}
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby="fill-dialog-title"
-				ref={panel}
-			>
-				<div className="who2">
-					<b id="fill-dialog-title">{card.ownerLabel}</b>
-					<span className="live">{card.statusLabel}</span>
+			<div className="dlg" role="dialog" aria-modal="true" aria-labelledby="fill-dialog-title" ref={panel}>
+				<div className="dlg-h">
+					<h3 id="fill-dialog-title">
+						Filled · your position is live
+						<TodoOwner />
+					</h3>
+					<button type="button" className="dlg-x" onClick={onClose} aria-label="Close">
+						×
+					</button>
 				</div>
-				<span className="note">
-					{card.instrumentLabel} · {card.sideLabel}
-				</span>
-				<div className="board">
-					<div>
-						<span className="lbl">Live P&amp;L</span>
-						<span className={`v ${card.pnlClass}`}>
-							{card.pnlLabel} {card.pnlPercentLabel === "—" ? null : `(${card.pnlPercentLabel})`}
-						</span>
+
+				<div className="frame">
+					<div className="sc">
+						<div className="sc-top">
+							{/* No avatar and no date: the fill result carries a truncated
+							    wallet and nothing else about its owner. See the note above. */}
+							<div style={{ minWidth: 0 }}>
+								<div className="sc-name num">{card.ownerLabel}</div>
+								<span className="chip">{card.statusLabel}</span>
+							</div>
+						</div>
+						<div className="sc-inst">
+							<b>{card.instrumentLabel}</b>
+						</div>
+						<div className="sc-strikes">{card.sideLabel} · Base · Thetanuts OptionBook</div>
+						<div className="sc-pnl">
+							<b className={`${tone} num${card.pnlLabel === "—" ? " none" : ""}`}>{card.pnlLabel}</b>
+							{card.pnlPercentLabel === "—" ? null : (
+								<span className="num">
+									({arrow === null ? null : <em className={tone}>{arrow} </em>}
+									{card.pnlPercentLabel})
+								</span>
+							)}
+						</div>
+						<p className="sc-basis">
+							Live P&amp;L needs a mark for this option and nothing published one at the moment this fill
+							confirmed, so no number is shown rather than a guess. Mark source
+							<TodoOwner />
+						</p>
+						<div className="tiles">
+							{card.tiles.map((tile) => (
+								<span className="tile" key={tile.label}>
+									<i>{tile.label}</i>
+									<b className="num">{tile.value}</b>
+								</span>
+							))}
+						</div>
+						<a className="sc-tx num" href={txHref} rel="noreferrer" target="_blank">
+							{txLabel}
+						</a>
+					</div>
+					<div className="frame-f">
+						<span className="wm">thesis.fun</span>
+						<span className="fine">Verified onchain · Base</span>
 					</div>
 				</div>
-				<span className="note">
-					Live P&amp;L needs a mark for this option. Nothing published one at the moment this fill confirmed,
-					so no number is shown rather than a guess. Mark source <TodoOwner />
-				</span>
-				<dl className="kv">
-					{card.tiles.map((tile) => (
-						<Fragment key={tile.label}>
-							<dt>{tile.label}</dt>
-							<dd className="mono">{tile.value}</dd>
-						</Fragment>
-					))}
-				</dl>
-				<a className="tx" href={txHref} rel="noreferrer" target="_blank">
-					{txLabel}
-				</a>
-				<button type="button" className="btn primary block" onClick={copy}>
-					{copied ? "Link copied" : "Copy link"}
-				</button>
-				<Link className="btn block" href={{ pathname: "/new", query: { link: card.positionPath } }}>
-					Write a post about it
-				</Link>
-				<button type="button" className="btn block" onClick={onClose}>
-					Close
-				</button>
-				<span className="note">
-					Dialog copy and the share-card layout <TodoOwner />
+
+				<div className="dlg-acts">
+					<button type="button" className="btn sec" onClick={copy}>
+						{copied ? "Link copied" : "Copy link"}
+					</button>
+					<Link className="btn acc" href={{ pathname: "/new", query: { link: card.positionPath } }}>
+						Write a post about it
+					</Link>
+				</div>
+				<span className="dlg-note">
+					Dialog copy and the share-card layout
+					<TodoOwner />
 				</span>
 			</div>
 		</div>

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Pill, TodoOwner } from "@/components/primitives";
+import { TodoOwner } from "@/components/primitives";
 import { usd, usd2 } from "@/lib/format";
 import type { MarketStructure } from "@/lib/display-types";
 
@@ -8,10 +8,16 @@ import type { MarketStructure } from "@/lib/display-types";
  * for. Selecting a row is what loads the ticket, so this table — not a post —
  * is where a trade starts.
  *
+ * Layout from the mockup's `#market` "Live structures" card (lines 771-814):
+ * seven columns, the three money columns right-aligned, the selected row tinted
+ * with the accent at 8% and marked by a 2px accent rule down its left edge. The
+ * row is the selection, so it carries `aria-selected`; the button is the control
+ * that changes it.
+ *
  * In `DATA_SOURCE=mock` the rows are fixtures and Select is inert, exactly as
- * before. Against the live book each Select is a link that reloads the page
- * with that structure quoted, keeping whatever post and side the visitor
- * arrived with.
+ * before. Against the live book each Select is a link that reloads the page with
+ * that structure quoted, keeping whatever post and side the visitor arrived
+ * with. Neither behaviour changed in this round; only the look did.
  */
 export function StructuresList({
 	rows,
@@ -26,21 +32,21 @@ export function StructuresList({
 	live?: boolean;
 }) {
 	return (
-		<div className="sec">
-			<div className="bookmeta">
-				<h2 className="h2">Live structures</h2>
-				<span className="note">From OptionBook orders · prices move every block</span>
+		<section className="card">
+			<div className="card-h">
+				<h3>Live structures</h3>
+				<span className="x">From OptionBook orders · prices move every block</span>
 			</div>
-			<div className="tablewrap">
-				<table>
+			<div className="card-b tbl-wrap">
+				<table className="tbl">
 					<thead>
 						<tr>
 							<th>Expiry</th>
 							<th>Structure</th>
 							<th>Strikes</th>
-							<th className="num">Premium / ct</th>
-							<th className="num">Max payout</th>
-							<th className="num">Liquidity left</th>
+							<th className="r">Premium / ct</th>
+							<th className="r">Max payout</th>
+							<th className="r">Liquidity left</th>
 							<th>
 								<span className="sr-only">Select</span>
 							</th>
@@ -48,25 +54,27 @@ export function StructuresList({
 					</thead>
 					<tbody>
 						{rows.map((row) => (
-							<tr className={row.selected ? "sel" : undefined} key={row.id}>
-								<td className="mono">{row.expiryLabel}</td>
-								<td>{row.productType}</td>
-								<td className="mono">{row.strikesLabel}</td>
-								<td className="num">{usd2(row.premiumPerContractUsd)}</td>
-								<td className="num bull">{row.maxPayoutLabel}</td>
-								<td className="num">{usd(row.liquidityLeftUsd)}</td>
-								<td>
+							<tr aria-selected={row.selected} key={row.id}>
+								<td className="num mut">{row.expiryLabel}</td>
+								<td className="struct">{row.productType}</td>
+								<td className="num mut">{row.strikesLabel}</td>
+								<td className="r num">{usd2(row.premiumPerContractUsd)}</td>
+								<td className="r num">{row.maxPayoutLabel}</td>
+								<td className="r num">{usd(row.liquidityLeftUsd)}</td>
+								<td className="r">
 									{row.selected ? (
-										<Pill on>Selected</Pill>
+										<button type="button" className="sel-btn" aria-pressed="true">
+											Selected
+										</button>
 									) : live && slug !== undefined ? (
 										<Link
-											className="btn sm"
+											className="sel-btn"
 											href={{ pathname: `/m/${slug}`, query: { ...query, structure: row.id } }}
 										>
 											Select
 										</Link>
 									) : (
-										<button type="button" className="btn sm">
+										<button type="button" className="sel-btn" aria-pressed="false">
 											Select
 										</button>
 									)}
@@ -76,9 +84,10 @@ export function StructuresList({
 					</tbody>
 				</table>
 			</div>
-			<span className="note">
-				How structures are ordered and which are surfaced first <TodoOwner />
-			</span>
-		</div>
+			<div className="card-f">
+				How structures are ordered and which of them are surfaced first
+				<TodoOwner />
+			</div>
+		</section>
 	);
 }

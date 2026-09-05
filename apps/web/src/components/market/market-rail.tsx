@@ -2,7 +2,7 @@
 
 /**
  * The market page's right rail in database mode: the live ticket, and the
- * mockup's "Post about <asset>" panel beside it.
+ * "Post about <asset>" panel beside it.
  *
  * They are no longer one journey. Owner 2026-09-05: "trade is just trade.
  * post(thesis) is it's own thing. doesn't have to be tied." A fill from this
@@ -37,17 +37,25 @@ export function MarketRail({
 				trade={trade}
 				onSignedIn={signInHint}
 			/>
-			{message !== null ? <span className="note">{message}</span> : null}
-			<div className="panel">
-				<h3>Post about {trade.asset}</h3>
-				<span className="note">
+			{message !== null ? (
+				<section className="card pad mkt-panel">
+					<p className="fine first">{message}</p>
+				</section>
+			) : null}
+			<section className="card pad mkt-panel">
+				<h3 style={{ fontSize: "15px" }}>Post about {trade.asset}</h3>
+				<p className="fine">
 					Write your read on this market. A post is text first — tag this structure if you want, and it shows
 					the verified badge only once your own fill confirms.
-				</span>
-				<Link className="btn block" href={{ pathname: "/new", query: { asset: trade.asset } }}>
+				</p>
+				<Link
+					className="btn sec block"
+					style={{ marginTop: "14px" }}
+					href={{ pathname: "/new", query: { asset: trade.asset } }}
+				>
 					Write a post
 				</Link>
-			</div>
+			</section>
 		</>
 	);
 }

@@ -1,0 +1,244 @@
+/*
+ * Market page (`/m/[asset]`) — page-scoped styles.
+ *
+ * The mockup's own blocks — `.tbl*`, `.sel-btn`, `.seg`, `.amt`, `.lbl`,
+ * `.card*`, `.pill`, `.stats`, `.tiles`, `.av*`, `.kv`, `.row`, `.post` — are
+ * ported class-for-class in `src/index.css`, which the shell lane owns
+ * (read at `.claude/worktrees/ui-feed-r1/apps/web/src/index.css`, lines
+ * 108-378). Nothing here repeats them.
+ *
+ * What IS here: the market header and the vertical rhythm of the ticket, which
+ * the mockup writes as inline styles on `#market` (lines 750-899); the two
+ * states the mockup has no example of (a book that could not be read, and a
+ * ticket with something to say back); and the compact tagged-post row.
+ *
+ * Imported by `src/app/m/[asset]/page.tsx` only. Next.js keeps a page-imported
+ * stylesheet loaded after navigation (app/getting-started/css: "this currently
+ * does not remove stylesheets as you navigate"), which is harmless: every
+ * selector below is either unique to this page or scoped under `.ticket`,
+ * `.mkt-head`, `.mkt-panel` or `.tagged`.
+ */
+
+/* ---------- market header (mockup lines 750-767, inline there) ---------- */
+.mkt-head {
+	display: flex;
+	align-items: flex-start;
+	gap: 14px;
+	flex-wrap: wrap;
+}
+.mkt-head h1 {
+	font-size: 24px;
+	font-weight: 800;
+	letter-spacing: -0.025em;
+	line-height: 1.15;
+}
+.mkt-head .sub {
+	display: block;
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--muted);
+	margin-top: 3px;
+}
+.mkt-head .px {
+	margin-left: auto;
+	text-align: right;
+}
+.mkt-head .px b {
+	display: block;
+	font-size: 32px;
+	font-weight: 800;
+	letter-spacing: -0.03em;
+	line-height: 1.05;
+}
+.mkt-head .px i {
+	display: block;
+	font-style: normal;
+	font-size: 13.5px;
+	font-weight: 700;
+	margin-top: 4px;
+}
+
+/* A book that could not be read says so in place of the table, rather than
+   rendering an empty one that reads as "no liquidity". */
+.mkt-warn {
+	display: block;
+	padding: 14px 16px;
+	border: 1px solid var(--line);
+	border-radius: var(--r-panel);
+	background: var(--surface2);
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--muted);
+	line-height: 1.5;
+}
+
+/* ---------- ticket (mockup lines 860-899: its inline margins, named) ---------- */
+.ticket .sub {
+	display: block;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--muted);
+	margin-top: 4px;
+	line-height: 1.5;
+}
+.ticket .seg {
+	margin-top: 16px;
+}
+/* A side the book cannot fill is greyed, not hidden: which sides exist is
+   information, and a control that vanishes reads as a bug. */
+.ticket .seg button:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+.ticket .fine {
+	display: block;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--muted);
+	margin-top: 10px;
+	line-height: 1.5;
+}
+.ticket .lbl {
+	display: block;
+	margin-top: 18px;
+}
+.ticket .amt {
+	margin-top: 8px;
+}
+/* Mock mode has no input: the budget is a fixture, shown at the input's size. */
+.ticket .amt .val {
+	flex: 1;
+	min-width: 0;
+	font-size: 26px;
+	font-weight: 800;
+	letter-spacing: -0.02em;
+}
+.ticket .pills {
+	margin-top: 10px;
+}
+.ticket .under {
+	display: block;
+	font-size: 12px;
+	font-weight: 500;
+	color: var(--muted);
+	margin-top: 8px;
+}
+.ticket .kv {
+	margin-top: 16px;
+}
+.ticket .go {
+	margin-top: 16px;
+}
+.ticket .btn:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+.ticket .sign {
+	display: block;
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--muted);
+	text-align: center;
+	margin-top: 8px;
+}
+/* Anything the ticket has to say back — a quote that cannot be signed, a wrong
+   chain, a reverted fill. Neutral by design: colour is for money only, so a
+   failure reads as a hairlined note, never as red text. */
+.ticket .msg {
+	display: block;
+	margin-top: 12px;
+	padding: 11px 13px;
+	border: 1px solid var(--line);
+	border-radius: var(--r-row);
+	background: var(--surface2);
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--muted);
+	line-height: 1.5;
+}
+.ticket .msg b {
+	color: var(--text);
+	font-weight: 600;
+}
+.ticket .tx {
+	display: inline-block;
+	margin-top: 10px;
+	font-weight: 600;
+}
+
+/* ---------- the other right-hand panels ---------- */
+.mkt-panel .fine {
+	display: block;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--muted);
+	margin-top: 6px;
+	line-height: 1.5;
+}
+.mkt-panel .fine.first {
+	margin-top: 0;
+}
+
+/* ---------- posts about <asset> (mockup lines 817-855) ---------- */
+.tagged-h .x {
+	display: flex;
+	gap: 6px;
+	margin-left: auto;
+}
+.tagged {
+	padding: 0 10px 10px;
+}
+/* Inside the card these posts are rows separated by a hairline, not stacked
+   surfaces of their own. */
+.tagged .post {
+	background: none;
+	border: 0;
+	border-radius: 0;
+	padding: 12px 10px;
+}
+.tagged .post:hover {
+	border-color: transparent;
+}
+.tagged .post + .post {
+	border-top: 1px solid var(--line-soft);
+}
+.tagged .p-name {
+	font-size: 14px;
+}
+.tagged .p-body {
+	font-size: 15px;
+}
+.tagged .empty {
+	display: block;
+	padding: 18px 10px 22px;
+	font-size: 13.5px;
+	font-weight: 500;
+	color: var(--muted);
+}
+
+@media (max-width: 900px) {
+	.mkt-head .px {
+		margin-left: 0;
+		text-align: left;
+	}
+	.mkt-head .px b {
+		font-size: 26px;
+	}
+	.ticket .amt .val {
+		font-size: 22px;
+	}
+	.tagged {
+		padding: 0 4px 8px;
+	}
+}
+
+/* The book scrolls sideways on a narrow screen (`.tbl-wrap` in `index.css`),
+   but `overflow-x:auto` only clips an absolutely positioned descendant when the
+   scroller is itself a containing block. Without this, the visually hidden
+   "Select" column header — Tailwind's `.sr-only` is `position:absolute` — sits
+   at the table's far right OUTSIDE the clip and drags the document to 608px at
+   a 390px viewport, giving the whole page a horizontal scrollbar. Measured on
+   /m/btc at 390×844: 608px before, 390px after. */
+.tbl-wrap {
+	position: relative;
+}

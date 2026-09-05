@@ -16,7 +16,7 @@
  * naming a revalidation interval, which would be an owner's number, and it is
  * scoped to the database branch so the mock build keeps its static output.
  */
-import { siteOrigin } from "./site-origin";
+import { siteOrigins } from "./site-origin";
 import type * as Domain from "@/types";
 import { connection } from "next/server";
 import type * as View from "./display-types";
@@ -24,6 +24,7 @@ import * as display from "./display";
 import * as mock from "./view-data";
 import * as mockSource from "@/mock/data";
 import { attachLinkedPositions, enrichWithTradeLinks } from "./thesis/enrich";
+import { PUBLIC_THESIS_STATUSES } from "./data/constants";
 import { usingDatabase } from "./data/source";
 import { rankTheses } from "./social/ranking";
 
@@ -128,7 +129,7 @@ export async function toPosts(rows: readonly Domain.Thesis[]): Promise<View.Thes
 	if (rows.length === 0) return [];
 	const { withCards } = await import("./position/view");
 	const asOf = new Date();
-	const origin = usingDatabase() ? await siteOrigin() : undefined;
+	const origin = usingDatabase() ? await siteOrigins() : undefined;
 	return rows.map((row) => withCards(display.thesisWithOrigin(row, origin), row, asOf));
 }
 
@@ -204,7 +205,7 @@ export async function discoverData(): Promise<DiscoverData> {
 					(row, index, all) => all.findIndex((other) => other.id === row.id) === index,
 				),
 				(ids) => listPositionsByIds(ids),
-				await siteOrigin(),
+				await siteOrigins(),
 			)
 		).map((row) => [row.id, row]),
 	);
@@ -247,7 +248,7 @@ export async function railTheses(limit = 5): Promise<View.Thesis[]> {
 	if (!usingDatabase()) return mockSource.theses.slice(0, limit).map(display.thesis);
 	await connection();
 	const { listFeed } = await import("./data/reads");
-	const origin = await siteOrigin();
+	const origin = await siteOrigins();
 	return (await listFeed({ limit })).slice(0, limit).map(row => display.thesisWithOrigin(row, origin));
 }
 
@@ -258,7 +259,9 @@ export async function railTheses(limit = 5): Promise<View.Thesis[]> {
  * as missing so the route returns 404.
  */
 function renderableStatus(status: string): boolean {
-	return status === "open" || status === "settled";
+	// B3: the ONE public-status list, so the thread page and the rankings cannot
+	// disagree about which posts exist.
+	return PUBLIC_THESIS_STATUSES.some((value) => value === status);
 }
 
 export async function thesisDetailData(slug: string): Promise<View.ThesisDetail | undefined> {
@@ -279,7 +282,7 @@ export async function thesisDetailData(slug: string): Promise<View.ThesisDetail 
 
 	const { listPositionsByIds } = await import("./data/reads");
 	const [enriched = thread.thesis] = await enrichWithTradeLinks([thread.thesis], (ids) =>
-		listPositionsByIds(ids), await siteOrigin(),
+		listPositionsByIds(ids), await siteOrigins(),
 	);
 
 	return withThesisCards(display.detail({
@@ -305,7 +308,7 @@ async function withThesisCards(
 	domain: Domain.Thesis,
 ): Promise<View.ThesisDetail> {
 	const { withCards } = await import("./position/view");
-	return { ...detail, thesis: withCards(display.thesisWithOrigin(domain, usingDatabase() ? await siteOrigin() : undefined), domain) };
+	return { ...detail, thesis: withCards(display.thesisWithOrigin(domain, usingDatabase() ? await siteOrigins() : undefined), domain) };
 }
 
 /**
@@ -381,7 +384,7 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		signedIn: signedIn !== null, databaseMode: true, self: signedIn?.userId === profile.creator.id,
 		following: (await getFollowState(signedIn?.userId ?? null, profile.creator.id)).following,
 		creator: display.creator(profile.creator),
-		callouts: await toPosts(await enrichWithTradeLinks(profile.theses.filter((thesis) => renderableStatus(thesis.thesis.status)), listPositionsByIds, await siteOrigin())),
+		callouts: await toPosts(await enrichWithTradeLinks(profile.theses.filter((thesis) => renderableStatus(thesis.thesis.status)), listPositionsByIds, await siteOrigins())),
 		positions: profile.positions.map(display.participant),
 		activity: (await listActivity(profile.creator.id)).map(display.activity),
 	};

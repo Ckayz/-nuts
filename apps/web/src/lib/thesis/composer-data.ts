@@ -13,7 +13,7 @@
  * foreign host, a `javascript:` URL, junk — is dropped and the composer simply
  * opens empty. `?asset=` must be a ticker shape and is uppercased.
  */
-import { siteOrigin } from "../site-origin";
+import { siteOrigins } from "../site-origin";
 import { marketSummariesData } from "../market/summaries";
 import type { PnlCard } from "../display-types";
 import { usingDatabase } from "../data/source";
@@ -29,7 +29,7 @@ export interface AssetTag {
 export interface ComposerData {
 	assets: AssetTag[];
 	marketsUnavailable: boolean;
-	siteOrigin: string;
+	siteOrigin: string[];
 	presetAsset: string | null;
 	presetRationale: string;
 	previewCards: PnlCard[];
@@ -54,7 +54,7 @@ export async function composerData(
 	searchParams: { [key: string]: string | string[] | undefined },
 ): Promise<ComposerData> {
 	const databaseMode = usingDatabase();
-	const origin = await siteOrigin();
+	const origin = await siteOrigins();
 	const { markets: marketSummaries, unavailable: marketsUnavailable } = await marketSummariesData();
 	const requestedAsset = presetAsset(single(searchParams.asset));
 	const asset = databaseMode && !marketSummaries.some(market => market.asset === requestedAsset) ? null : requestedAsset;

@@ -3,6 +3,7 @@ import { useOptimistic, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateProfile } from "@/lib/profile/actions";
 import type { ProfileFields } from "@/lib/profile/validation";
+import { readableError } from "@/lib/messages";
 
 export function ProfileEditor({ profile, walletAddress }: { profile: ProfileFields; walletAddress: string }) {
 	const router = useRouter();
@@ -34,7 +35,7 @@ export function ProfileEditor({ profile, walletAddress }: { profile: ProfileFiel
 				{field === "bio" ? <textarea className="inp" name={field} defaultValue={profile[field] ?? ""} disabled={pending} /> : <input className="inp" name={field} defaultValue={profile[field] ?? ""} disabled={pending} maxLength={field === "handle" ? 32 : undefined} />}
 			</label>)}
 			{pending ? <p className="mut" aria-live="polite">{optimistic.displayName ?? optimistic.handle ?? walletAddress}{optimistic.bio ? ` · ${optimistic.bio}` : ""}</p> : null}
-			{error ? <p role="alert">{error}</p> : null}
+			{error ? <p role="alert">{readableError(error)}</p> : null}
 			<button className="btn acc" type="submit" disabled={pending}>Save</button>
 		</form>
 	</details>;

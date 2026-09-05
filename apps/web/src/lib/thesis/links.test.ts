@@ -123,3 +123,60 @@ describe("renderTextWithLinks", () => {
 test("tradeLinkHref lowercases the id", () => {
 	expect(tradeLinkHref(A.toUpperCase())).toBe(`/p/${A}`);
 });
+
+/**
+ * 9(b). A deployment answers on more than one name: the per-deployment
+ * `VERCEL_URL`, a branch alias, the custom domain. `CopyLink` builds the copied
+ * address from the browser's own origin, so the copied link carries whichever
+ * name the visitor was reading — and matching only ONE of them left the link as
+ * plain text with no trade card.
+ */
+describe("more than one accepted origin", () => {
+	const PREVIEW = "https://thesis-fun-abc123.vercel.app";
+	const DOMAIN = "https://thesis.fun";
+
+	test("a link copied on origin A unfurls when the page is served from origin B", () => {
+		// Copied on the custom domain; the request arrived on the preview URL.
+		expect(extractTradeLinks(`${DOMAIN}/p/${A}`, [PREVIEW, DOMAIN])).toEqual([A]);
+		// And the other way round.
+		expect(extractTradeLinks(`${PREVIEW}/p/${A}`, [DOMAIN, PREVIEW])).toEqual([A]);
+	});
+
+	test("a single origin still only matches itself", () => {
+		expect(extractTradeLinks(`${DOMAIN}/p/${A}`, [PREVIEW])).toEqual([]);
+		expect(extractTradeLinks(`${DOMAIN}/p/${A}`, PREVIEW)).toEqual([]);
+	});
+
+	test("a third host is still never a trade link, however many origins are accepted", () => {
+		expect(extractTradeLinks(`https://evil.example/p/${A}`, [PREVIEW, DOMAIN])).toEqual([]);
+		// The lookalike rule survives the list: the character after the origin
+		// must be "/", so a longer host that starts with ours is not ours.
+		expect(extractTradeLinks(`${DOMAIN}.evil.example/p/${A}`, [PREVIEW, DOMAIN])).toEqual([]);
+	});
+
+	// MEASURED, not assumed: an empty accepted origin is INERT, not dangerous —
+	// an empty prefix means the candidate must start with "/", which is exactly
+	// the path-only case that already links. Dropping blanks is hygiene, so this
+	// case pins the OUTCOMES, and deliberately does not claim a safety property
+	// the code does not have. (A mutant that keeps blank entries stays GREEN
+	// here, and `bun run` over the five shapes above confirms it changes nothing.)
+	test("blank and duplicate entries change no outcome", () => {
+		expect(extractTradeLinks(`${DOMAIN}/p/${A}`, [])).toEqual([]);
+		expect(extractTradeLinks(`${DOMAIN}/p/${A}`, ["", "   "])).toEqual([]);
+		// A blank entry cannot turn another host into a link either.
+		expect(extractTradeLinks(`https://evil.example/p/${A}`, ["", DOMAIN])).toEqual([]);
+		expect(extractTradeLinks(`${DOMAIN}/p/${A}`, [DOMAIN, DOMAIN, `${DOMAIN}/`])).toEqual([A]);
+		// A path-only link never needed an origin and still does not.
+		expect(extractTradeLinks(`/p/${A}`, [])).toEqual([A]);
+	});
+
+	test("two links copied on two different origins both unfurl in one post", () => {
+		expect(extractTradeLinks(`${DOMAIN}/p/${A} and ${PREVIEW}/p/${B}`, [PREVIEW, DOMAIN])).toEqual([A, B]);
+	});
+
+	test("the rendered anchor is still the rebuilt path, never the pasted URL", () => {
+		expect(renderTextWithLinks(`${DOMAIN}/p/${A}`, [PREVIEW, DOMAIN])).toEqual([
+			{ kind: "link", label: `${DOMAIN}/p/${A}`, href: `/p/${A}`, positionId: A },
+		]);
+	});
+});

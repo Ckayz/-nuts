@@ -67,6 +67,28 @@ export interface PnlInputs {
 	readonly spotUsd8: string | null;
 	/** Why no derivation is possible. Shown verbatim when nothing else supplies a number. */
 	readonly unavailableReason: string;
+	/**
+	 * C7. When this option expires, ISO 8601, or null when it cannot be read.
+	 *
+	 * There is no expiry or settlement reconciliation yet (`markIndexed` is
+	 * referenced in `trade/record.ts` but does not exist), so a position stays
+	 * `confirmed` for ever after its option expires. Without these two fields the
+	 * derivation below kept valuing an EXPIRED option at TODAY's spot, which is a
+	 * number that cannot happen: the option is finished and its payoff was fixed
+	 * at the settlement price, not at today's.
+	 */
+	readonly expiryAt: string | null;
+	/** The instant this page is rendered for, ISO 8601. */
+	readonly asOf: string;
+}
+
+/** C7. True once the option's expiry has passed. Unreadable dates count as NOT expired: a false "settlement pending" would be its own wrong claim. */
+export function isPastExpiry(expiryAt: string | null, asOf: string): boolean {
+	if (expiryAt === null) return false;
+	const expiry = Date.parse(expiryAt);
+	const now = Date.parse(asOf);
+	if (Number.isNaN(expiry) || Number.isNaN(now)) return false;
+	return expiry <= now;
 }
 
 export interface PnlResolution {
@@ -244,6 +266,19 @@ export function resolvePnl(inputs: PnlInputs): PnlResolution {
 			pnlUsd: null,
 			basis: "unavailable",
 			detail: "Settlement pending: Thetanuts has not published this option's settlement yet.",
+		};
+	}
+
+	// C7. Past expiry but not settled: the option is FINISHED. Its result is
+	// whatever Thetanuts settles it at, which nothing here knows yet, so no
+	// estimate and no spot derivation may be shown — both would assert a live
+	// position that no longer exists. A recorded final P&L is handled above.
+	if (isPastExpiry(inputs.expiryAt, inputs.asOf)) {
+		return {
+			pnlUsd: null,
+			basis: "unavailable",
+			detail:
+				"Settlement pending: this option has expired and Thetanuts has not published its settlement yet, so there is no final figure and no live estimate.",
 		};
 	}
 

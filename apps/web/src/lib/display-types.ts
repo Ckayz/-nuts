@@ -166,6 +166,23 @@ export interface Position {
     entryUsd?: DisplayAmount;
     tx?: TxRef;
     settled: boolean;
+    /**
+     * D5. The lifecycle vocabulary and the P&L basis, so a list row does not
+     * render an EXPIRED position identically to an open one.
+     *
+     * These rows used to carry `settled: boolean` alone: "Open · syncing",
+     * "Settlement pending" and "Failed" all looked the same, and the number
+     * beside them was printed with no statement of where it came from. Same
+     * words as the share card (`POSITION_STATUS_DISPLAY`, PRD 8.5), so a
+     * position reads the same in a list as on its own page.
+     */
+    statusLabel: string;
+    statusTone: ThesisStatus;
+    /** "Result" once settled, "Live P&L" otherwise — the card's own wording. */
+    pnlLabel: string;
+    /** One factual sentence naming where the number came from. */
+    pnlBasisLabel: string;
+    basis: PnlBasis;
 }
 export interface ActivityItem {
     id?: string;

@@ -35,7 +35,7 @@ Never `drizzle-kit push` against the shared project (it can DROP the other devel
 ## 4. Deploy and verify
 1. Trigger the production deploy (push to `main`, or "Redeploy" in the dashboard). Watch the build log for the `DATA_SOURCE` error above — it means step 2 was missed.
 2. Open `/`, `/m/btc`, `/new`, `/portfolio`, sign in with a wallet on Base, post, like. Every route should answer 200; the Markets panel must show the live book (6–8 assets), not "unavailable".
-3. **Custom domain**: assign it in Vercel → Domains. The app derives its share-link origin from `VERCEL_PROJECT_PRODUCTION_URL` (set by Vercel to the production domain), so pasted `https://<domain>/p/<id>` links unfurl into trade cards only once the domain is the production domain.
+3. **Custom domain**: assign it in Vercel → Domains. A pasted `https://<domain>/p/<id>` link unfurls into a trade card as soon as the page is served on that domain: `lib/site-origin.ts` accepts BOTH the deployment URL (`VERCEL_PROJECT_PRODUCTION_URL` / `VERCEL_URL`) and the origin the request actually arrived on, so a branch alias and a custom domain both work without waiting for either to become the production domain. (Measured 2026-09-05 on a db-mode production build: with the deployment URL set to one name, a link written on a second name unfurled when the page was served on that second name.) A link written on a THIRD origin the deployment never answers on stays plain text, which is the intended fence.
 4. Then the owner's tiny real fill (`packages/thetanuts/scripts/README.md`) is the final proof of the money path.
 
 ## 5. Things that will bite

@@ -1,24 +1,55 @@
 import "server-only";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
-/** Request Google Fonts' non-browser CSS and require Satori-supported TTF/WOFF.
- * Cache successful font loads in-process; a failed load remains retryable. */
-let pending: Promise<{ name: string; data: ArrayBuffer; weight: 400 | 700; style: "normal" }[]> | undefined;
+/**
+ * Manrope for the two Open Graph image routes, read from THIS repository.
+ *
+ * 9(a). This used to request `fonts.googleapis.com` and then `fonts.gstatic.com`
+ * on every cold render, so a Google hiccup — or an egress-restricted runtime —
+ * made `/t/<slug>/opengraph-image` and `/p/<id>/opengraph-image` throw a 500
+ * instead of drawing a share card. The bytes are vendored now
+ * (`src/assets/manrope-{400,700}.ttf`, provenance and OFL licence in
+ * `src/assets/README.md`), so neither route makes ANY outbound request.
+ *
+ * The path is `process.cwd()`-relative, which is the pattern Next documents for
+ * `ImageResponse` fonts (`node_modules/next/dist/docs/01-app/03-api-reference/
+ * 03-file-conventions/01-metadata/opengraph-image.md`). `vercel.json` gives the
+ * `web` service `root: apps/web`, and `next start` is run from the same place,
+ * so the working directory is the app directory in both. `next.config.ts` also
+ * names the files in `outputFileTracingIncludes` so the deployment carries them.
+ *
+ * Satori reads TrueType and WOFF but not WOFF2, so these are `.ttf`.
+ */
+export type OgFont = { name: string; data: ArrayBuffer; weight: 400 | 700; style: "normal" };
+
+const FONT_FILES = { 400: "manrope-400.ttf", 700: "manrope-700.ttf" } as const;
+
+/** Cache successful loads in-process; a failed read stays retryable. */
+let pending: Promise<OgFont[]> | undefined;
 export function ogFonts() {
-	pending ??= loadFonts().catch(error => { pending = undefined; throw error; });
+	pending ??= loadFonts().catch(error => {
+		pending = undefined;
+		throw error;
+	});
 	return pending;
 }
-export async function loadFonts(read: typeof fetch = fetch) {
-	const response = await read("https://fonts.googleapis.com/css?family=Manrope:400,700", {
-		headers: { "User-Agent": "Thesis-OG" },
-	});
-	if (!response.ok) throw new Error("Could not load Manrope font stylesheet");
-	const css = await response.text();
+
+export function fontPath(weight: 400 | 700, cwd: string = process.cwd()): string {
+	return join(cwd, "src", "assets", FONT_FILES[weight]);
+}
+
+export async function loadFonts(read: (path: string) => Promise<Buffer> = readFile): Promise<OgFont[]> {
 	return Promise.all(([400, 700] as const).map(async weight => {
-		const block = css.split("}").find(part => part.includes(`font-weight: ${weight};`));
-		const source = block?.match(/src:\s*url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)\s*format\(['"](?:truetype|woff)['"]\)/)?.[1];
-		if (!source) throw new Error(`Manrope ${weight} has no Satori-supported font source`);
-		const font = await read(source);
-		if (!font.ok) throw new Error(`Could not load Manrope ${weight}`);
-		return { name: "Manrope", data: await font.arrayBuffer(), weight, style: "normal" as const };
+		const bytes = await read(fontPath(weight));
+		if (bytes.byteLength === 0) throw new Error(`Vendored Manrope ${weight} is empty`);
+		return {
+			name: "Manrope",
+			// A Buffer is a view on a pooled ArrayBuffer, so hand Satori this
+			// font's own bytes rather than the whole pool.
+			data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+			weight,
+			style: "normal" as const,
+		};
 	}));
 }

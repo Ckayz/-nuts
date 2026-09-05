@@ -669,3 +669,60 @@ test("MINOR3/4: every preview result carries asOf, and market counts are named f
   expect(market.assets[0]).not.toHaveProperty("tradeableOrders");
  } finally { restore(); }
 });
+
+/**
+ * C-m1. `feed_unusable` describes "the book could not be read". A TRANSPORT
+ * failure is exactly that, but it used to throw out of `fetchSnapshot` and out
+ * of `getOrderSnapshot`, so every caller had to survive an exception instead of
+ * reading the result the type already provides. A null payload threw a
+ * TypeError from the same place.
+ */
+test("C-m1: a transport failure becomes feed_unusable, never a thrown error", async () => {
+ const request = spyOn(rawOrderApi, "request").mockRejectedValue(new Error("fetch failed: ECONNREFUSED"));
+ try {
+  const result = await getOrderSnapshot(true);
+  expect(isFeedUnusable(result)).toBe(true);
+  if (!isFeedUnusable(result)) throw new Error("unreachable");
+  expect(result.detail).toContain("could not be reached");
+  expect(result.detail).toContain("ECONNREFUSED");
+  // Never described as an empty book.
+  expect(result.detail).toContain("not an empty book");
+  // Not cached: the next call re-reads.
+  const second = await getOrderSnapshot(true);
+  expect(isFeedUnusable(second)).toBe(true);
+ } finally {
+  request.mockRestore();
+ }
+});
+
+test("C-m1: an HTTP rejection and a non-Error rejection are both feed_unusable", async () => {
+ for (const rejection of [Object.assign(new Error("HTTP 503"), { status: 503 }), "gateway timeout", 500]) {
+  const request = spyOn(rawOrderApi, "request").mockRejectedValue(rejection);
+  try {
+   const result = await getOrderSnapshot(true);
+   expect(isFeedUnusable(result)).toBe(true);
+  } finally {
+   request.mockRestore();
+  }
+ }
+});
+
+test("C-m1: a null response body is feed_unusable, not a TypeError", async () => {
+ // `rawOrderApi` IS `readClient.api`, so mocking `request` also breaks the
+ // `getMarketData` call that uses it internally. Both are stubbed so the null
+ // BODY branch is the one under test rather than the transport branch.
+ const request = spyOn(rawOrderApi, "request").mockResolvedValue(null as unknown as { orders?: unknown });
+ const market = spyOn(readClient.api, "getMarketData").mockResolvedValue(
+  {} as unknown as Awaited<ReturnType<typeof readClient.api.getMarketData>>,
+ );
+ try {
+  const result = await getOrderSnapshot(true);
+  expect(isFeedUnusable(result)).toBe(true);
+  if (!isFeedUnusable(result)) throw new Error("unreachable");
+  expect(result.detail).toContain("no response body");
+  expect(result.detail).toContain("not an empty book");
+ } finally {
+  request.mockRestore();
+  market.mockRestore();
+ }
+});

@@ -138,11 +138,18 @@ function backing(value: Domain.Thesis, settled: boolean): View.Backing {
  * hand the array index in as the origin (the compiler caught exactly that).
  *
  */
-export function thesisWithOrigin(value: Domain.Thesis, siteOrigin: string | undefined): View.Thesis {
-    // TODO-OWNER: the mockup specifies no presentation for other PRD lifecycle states.
-    if (value.thesis.status !== "open" && value.thesis.status !== "settled")
+export function thesisWithOrigin(value: Domain.Thesis, siteOrigin: string | readonly string[] | undefined): View.Thesis {
+    // B3. `expired` is PUBLIC (the rankings admit it) and used to throw here, so
+    // one expired post crashed the whole feed. It renders with the settlement-
+    // pending presentation the PRD already words (§8.5.3), reusing
+    // POSITION_STATUS_DISPLAY.expired so the vocabulary lives in one place.
+    // TODO-OWNER: the mockup specifies no presentation for other PRD lifecycle
+    // states, so `draft` and `cancelled` still throw — they must never reach a
+    // page, and PUBLIC_THESIS_STATUSES keeps them out.
+    if (value.thesis.status !== "open" && value.thesis.status !== "settled" && value.thesis.status !== "expired")
         throw new Error(`No mockup presentation for ${value.thesis.status}`);
     const settled = value.thesis.status === "settled";
+    const expired = value.thesis.status === "expired";
     // The LIVE / ENDING / SETTLED chip is counted off the expiry, so a post that
     // names no market carries no chip at all rather than an invented one.
     let status: View.ThesisStatus | null = null;
@@ -150,6 +157,11 @@ export function thesisWithOrigin(value: Domain.Thesis, siteOrigin: string | unde
     if (settled) {
         status = "settled";
         statusLabel = `SETTLED · ${value.backing?.mock.settledWinner?.toUpperCase() ?? "—"} WON`;
+    } else if (expired) {
+        // B3: the option's expiry has passed but Thetanuts has published no
+        // settlement, so the post says exactly that and asserts no winner.
+        status = POSITION_STATUS_DISPLAY.expired.tone;
+        statusLabel = POSITION_STATUS_DISPLAY.expired.label.toUpperCase();
     } else if (value.market !== null && value.market.expiryAt !== null) {
         status = value.endingSoon ? "ending" : "live";
         const hours = Math.max(0, Math.floor((Date.parse(value.market.expiryAt) - Date.parse(value.dataAsOf)) / 3600000));
@@ -324,7 +336,25 @@ export function pnlCard(input: PnlCardInput): View.PnlCard {
 }
 
 export function position(value: Domain.Position): View.Position {
-    return { id: value.id, thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(value.status === "settled" ? value.economics.finalPnlUsd : value.economics.estimatedPnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled: value.status === "settled" };
+    // D5. The list row carries the SAME lifecycle vocabulary and P&L basis the
+    // share card does, so an expired or failed position no longer renders
+    // identically to an open one and no number is printed without saying where
+    // it came from. The P&L itself follows PRD 14's recorded-value rule: a
+    // finished option shows its recorded result or nothing, never an estimate.
+    const display = POSITION_STATUS_DISPLAY[value.status];
+    const settled = value.status === "settled";
+    const finished = settled || value.status === "expired";
+    const pnlUsd = finished ? value.economics.finalPnlUsd : value.status === "pending" || value.status === "failed" ? null : value.economics.estimatedPnlUsd;
+    const basis: View.PnlBasis = pnlUsd === null ? "unavailable" : settled ? "settled" : "estimate";
+    const pnlBasisLabel =
+        value.status === "failed" ? "This transaction failed, so there is no position."
+        : value.status === "pending" ? "This fill has not been confirmed on Base yet."
+        : pnlUsd === null && finished ? "Settlement pending: Thetanuts has not published this option's settlement yet."
+        : pnlUsd === null ? "No P&L recorded for this fill yet."
+        : settled ? "Final P&L recorded at settlement."
+        : "Estimated P&L recorded with the fill.";
+    return { id: value.id, thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(pnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled,
+        statusLabel: display.label, statusTone: display.tone, pnlLabel: settled ? "Result" : "Live P&L", pnlBasisLabel, basis };
 }
 export function participant(value: Domain.Participant): View.Participant {
     return { ...position(value), creator: creator(value.creator), says: value.says, isCreator: value.role === "creator" };

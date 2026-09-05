@@ -411,6 +411,10 @@ async function fillCard(ticket: TradeTicketPayload, row: Position): Promise<Fill
 		status: row.status === "failed" ? "failed" : "confirmed",
 		createdAt: (row.confirmedAt ?? row.createdAt).toISOString(),
 		instrumentLabel: ticket.instrumentLabel,
+		// The MARKET direction. `ticket.side` is already TicketSide, "bull" |
+		// "bear" — the direction the user chose on the ticket. The `side` field
+		// below is "back"/"counter", which is about a thesis, not the market.
+		direction: ticket.side,
 		// The order snapshot's own strings are already in the ticket's label; the
 		// split fields stay null rather than re-parsing that label back apart.
 		asset: null,

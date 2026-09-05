@@ -306,6 +306,14 @@ export interface PnlCardInput {
     /** Expiry in full, e.g. "11 Sep 26 08:00 UTC"; null when unknown. */
     readonly expiryFullLabel: string | null;
     readonly side: Domain.PositionSide;
+    /**
+     * MARKET direction, derived from the option by `marketDirection()`. Passed
+     * in rather than derived from `side`, because `side` is "back"/"counter" —
+     * whose side of a thesis this is — and backing a BEAR thesis is a bear
+     * position. Null when the option identity could not be read, and a null
+     * direction prints no direction rather than guessing one.
+     */
+    readonly direction: View.Side | null;
     /** Already resolved by `lib/position/pnl.ts`; never re-derived here. */
     readonly pnl: { readonly usd: string | null; readonly detail: string; readonly basis: View.PnlBasis };
     /** "Premium paid" for a taker who bought, "Collateral locked" for one who sold. */
@@ -333,8 +341,9 @@ export function pnlCard(input: PnlCardInput): View.PnlCard {
         strikesLabel: input.strikesLabel,
         expiryLabel: input.expiryLabel,
         expiryFullLabel: input.expiryFullLabel,
-        side: input.side === "back" ? "bull" : "bear",
-        sideLabel: input.side === "back" ? "Bull" : "Bear",
+        // `side` is NOT the market direction; see PnlCardInput.direction.
+        side: input.direction,
+        sideLabel: input.direction === null ? null : input.direction === "bull" ? "Bull" : "Bear",
         pnl: amount(input.pnl.usd),
         pnlLabel: settled ? "Result" : "Live P&L",
         // TODO-OWNER: the denominator. Max loss is the money genuinely at stake,

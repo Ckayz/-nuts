@@ -18,7 +18,7 @@ import type * as Domain from "@/types";
 import type * as View from "@/lib/display-types";
 import { amount, expiryLabel, marketSlug, percentLabel, pnlCard, quantity, strikeSide, strikesLabel, tx } from "@/lib/display";
 import { decimalFromBaseUnits } from "@/lib/data/decimal";
-import { STRIKE_DECIMALS, type PositionInstrument } from "./instrument";
+import { STRIKE_DECIMALS, type PositionInstrument, marketDirection } from "./instrument";
 import type { LivePriceBook, PositionPageDetail } from "./types";
 import {
 	USD_DECIMALS,
@@ -260,6 +260,11 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 		expiryLabel: parts.expiry,
 		expiryFullLabel: parts.expiryFull,
 		side: position.side,
+		// The MARKET direction, from the option itself. `side` above is
+		// "back"/"counter" — whose side of a thesis this is — and says nothing
+		// about which way the position bets. Null when the order snapshot could
+		// not be decoded, which prints no direction rather than a wrong one.
+		direction: instrument === null ? null : marketDirection(instrument),
 		pnl: { usd: pnl.pnlUsd, detail: pnl.detail, basis: pnl.basis },
 		entryLabel,
 		entryUsd,
@@ -410,6 +415,9 @@ export function backingCard(value: Domain.Thesis, asOf: Date = new Date()): View
 		expiryFullLabel: expiryAt === null ? null : expiryLabel(expiryAt, true),
 		// The creator backs their own thesis, so their fill is the "back" side.
 		side: "back",
+		// ...and therefore bets the direction the thesis states. A post with no
+		// structure has no direction to state, and prints none.
+		direction: value.thesis.direction,
 		pnl: (() => {
 			const resolved = resolvePnl({
 				status,

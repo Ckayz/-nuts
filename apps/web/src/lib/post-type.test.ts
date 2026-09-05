@@ -55,22 +55,38 @@ test("a BEAR post whose two look-alike fields both say bull is still badged Bear
 	//   (display.ts:110), and `lib/position/view.ts` `backingCard()` passes
 	//   `side: "back"` for every backed post, which display.ts:337 prints as
 	//   "Bull". Both were measured on 2026-09-06; both are constants, not facts.
-	// This fixture is bear, backed, and both fields say bull.
+	// This fixture is bear and backed. `structure.side` STILL says bull for every
+	// post — `lib/display.ts` `structure()` returns it as a literal — so the badge
+	// must not read it. `backingCard.side` was the same constant until the card
+	// builder was fixed to take a real market direction; it now agrees with the
+	// thesis, and the badge still does not read it, because a post without a
+	// backing has no card at all.
 	const post = bySlug("btc-nfp-4a2c");
 	expect(post.direction).toBe("bear");
 	expect(post.structure?.side).toBe("bull");
-	expect(post.backingCard?.side).toBe("bull");
+	expect(post.backingCard?.side).toBe("bear");
 	expect(postTypeBadge(post)).toEqual({ label: "Bear", tone: "bear" });
 });
 
-test("neither look-alike field is ever the answer, across the whole fixture set", () => {
+test("structure.side is a constant and can never be the answer", () => {
+	// `lib/display.ts` structure() returns `side: "bull"` as a literal, so this
+	// field says bull for every post in the set. If the badge read it, no post
+	// could ever be Bear — and three of them are.
 	for (const post of posts) {
 		if (post.structure !== null) expect(post.structure.side).toBe("bull");
-		if (post.backingCard != null) expect(post.backingCard.side).toBe("bull");
 	}
-	// So if the badge read either one, no post could ever be Bear. Three are.
 	const bears = posts.filter((post) => postTypeBadge(post).tone === "bear");
 	expect(bears.length).toBeGreaterThan(0);
+});
+
+test("the position card now states the direction the post states", () => {
+	// Before the card builder was fixed, `backingCard.side` was derived from
+	// "back"/"counter" and printed Bull for every position, bear ones included.
+	// The badge and the card underneath it are now the same claim.
+	for (const post of posts) {
+		if (post.backingCard == null || post.direction === null) continue;
+		expect(post.backingCard.side).toBe(post.direction);
+	}
 });
 
 test("every fixture post gets exactly one badge, and its tone is one of three", () => {

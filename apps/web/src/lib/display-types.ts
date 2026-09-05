@@ -326,9 +326,11 @@ export interface PnlCard {
     expiryLabel: string | null;
     /** Expiry in full, e.g. "11 Sep 26 08:00 UTC"; the share card's sub-line. */
     expiryFullLabel: string | null;
-    side: Side;
+    /** Market direction. Null when the option identity could not be read. */
+    side: Side | null;
     /** "Bull" / "Bear" as rendered. */
-    sideLabel: string;
+    /** Null when the option identity was unreadable: no direction is printed. */
+    sideLabel: string | null;
     /** The big number. `"—"` in every field when no honest value exists. */
     pnl: DisplayAmount;
     /** "Result" once settled, "Live P&L" while the option is open. */

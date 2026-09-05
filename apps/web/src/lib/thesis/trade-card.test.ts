@@ -58,8 +58,13 @@ test("linkedPositionCard maps an open position through the ONE card builder", ()
 		statusLabel: "Open",
 		statusTone: "live",
 		instrumentLabel: "BTC",
-		side: "bull",
-		sideLabel: "Bull",
+		// Null, and that is the fix: these fixtures carry no `instrument`, and
+		// the market direction is a property of the OPTION. The old code read
+		// `side === "back" ? "Bull" : "Bear"`, so this fixture printed "Bull"
+		// for a position whose direction nothing here knows. A wrong direction
+		// on a money position is worse than no direction.
+		side: null,
+		sideLabel: null,
 		pnlLabel: "Live P&L",
 		pnlPctLabel: "+61.2% of max loss",
 		// Round-1 fold item 10: the date the builder has, not "@owner".
@@ -252,8 +257,11 @@ test("missing figures render as em dashes and no percent, never as zero", () => 
 	});
 	expect(card.pnl.signed).toBe("—");
 	expect(card.pnlPctLabel).toBeNull();
-	expect(card.sideLabel).toBe("Bear");
-	expect(card.side).toBe("bear");
+	// Was "Bear" only because the old rule printed `side === "counter"` as Bear.
+	// "counter" is whose side of a THESIS this is; it is not a market direction,
+	// and this fixture carries no option to derive one from.
+	expect(card.sideLabel).toBeNull();
+	expect(card.side).toBeNull();
 	expect(card.stats.map((stat: { value: string }) => stat.value)).toEqual(["—", "—", "—"]);
 });
 
@@ -356,4 +364,41 @@ test("headline and rationale share one deduplicated card cap", () => {
 	const base = post(ids.map(id => `/p/${id}`).join(" "));
 	const row = { ...base, thesis: { ...base.thesis, headline: `/p/${ids[0]} /p/${ids[1]}` } };
 	expect(linkedPositionIds([row])).toEqual(ids.slice(0, 4));
+});
+
+
+/** Minimal real instrument; only isCall and takerSide vary below. */
+const INSTRUMENT = {
+	asset: "BTC",
+	isCall: false,
+	takerSide: "buy" as const,
+	strikesUsd8: ["7800000000000"],
+	ascendingStrikesUsd8: ["7800000000000"],
+	expiryAt: "2026-09-11T08:00:00.000Z",
+	implementationName: null,
+	productType: null,
+} as unknown as NonNullable<Domain.LinkedPosition["instrument"]>;
+
+test("a real option decides the direction, and counter/back never does", () => {
+	// The four rows of options semantics, through the card builder this time.
+	// `side` stays "counter" throughout, proving it is not what is being read.
+	const cases = [
+		{ isCall: true, takerSide: "buy" as const, side: "bull", label: "Bull" },
+		{ isCall: false, takerSide: "sell" as const, side: "bull", label: "Bull" },
+		{ isCall: false, takerSide: "buy" as const, side: "bear", label: "Bear" },
+		{ isCall: true, takerSide: "sell" as const, side: "bear", label: "Bear" },
+	];
+	for (const shape of cases) {
+		const card = linkedPositionCard({
+			position: position({ side: "counter" }),
+			owner,
+			instrument: {
+				...INSTRUMENT,
+				isCall: shape.isCall,
+				takerSide: shape.takerSide,
+			},
+		});
+		expect(card.side).toBe(shape.side as "bull" | "bear");
+		expect(card.sideLabel).toBe(shape.label);
+	}
 });

@@ -18,7 +18,15 @@ export function testDatabaseUrlRefusal(rawUrl: string | undefined, override: str
 	if (override === "1") return null;
 	let host: string;
 	try {
-		host = new URL(raw).hostname;
+		const url = new URL(raw);
+		// pg copies query parameters before the authority; never trust that
+		// authority when a destination override is present (even an empty one).
+		for (const parameter of ["host", "hostaddr", "connectionString", "service", "servicefile"]) {
+			if (url.searchParams.has(parameter)) {
+				return `Refusing DATABASE_URL query parameter "${parameter}": it can override the destination host. Set TEST_DATABASE_OK=1 to override deliberately.`;
+			}
+		}
+		host = url.hostname;
 	} catch {
 		return "DATABASE_URL is not a parseable URL, so the test suite cannot prove it is local. Set TEST_DATABASE_OK=1 to run anyway.";
 	}

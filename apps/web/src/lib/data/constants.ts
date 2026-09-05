@@ -36,3 +36,8 @@ export const FILLED_POSITION_STATUSES = ["confirmed", "indexed", "expired", "set
  * A `draft` or `cancelled` headline must still never leave the database.
  */
 export const PUBLIC_THESIS_STATUSES = ["open", "expired", "settled"] as const;
+
+/** TODO-OWNER: six feed posts in docs/mockups/thesis-fun-mockup.html:534–700; no UI slice. */
+export const RANKED_THESIS_LIMIT = 6;
+/** TODO-OWNER: seven trader rows in docs/mockups/thesis-fun-mockup.html:472–492; no UI slice. */
+export const LEADERBOARD_LIMIT = 7;

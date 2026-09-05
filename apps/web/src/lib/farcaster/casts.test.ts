@@ -12,6 +12,7 @@ const {
 	FARCASTER_REVALIDATE_SECONDS,
 	FARCASTER_TEXT_LIMIT,
 	FARCASTER_TIMEOUT_MS,
+	FARCASTER_ASSET_COUNT,
 	farcasterCastUrl,
 	loadFarcasterRail,
 	parseCast,
@@ -389,11 +390,30 @@ test("B-C2: the production default is a real, finite deadline", () => {
 	);
 });
 
-test("the revalidate window stays well inside the documented 600 RPM ceiling", () => {
+test("B-C4: the request budget is computed against cast search's 120 RPM, not 600", () => {
 	// docs.neynar.com/reference/what-are-the-rate-limits-on-neynar-apis.md:
-	// Free plan is 600 RPM per API endpoint for "All others".
-	expect(60 / FARCASTER_REVALIDATE_SECONDS).toBeLessThan(600);
+	// Free plan is 600 RPM per endpoint for "All others", and `cast/search` — the
+	// endpoint this module calls — is the ONE exception at 120 RPM. The comment
+	// this test replaced cited the 600 figure for the wrong endpoint.
+	const requestsPerRailRead = FARCASTER_ASSET_COUNT * 2; // two terms per asset
+	const perMinute = (requestsPerRailRead * 60) / FARCASTER_REVALIDATE_SECONDS;
 	expect(FARCASTER_REVALIDATE_SECONDS).toBeGreaterThan(0);
+	expect(perMinute).toBeCloseTo(0.8, 10);
+	expect(perMinute).toBeLessThan(120);
+});
+
+test("B-C4: the module documents the endpoint it actually calls, and nothing dead", async () => {
+	const source = readFileSync(new URL("./casts.ts", import.meta.url), "utf8");
+	// The header used to document the channel feed while the code called search.
+	expect(source).toContain("GET https://api.neynar.com/v2/farcaster/cast/search");
+	// The dead channel constants are gone (grep before: definition only).
+	expect(source).not.toContain('export const FARCASTER_CHANNEL_IDS');
+	expect(source).not.toContain("NEYNAR_CHANNEL_FEED_URL");
+	// B-C3: the two eligibility rules that decide which casts vanish are tagged.
+	const dedupe = source.slice(0, source.indexOf("const DEDUPE_PREFIX"));
+	expect(dedupe.slice(dedupe.lastIndexOf("/**"))).toContain("TODO-OWNER");
+	const cites = source.slice(0, source.indexOf("export function citesALevel"));
+	expect(cites.slice(cites.lastIndexOf("/**"))).toContain("TODO-OWNER");
 });
 
 // ── choosing what to show ───────────────────────────────────────────────────

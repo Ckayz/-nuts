@@ -26,9 +26,7 @@ test("a ready cast draws handle, display name, avatar, text and an outbound link
 	const html = renderToStaticMarkup(<FarcasterRail state={{ status: "ready", casts: [row] }} />);
 	expect(html).toContain("Dan Romero");
 	expect(html).toContain("@dwr.eth");
-	expect(html).toContain('src="https://example.invalid/pfp.png"');
-	// React 19 emits this attribute camel-cased in static markup; asserted as rendered.
-	expect(html).toContain('referrerPolicy="no-referrer"');
+	expect(html).toContain("data:image/svg+xml");
 	expect(html).toContain("Basis on the Sep expiry is back to 4.1%.");
 	expect(html).toContain('href="https://farcaster.xyz/dwr.eth/0x029f7cce"');
 	expect(html).toContain('rel="noreferrer noopener"');
@@ -36,6 +34,20 @@ test("a ready cast draws handle, display name, avatar, text and an outbound link
 	// The established rail idiom, not a new one.
 	expect(html).toContain('class="rail-post"');
 	expect(html).toContain('class="card"');
+});
+
+/**
+ * D-N2. The rail passed `cast.avatarUrl` into `Avatar`, which renders a remote
+ * `<img>` with NO error handler, against an app contract of generated avatars
+ * with no network. The remote URL must not reach the markup at all — and this
+ * fixture carries one, so the assertion is not vacuous.
+ */
+test("D-N2: a Farcaster author is drawn with a GENERATED avatar, never a remote picture", () => {
+	expect(row.avatarUrl).toBe("https://example.invalid/pfp.png");
+	const html = renderToStaticMarkup(<FarcasterRail state={{ status: "ready", casts: [row] }} />);
+	expect(html).not.toContain("example.invalid");
+	expect(html).not.toContain("<link rel=\"preload\"");
+	expect(html).toContain("data:image/svg+xml");
 });
 
 test("no avatar falls back to the app's generated avatar rather than a broken image", () => {

@@ -47,12 +47,14 @@ function body(state: FarcasterRailState) {
 		const name = cast.displayName ?? cast.username;
 		const row = (
 			<>
-				<Avatar
-					initials={initials(name)}
-					seed={cast.username}
-					src={cast.avatarUrl ?? undefined}
-					size={30}
-				/>
+				{/* D-N2 (lane D confirming pass). GENERATED avatar only, never
+				    `cast.avatarUrl`. Two reasons, both measured: the app's avatar
+				    contract is local DiceBear SVGs with no network (owner
+				    2026-09-05), and `Avatar` renders a remote `src` with no error
+				    handler, so a dead Farcaster picture drew a broken image. The
+				    parsed cast still CARRIES `avatarUrl` (unused here) so remote
+				    pictures can be turned back on without re-deriving it. */}
+				<Avatar initials={initials(name)} seed={cast.username} size={30} />
 				<div className="t">
 					<div className="n">
 						{name}
@@ -78,9 +80,8 @@ function body(state: FarcasterRailState) {
 }
 
 /**
- * The monogram behind a Farcaster avatar, for the moment before a remote picture
- * loads and for the case where the author has none. Same one-or-two letter shape
- * the app's own avatars use.
+ * The monogram behind a Farcaster avatar. Same one-or-two letter shape the app's
+ * own avatars use; it shows only when the generated avatar cannot be built.
  */
 export function initials(name: string): string {
 	const words = name.trim().split(/\s+/).filter(Boolean);

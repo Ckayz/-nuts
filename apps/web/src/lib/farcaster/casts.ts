@@ -14,19 +14,24 @@ import { env } from "@nuts/env/server";
  * being wrong about it — a payload that does not match yields "no rail", never a
  * crash and never a fabricated cast.
  *
- *   host + path   GET https://api.neynar.com/v2/farcaster/feed/channels/
- *                 docs.neynar.com/reference/fetch-feed-by-channel-ids.md
+ * B-C4 / CL-4: this block used to document the CHANNEL FEED
+ * (`/v2/farcaster/feed/channels/`), which the code stopped calling when the rail
+ * moved to cast search, along with a `FARCASTER_CHANNEL_IDS` constant nothing
+ * read. It now documents the endpoint the code actually calls.
+ *
+ *   host + path   GET https://api.neynar.com/v2/farcaster/cast/search
+ *                 docs.neynar.com/reference/search-casts.md
  *                 (OpenAPI `servers: [{url: https://api.neynar.com}]`,
- *                  `paths: /v2/farcaster/feed/channels/`, method `get`)
+ *                  `paths: /v2/farcaster/cast/search`, method `get`)
+ *                 — the URL this module builds; see NEYNAR_SEARCH_URL.
  *   auth header   `x-api-key` — same document, `components.securitySchemes`:
  *                 `ApiKeyAuth: {in: header, name: x-api-key, type: apiKey}`
- *   parameters    `channel_ids` required, "Comma separated list of up to 10
- *                 channel IDs e.g. neynar,farcaster"; `limit` default 25,
- *                 minimum 1, maximum 100; `with_replies` default false;
- *                 `with_recasts` default true; `cursor`; `viewer_fid`;
- *                 `members_only` default true
- *   response      `FeedResponse { casts: Cast[], next: NextCursor }`
- *                 (both `required`)
+ *   parameters    `q` (the search text), `mode` and `limit` (1..100) are the
+ *                 three this module sends; their VALUES were chosen from live
+ *                 probes, recorded on FARCASTER_SEARCH_QUERY and ASSET_TERMS.
+ *   response      the page arrives nested under `result` — `{ result: { casts:
+ *                 Cast[] } }` — which is why `feedResponseSchema` accepts BOTH
+ *                 that shape and a bare `{ casts: [...] }`.
  *   Cast          `required` includes `hash`, `text`, `timestamp`, `author`,
  *                 `channel` (channel is `nullable: true`)
  *   author (User) `required` lists `object, fid, username, custody_address,
@@ -39,23 +44,19 @@ import { env } from "@nuts/env/server";
  * ── Rate and credit budget ──────────────────────────────────────────────────
  * docs.neynar.com/reference/what-are-the-rate-limits-on-neynar-apis.md:
  * the Free plan is 600 RPM / 10 RPS per API endpoint and 1000 RPM across all
- * APIs, with 10M credits/month. Only `GET v2/farcaster/cast/search` carries a
- * lower per-endpoint limit (120 RPM on Free); this endpoint falls under "All
- * others" at 600 RPM. The per-request CREDIT cost is NOT published anywhere in
- * the documentation — see the module's TODO-OWNER on the revalidate window.
- */
-
-/**
- * TODO-OWNER: which Farcaster channels the rail reads.
+ * APIs, with 10M credits/month. `GET v2/farcaster/cast/search` — the endpoint
+ * this module calls — is the ONE endpoint carrying a LOWER per-endpoint limit:
+ * 120 RPM on Free. The budget is therefore computed against 120, not the 600
+ * this comment used to cite.
  *
- * Both ids VERIFIED to exist 2026-09-06 against Farcaster's own public channel
- * directory (GET https://api.farcaster.xyz/v2/all-channels, 16,452 channels):
- * "base" (Base, 481,220 followers) and "farcaster" (Farcaster, 445,607). That
- * check is a one-off by hand, not something this code performs — a channel id
- * that stops existing produces an empty or rejected response, which renders the
- * honest line below, never an invented cast.
+ * Recomputed for 120 RPM: one rail read issues FARCASTER_ASSET_COUNT × 2
+ * requests (two terms per asset, see ASSET_TERMS), i.e. 4 today, once per
+ * FARCASTER_REVALIDATE_SECONDS = 300 s per cache key. That is 0.8 requests per
+ * minute against a 120 RPM ceiling — 0.67% of it — and about 34,560 requests in
+ * a 30-day month. The per-request CREDIT cost is NOT published anywhere in the
+ * documentation, so the share of the 10M monthly credits CANNOT be computed
+ * here; see the TODO-OWNER on the revalidate window.
  */
-export const FARCASTER_CHANNEL_IDS = "base,farcaster";
 
 /** TODO-OWNER: how many casts the rail shows. The mockup's rail draws five rows. */
 export const FARCASTER_RAIL_LIMIT = 5;
@@ -64,11 +65,13 @@ export const FARCASTER_RAIL_LIMIT = 5;
  * TODO-OWNER: cache window, in seconds, for the Neynar read.
  *
  * Chosen against the MEASURED rate limit and against an UNMEASURABLE credit
- * cost. 300 s is one request per five minutes per cache key — 0.2 RPM against a
- * documented 600 RPM per-endpoint ceiling, roughly 8,640 requests in a 30-day
- * month. Neynar publishes no per-request credit price for this endpoint, so the
- * share of the 10M monthly credits this spends CANNOT be computed here; the
- * number is deliberately conservative rather than tuned.
+ * cost. B-C4: the ceiling that applies is cast search's 120 RPM, not the 600
+ * RPM "All others" figure this comment used to cite. 300 s is one rail read per
+ * five minutes per cache key, and one rail read is FARCASTER_ASSET_COUNT × 2
+ * requests (4 today) — 0.8 RPM against 120 RPM, roughly 34,560 requests in a
+ * 30-day month. Neynar publishes no per-request credit price for this endpoint,
+ * so the share of the 10M monthly credits this spends CANNOT be computed here;
+ * the number is deliberately conservative rather than tuned.
  */
 export const FARCASTER_REVALIDATE_SECONDS = 300;
 
@@ -184,6 +187,11 @@ export const FARCASTER_TIMEOUT_MS = 3_000;
 /**
  * Characters of normalised text compared when collapsing duplicates.
  *
+ * TODO-OWNER: the number. B-C3 — this is a SELECTION RULE, not an
+ * implementation detail: it decides which casts vanish from the rail, so it is
+ * the owner's to set even though a measurement suggested it. A measurement is
+ * evidence for a number, never approval of it.
+ *
  * MEASURED: 28, not 40. The farm's shared opening "Unlock the power of crypto
  * options!" normalises to 33 characters, so a 40-character key reaches past it
  * into the part they vary ("…Learn about calls", "…Understand the Greeks") and
@@ -223,6 +231,11 @@ export function dedupeKey(text: string): string {
  * MEASURED 2026-09-06: on `implied volatility` this keeps 2 of 5 and both are
  * real; on `options trading calls puts` it keeps 0 of 40, which is the correct
  * answer for a page containing no observations at all.
+ *
+ * TODO-OWNER: the rule itself — the $TICKER / percentage / price formula below.
+ * B-C3 — it is the strictest filter in the module, and it is what decides which
+ * casts a visitor never sees. The measurement above is evidence for the rule,
+ * not approval of it.
  */
 export function citesALevel(text: string): boolean {
 	return /\$[A-Za-z]{2,6}\b|\d+(?:[.,]\d+)?\s?%|\$\s?\d/.test(text);

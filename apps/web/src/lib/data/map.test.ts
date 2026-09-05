@@ -356,6 +356,61 @@ describe("mapPosition", () => {
 		expect(mapPosition({ position: positionRow(), thesis: null }).expiryAt).toBeNull();
 	});
 
+	/**
+	 * B1. The SAME decode also has to reach the row, or a list can only print a
+	 * P&L column the indexer happened to write: the profile row and the portfolio
+	 * said "Live P&L · not available yet" about a fill whose own page computed
+	 * "−$1.00" from these very fields.
+	 */
+	test("the decoded instrument and the raw fill amounts ride on the row", () => {
+		const snapshot = {
+			version: 1,
+			order: {
+				maker: `0x${"1".repeat(40)}`,
+				taker: `0x${"0".repeat(40)}`,
+				option: `0x${"2".repeat(40)}`,
+				isBuyer: false,
+				numContracts: "10000",
+				price: "50000000",
+				expiry: "1788249600",
+				nonce: "1",
+			},
+			signature: "0x00",
+			availableAmount: "1000000",
+			makerAddress: `0x${"1".repeat(40)}`,
+			rawApiData: {
+				priceFeed: `0x${"3".repeat(40)}`,
+				implementation: `0x${"4".repeat(40)}`,
+				collateral: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+				isCall: false,
+				isLong: false,
+				strikes: ["250000000000"],
+				expiry: 1788249600,
+			},
+		} as unknown as PositionRow["orderSnapshot"];
+		const source = positionRow({ orderSnapshot: snapshot });
+		const mapped = mapPosition({ position: source, thesis: null });
+
+		expect(mapped.instrument).not.toBeNull();
+		expect(mapped.instrument?.expiryAt).toBe("2026-09-01T08:00:00.000Z");
+		expect(mapped.instrument?.collateralSymbol).toBe("USDC");
+		// Byte-for-byte the stored columns; nothing is converted or rounded here.
+		expect(mapped.quantities).toEqual({
+			contracts: source.contracts,
+			contractDecimals: source.contractDecimals,
+			premium: source.premium,
+			premiumDecimals: source.premiumDecimals,
+			fees: source.fees,
+			feeDecimals: source.feeDecimals,
+			collateral: source.collateral,
+			collateralDecimals: source.collateralDecimals,
+		});
+	});
+
+	test("an undecodable snapshot carries a null instrument, never an invented one", () => {
+		expect(mapPosition({ position: positionRow(), thesis: null }).instrument).toBeNull();
+	});
+
 	test("a NaN USD column becomes null, not a thrown render", () => {
 		const mapped = mapPosition({
 			position: positionRow({ estimatedPnlUsd: "NaN", maximumLossUsd: "NaN" }),

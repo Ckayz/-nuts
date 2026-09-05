@@ -360,6 +360,10 @@ export function mapPosition(input: MapPositionInput): Domain.Position {
 	if (position.chainId !== 8453) {
 		throw new Error(`Position ${position.id} is not on Base mainnet (chain ${position.chainId})`);
 	}
+	// B1/D5. ONE decode of the stored order snapshot, used for the expiry AND
+	// carried on the row so a list can value the position at the live spot the
+	// same way `/p/[id]` does. `positionInstrument` is pure and reads no network.
+	const instrument = positionInstrument(position.orderSnapshot);
 	return {
 		id: position.id,
 		thesisId: position.thesisId,
@@ -389,7 +393,18 @@ export function mapPosition(input: MapPositionInput): Domain.Position {
 		// D5. The instrument's expiry, decoded by the SAME reader `/p/[id]` uses,
 		// so a list row can tell a finished option from a live one. Nothing moves
 		// a row to `expired` on its own yet.
-		expiryAt: positionInstrument(position.orderSnapshot)?.expiryAt ?? null,
+		expiryAt: instrument?.expiryAt ?? null,
+		instrument,
+		quantities: {
+			contracts: position.contracts,
+			contractDecimals: position.contractDecimals,
+			premium: position.premium,
+			premiumDecimals: position.premiumDecimals,
+			fees: position.fees,
+			feeDecimals: position.feeDecimals,
+			collateral: position.collateral,
+			collateralDecimals: position.collateralDecimals,
+		},
 		createdAt: position.createdAt.toISOString(),
 		mockTransactionFragment: null,
 	};

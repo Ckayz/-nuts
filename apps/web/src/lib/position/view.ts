@@ -19,7 +19,7 @@ import type * as View from "@/lib/display-types";
 import { amount, dateLabel, expiryLabel, marketSlug, percentLabel, pnlCard, quantity, strikeSide, strikesLabel, tx } from "@/lib/display";
 import { decimalFromBaseUnits } from "@/lib/data/decimal";
 import { STRIKE_DECIMALS, type PositionInstrument } from "./instrument";
-import type { PositionPageDetail } from "./types";
+import type { LivePriceBook, PositionPageDetail } from "./types";
 import {
 	USD_DECIMALS,
 	type DerivationInputs,
@@ -29,6 +29,15 @@ import {
 	lifecycleStatus,
 	resolvePnl,
 } from "./pnl";
+
+/** No live prices at all: every lookup answers null, the pre-B1 behaviour. */
+export const NO_LIVE_PRICES: LivePriceBook = {
+	spotUsd8: () => null,
+	collateralUsdPrice8: () => null,
+	feedError: null,
+};
+
+export type { LivePriceBook };
 
 export interface PositionViewInput {
 	readonly detail: PositionPageDetail;
@@ -329,8 +338,9 @@ export function pnlCardFor(input: PositionViewInput): View.PnlCard {
 export function linkedPositionCard(
 	value: Domain.LinkedPosition,
 	asOf: Date = new Date(),
-	collateralUsdPrice8: string | null = null,
+	prices: LivePriceBook = NO_LIVE_PRICES,
 ): View.PnlCard {
+	const instrument = value.instrument ?? null;
 	// C8. The instrument and the raw amounts are decoded by the batch reader
 	// through the SAME mapper `/p/[id]` uses, so the card and the position page
 	// cannot disagree about the side, the asset or the entry amount. They were
@@ -341,13 +351,17 @@ export function linkedPositionCard(
 		detail: {
 			position: value.position,
 			owner: value.owner,
-			instrument: value.instrument ?? null,
+			instrument,
 			quantities: value.quantities ?? null,
 			thesis: null,
 		},
-		// Still null: the feed reads no live spot, so nothing is derived here.
-		spotUsd8: null,
-		collateralUsdPrice8,
+		// B1. The feed DOES read a live spot now: the page resolves one price book
+		// for every card it draws (`lib/position/spot.ts` `livePriceBook`), so this
+		// card and that fill's own page cannot disagree about the money either.
+		// Without a book both lookups answer null and the card says "not available
+		// yet", exactly as before.
+		spotUsd8: prices.spotUsd8(instrument?.asset ?? value.position.underlyingAsset),
+		collateralUsdPrice8: prices.collateralUsdPrice8(instrument?.collateralSymbol ?? null),
 		asOf,
 	});
 }
@@ -450,10 +464,91 @@ export function backingCard(value: Domain.Thesis, asOf: Date = new Date()): View
  * it, the two cards are the same fill and only one is rendered (round-1 fold
  * item 8) — the backing card, because it is the one that carries the structure.
  */
-export function withCards(view: View.Thesis, domain: Domain.Thesis, asOf: Date = new Date()): View.Thesis {
+export function withCards(
+	view: View.Thesis,
+	domain: Domain.Thesis,
+	asOf: Date = new Date(),
+	prices: LivePriceBook = NO_LIVE_PRICES,
+): View.Thesis {
 	const backing = backingCard(domain, asOf);
 	const linked = (domain.linkedPositions ?? [])
 		.filter((entry) => entry.position.id !== domain.backing?.creatorPositionId)
-		.map((entry) => linkedPositionCard(entry, asOf));
+		.map((entry) => linkedPositionCard(entry, asOf, prices));
 	return { ...view, backingCard: backing, tradeCards: linked };
+}
+
+/**
+ * B1. Every asset and collateral token a set of posts' linked cards will price,
+ * so a page can resolve ONE price book before it builds any of them.
+ */
+export function cardPriceKeys(
+	rows: readonly Domain.Thesis[],
+): { assets: string[]; collateralSymbols: string[] } {
+	const assets = new Set<string>();
+	const collateralSymbols = new Set<string>();
+	for (const row of rows) {
+		for (const entry of row.linkedPositions ?? []) {
+			const asset = entry.instrument?.asset ?? entry.position.underlyingAsset;
+			if (asset) assets.add(asset);
+			const collateral = entry.instrument?.collateralSymbol;
+			if (collateral) collateralSymbols.add(collateral);
+		}
+	}
+	return { assets: [...assets], collateralSymbols: [...collateralSymbols] };
+}
+
+/**
+ * B1. The live P&L of ONE list row, computed the same way `positionPage` does.
+ *
+ * It lives here rather than in `lib/display.ts` because the risk model reaches
+ * `@nuts/thetanuts`, whose bundle pulls `fs/promises`, and `display.ts` is
+ * imported by CLIENT components (see the import note at the top of that file).
+ * So the server computes the number and only the answer crosses over.
+ *
+ * `null` inputs are the honest answer everywhere: a row with no decoded
+ * instrument, no raw amounts, an unpriceable collateral token or no live spot
+ * keeps the recorded-column behaviour and its existing sentence.
+ */
+export function listRowPnl(
+	position: Domain.Position,
+	prices: LivePriceBook,
+): { spotUsd8: string | null; derivedPnlUsd: string | null; derivable: boolean } {
+	const instrument = position.instrument ?? null;
+	const spotUsd8 = prices.spotUsd8(instrument?.asset ?? position.underlyingAsset);
+	const derivation = derivationFor(
+		{
+			position,
+			owner: { id: "", handle: "", displayName: null, initials: "", walletAddress: "" } as Domain.Creator,
+			instrument,
+			quantities: position.quantities ?? null,
+			thesis: null,
+		},
+		prices.collateralUsdPrice8(instrument?.collateralSymbol ?? null),
+	);
+	return {
+		spotUsd8,
+		// Whether the risk model HAD its inputs, which is a different fact from
+		// whether it produced a number: a derivable row with an unreadable spot
+		// feed must say the feed could not be read, not "nothing recorded".
+		derivable: derivation.inputs !== null,
+		derivedPnlUsd:
+			derivation.inputs === null || spotUsd8 === null
+				? null
+				: derivePnlAtSpot(derivation.inputs, spotUsd8),
+	};
+}
+
+/** Every asset and collateral token a set of list rows will price. */
+export function rowPriceKeys(
+	rows: readonly Domain.Position[],
+): { assets: string[]; collateralSymbols: string[] } {
+	const assets = new Set<string>();
+	const collateralSymbols = new Set<string>();
+	for (const row of rows) {
+		const asset = row.instrument?.asset ?? row.underlyingAsset;
+		if (asset) assets.add(asset);
+		const collateral = row.instrument?.collateralSymbol;
+		if (collateral) collateralSymbols.add(collateral);
+	}
+	return { assets: [...assets], collateralSymbols: [...collateralSymbols] };
 }

@@ -130,7 +130,44 @@ export async function toPosts(rows: readonly Domain.Thesis[]): Promise<View.Thes
 	const { withCards } = await import("./position/view");
 	const asOf = new Date();
 	const origin = usingDatabase() ? await siteOrigins() : undefined;
-	return rows.map((row) => withCards(display.thesisWithOrigin(row, origin), row, asOf));
+	const prices = await cardPrices(rows);
+	return rows.map((row) => withCards(display.thesisWithOrigin(row, origin), row, asOf, prices));
+}
+
+/**
+ * B1. ONE live price book for every trade card a set of posts will draw.
+ *
+ * The feed used to hand every card `spotUsd8: null` and the card then printed
+ * "Live P&L · not available yet" about a fill whose own page computed the
+ * figure. The prices come from the SAME cached order snapshot `/p/[id]` reads,
+ * fetched once per page rather than once per card, so the cost does not grow
+ * with the feed. Mock mode reads no feed at all and keeps the null book.
+ */
+async function cardPrices(rows: readonly Domain.Thesis[]) {
+	const { NO_LIVE_PRICES, cardPriceKeys } = await import("./position/view");
+	if (!usingDatabase()) return NO_LIVE_PRICES;
+	const keys = cardPriceKeys(rows);
+	if (keys.assets.length === 0 && keys.collateralSymbols.length === 0) return NO_LIVE_PRICES;
+	const { livePriceBook } = await import("./position/spot");
+	return livePriceBook(keys.assets, keys.collateralSymbols);
+}
+
+/**
+ * B1. The same, for LIST ROWS (`display.position` / `display.participant`),
+ * which read the risk model through `lib/position/view.ts` `listRowPnl` because
+ * `lib/display.ts` may not import the SDK-backed model into a client bundle.
+ */
+async function rowPnl(rows: readonly Domain.Position[]) {
+	const { NO_LIVE_PRICES, listRowPnl, rowPriceKeys } = await import("./position/view");
+	let prices = NO_LIVE_PRICES;
+	if (usingDatabase() && rows.length > 0) {
+		const keys = rowPriceKeys(rows);
+		if (keys.assets.length > 0 || keys.collateralSymbols.length > 0) {
+			const { livePriceBook } = await import("./position/spot");
+			prices = await livePriceBook(keys.assets, keys.collateralSymbols);
+		}
+	}
+	return (row: Domain.Position) => listRowPnl(row, prices);
 }
 
 /**
@@ -228,7 +265,10 @@ export async function discoverData(): Promise<DiscoverData> {
 		},
 		// `getPortfolio` already applies the single fill-status rule, so nothing
 		// is filtered by status a second time here.
-		yourPositions: positions.map((row) => display.position(row)).filter(isOpen),
+		yourPositions: await (async () => {
+			const live = await rowPnl(positions);
+			return positions.map((row) => display.position(row, new Date(), live(row))).filter(isOpen);
+		})(),
 	};
 }
 
@@ -306,7 +346,9 @@ async function withThesisCards(
 	domain: Domain.Thesis,
 ): Promise<View.ThesisDetail> {
 	const { withCards } = await import("./position/view");
-	return { ...detail, thesis: withCards(display.thesisWithOrigin(domain, usingDatabase() ? await siteOrigins() : undefined), domain) };
+	// B1: the thread's card is priced from the same book the feed's cards are.
+	const prices = await cardPrices([domain]);
+	return { ...detail, thesis: withCards(display.thesisWithOrigin(domain, usingDatabase() ? await siteOrigins() : undefined), domain, new Date(), prices) };
 }
 
 /**
@@ -383,7 +425,10 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		following: (await getFollowState(signedIn?.userId ?? null, profile.creator.id)).following,
 		creator: display.creator(profile.creator),
 		callouts: await toPosts(await enrichWithTradeLinks(profile.theses.filter((thesis) => renderableStatus(thesis.thesis.status)), listPositionsByIds, await siteOrigins())),
-		positions: profile.positions.map((row) => display.participant(row)),
+		positions: await (async () => {
+			const live = await rowPnl(profile.positions);
+			return profile.positions.map((row) => display.participant(row, new Date(), live(row)));
+		})(),
 		activity: (await listActivity(profile.creator.id)).map(display.activity),
 	};
 }
@@ -405,7 +450,8 @@ export async function portfolioData(): Promise<PortfolioData> {
 	const positions = await getPortfolio(signedIn.walletAddress);
 	const profile = await getCreator(signedIn.walletAddress, { viewerUserId: signedIn.userId });
 	// `getPortfolio` already applies the single fill-status rule.
-	const rows = positions.map((row) => display.position(row));
+	const live = await rowPnl(positions);
+	const rows = positions.map((row) => display.position(row, new Date(), live(row)));
 	return {
 		openPositions: rows.filter(isOpen),
 		settledPositions: rows.filter((position) => !isOpen(position)),

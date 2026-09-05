@@ -93,11 +93,22 @@ export async function composerData(
 	const session = await getSession();
 	const { listPositionsByIds } = await import("../data/reads");
 	const entry = linkedId === undefined ? undefined : (await listPositionsByIds([linkedId])).get(linkedId);
+	// B1: the preview the user sees before posting is priced from the same live
+	// book the published post's card and `/p/[id]` use, so "Write a post about it"
+	// never shows "not available yet" beside a figure the trade's page computes.
+	const { livePriceBook } = await import("../position/spot");
+	const prices =
+		entry === undefined
+			? undefined
+			: await livePriceBook(
+					[entry.instrument?.asset ?? entry.position.underlyingAsset],
+					[entry.instrument?.collateralSymbol ?? null],
+				);
 	return {
 		assets, marketsUnavailable, siteOrigin: origin,
 		presetAsset: asset,
 		presetRationale,
-		previewCards: entry === undefined ? [] : [linkedPositionCard(entry)],
+		previewCards: entry === undefined ? [] : [linkedPositionCard(entry, new Date(), prices)],
 		signedIn: session !== null,
 		// This data path has the session address, not the user row.
 		viewerSeed: session?.walletAddress.toLowerCase(),

@@ -542,6 +542,74 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				// C-R1. A fill already left this wallet from another card or tab.
 				// Nothing else is signed until it is recorded.
 				if (anotherFillIsHeld()) return;
+
+				/**
+				 * C-4 (lane C pass 3, MINOR). The SERVER fence, before the approval
+				 * is broadcast — not only before the fill.
+				 *
+				 * The local hold above is `sessionStorage`, which is per BROWSING
+				 * CONTEXT: it is empty in a second tab, in a private window and with
+				 * site data blocked, so on the unfixed component a card in any of
+				 * those states spent real approval gas while this wallet already had
+				 * an unrecorded fill on chain:
+				 *   {"stage":"approve","sends":1,"prepares":1,"data":["0x095ea7b3"]}
+				 * `prepareTradeFor` runs `findUnrecordedFill` FIRST
+				 * (`lib/trade/prepare.ts:84`), and it is the only fence that sees
+				 * across contexts and devices at all.
+				 *
+				 * This is also the shape the market ticket already had — prepare,
+				 * THEN approve (`components/market/take-a-side.tsx`) — so the two
+				 * wallet paths now differ in no step that spends money.
+				 */
+				setPhase("preparing");
+				preparedThisSend = true;
+				const beforeApproval = await prepareAgentTrade({
+					structureId: trade.structureId,
+					side: trade.side,
+					budgetInput: trade.budgetInput,
+					thesisId: trade.thesisId,
+				});
+				if (!beforeApproval.ok) {
+					setPhase("error");
+					setMessage(beforeApproval.reason);
+					return;
+				}
+				if (beforeApproval.stage === "fill") {
+					// The allowance already covers this fill, so there is nothing to
+					// approve and no gas is spent finding that out on chain. The fill
+					// path below runs its own economics and age checks on these
+					// figures, exactly as it would after an approval.
+					ready = {
+						stage: "fill",
+						fill: beforeApproval.fill,
+						token: beforeApproval.token,
+						expected: beforeApproval.expected,
+						preparedAt: beforeApproval.preparedAt,
+					};
+				} else {
+					/**
+					 * C-4. The bytes SIGNED are the server's fresh ones, and they are
+					 * held to the allowance this card PRINTED — the same exactness rule
+					 * as above, applied to the newer calldata. If the price moved while
+					 * the card sat in the transcript, the fresh approval allows a
+					 * different amount than the person read, and nothing is sent.
+					 */
+					const freshExact = approvalMatches({
+						data: beforeApproval.approve.data,
+						expectedSpender: trade.allowance.spender,
+						expectedAmount: trade.allowance.amount,
+					});
+					if (!freshExact.ok) {
+						setPhase("error");
+						// TODO-OWNER: wording.
+						setMessage(`${freshExact.reason} ${COPY.approvalNotSent}`);
+						return;
+					}
+					ready = { stage: "approve", approve: beforeApproval.approve };
+				}
+			}
+
+			if (ready.stage === "approve") {
 				setPhase("approving");
 				const approvalHash = await sendTransactionAsync({
 					to: ready.approve.to as `0x${string}`,

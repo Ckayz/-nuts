@@ -245,29 +245,114 @@ const toolPart = z.discriminatedUnion("state", [
  * exact hole. Padding cannot hide text precisely because the padding counts
  * toward the limit.
  *
- * Only USER text is bounded. Assistant text and reasoning parts are the MODEL's
- * own output replayed by `useChat`, and `maxOutputTokens: 1200` can exceed 2,000
- * characters, so bounding those would refuse ordinary conversations.
+ * C-3 (lane C pass 3, MAJOR). "RAW" was only half true until this round: the
+ * measured string came out of `messageText`, which TRIMS, so the padding was
+ * removed BEFORE it was counted and the reviewer's second payload walked
+ * straight through:
+ *
+ *   {"accepted":true,"gateText":"What is a put?","modelBytes":1000069}
+ *     — one user message of 1,000,000 spaces + a question, accepted, charged
+ *       and forwarded.
+ *
+ * `rawMessageText` (below) is what the fence measures now: the parts joined and
+ * NOT trimmed. The gate still reads the trimmed text, and that stays honest
+ * because trimming only ever removes leading and trailing WHITESPACE — every
+ * non-whitespace character the model receives is inside the string the gate
+ * classifies.
  *
  * TODO-OWNER: 2,000 is not the owner's number. It is the gate window that was
  * already in the code; the two are pinned together so they cannot drift.
  */
 export const MAX_MESSAGE_CHARS = 2000;
 
-/** The issue message the route matches to answer with a useful sentence. */
-export const MESSAGE_TOO_LONG = "agent:message-too-long";
+/**
+ * C-3 (lane C pass 3, MAJOR). The longest ASSISTANT message this route accepts.
+ *
+ * The fence used to skip every non-user message entirely — "assistant text is
+ * the MODEL's own output replayed by `useChat`" — which is true of an honest
+ * browser and says nothing at all about a hostile one. The reviewer's first
+ * payload:
+ *
+ *   {"status":200,"charges":1,"gateText":"What is a put?",
+ *    "primaryRoles":["user","assistant"],"primaryChars":1000128}
+ *
+ * A million characters accepted into the model's context, after the turn was
+ * charged.
+ *
+ * DERIVED, not plucked: `route.ts` caps the model's own answer at
+ * `maxOutputTokens: 1200`, so no genuine assistant message this app produced can
+ * be longer than 1,200 tokens. 10 characters per token is far above any real
+ * tokenizer's ratio (GPT/Claude byte-pair tokenizers average roughly 4), so
+ * 12,000 characters cannot refuse a reply this app actually wrote.
+ * `request.test.ts` re-reads BOTH numbers out of `route.ts` and this file, so
+ * the derivation cannot silently drift.
+ *
+ * TODO-OWNER: the 10-characters-per-token headroom is this file's choice.
+ */
+export const MAX_OUTPUT_TOKENS = 1200;
+export const MAX_CHARS_PER_TOKEN = 10;
+export const MAX_ASSISTANT_MESSAGE_CHARS = MAX_OUTPUT_TOKENS * MAX_CHARS_PER_TOKEN;
 
 /**
- * The text of one message, exactly as the route's `latestUserText` and the
- * scope gate read it. One implementation so the validated string and the
- * classified string cannot drift apart.
+ * C-3 (lane C pass 3, MAJOR). The whole request, serialized.
+ *
+ * Per-message caps bound the two channels a message DECLARES as text. They do
+ * not bound the ones it does not: a tool part's `input` is `z.unknown()` and a
+ * read tool's `output` is `z.record(z.string(), z.unknown())`, both unbounded by
+ * shape, and `convertToModelMessages` puts both into the model's context. The
+ * reviewer's own words: "Neither case has an aggregate input-size bound … Bound
+ * the complete forwarded payload across roles and parts before charging."
+ *
+ * So the aggregate is measured on `JSON.stringify(messages)` — every channel at
+ * once, including the ones no future part type has been written yet.
+ *
+ * TODO-OWNER: 120,000 is not the owner's number. Arithmetic behind it: the
+ * schema already caps a request at 80 messages, so this admits an average of
+ * 1,500 characters per message across a full-length conversation, and refuses
+ * the reviewer's 1,000,000-character payload by a factor of eight. A
+ * conversation that reaches it is refused with its own sentence and the person
+ * is asked to start a new chat — a real, reachable refusal, stated rather than
+ * implied.
+ */
+export const MAX_REQUEST_CHARS = 120_000;
+
+/** The issue message the route matches to answer with a useful sentence. */
+export const MESSAGE_TOO_LONG = "agent:message-too-long";
+/**
+ * C-3. The same fence on a message the PERSON did not type.
+ *
+ * A separate code because the sentence must be: "keep it under 2,000
+ * characters" is a lie about a replayed assistant message, whose limit is a
+ * different number and whose author is not the reader.
+ */
+export const HISTORY_TOO_LONG = "agent:history-too-long";
+/** C-3. Its aggregate sibling: the whole conversation, not one message. */
+export const REQUEST_TOO_LONG = "agent:request-too-long";
+
+/**
+ * The text of one message, exactly as the route's `userTexts` and the scope
+ * gate read it. One implementation so the validated string and the classified
+ * string cannot drift apart.
  */
 export function messageText(parts: ReadonlyArray<{ type?: unknown; text?: unknown }>): string {
+	return rawMessageText(parts).trim();
+}
+
+/**
+ * C-3. The same join with NO trim — what the length fence measures.
+ *
+ * `reasoning` parts count too: they are text the SDK forwards to the model
+ * (`ai@7.0.92` maps a `reasoning` UI part to a `reasoning` model part), so a
+ * fence that ignored them would bound one text channel and leave its twin open.
+ */
+export function rawMessageText(parts: ReadonlyArray<{ type?: unknown; text?: unknown }>): string {
 	return parts
-		.filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
+		.filter(
+			(part): part is { type: "text" | "reasoning"; text: string } =>
+				(part.type === "text" || part.type === "reasoning") && typeof part.text === "string",
+		)
 		.map((part) => part.text)
-		.join("\n")
-		.trim();
+		.join("\n");
 }
 
 /**
@@ -311,12 +396,17 @@ const messageSchema = z
 		parts: z.array(messagePartSchema),
 	})
 	.passthrough()
-	// C-P2-3. A user message longer than the gate's window is refused outright,
-	// so the text layer 1 classifies is always the text the primary model gets.
+	// C-P2-3 / C-3. A message longer than its role's limit is refused outright,
+	// so the text layer 1 classifies is always the text the primary model gets,
+	// and no role is an unbounded channel into the model's context.
+	//
+	// Measured RAW (`rawMessageText`, no trim): trimming first is what let
+	// 1,000,000 spaces + a question through.
 	.superRefine((message, ctx) => {
-		if (message.role !== "user") return;
-		if (messageText(message.parts as Array<{ type?: unknown; text?: unknown }>).length <= MAX_MESSAGE_CHARS) return;
-		ctx.addIssue({ code: "custom", message: MESSAGE_TOO_LONG, path: ["parts"] });
+		const user = message.role === "user";
+		const limit = user ? MAX_MESSAGE_CHARS : MAX_ASSISTANT_MESSAGE_CHARS;
+		if (rawMessageText(message.parts as Array<{ type?: unknown; text?: unknown }>).length <= limit) return;
+		ctx.addIssue({ code: "custom", message: user ? MESSAGE_TOO_LONG : HISTORY_TOO_LONG, path: ["parts"] });
 	});
 
 /** Exported so the shape can be pinned by a test rather than by a request. */
@@ -355,4 +445,17 @@ export const agentChatBodySchema = z.object({
 		.string()
 		.regex(/^[A-Za-z0-9]{1,12}$/)
 		.optional(),
-});
+})
+	/**
+	 * C-3 (lane C pass 3, MAJOR). The aggregate bound, measured on the messages
+	 * AS SERIALIZED — the only measurement that also covers `input`, `output`,
+	 * `errorText` and any part field a future SDK version adds.
+	 *
+	 * Runs on the parsed value, so a body that failed the shape rules never
+	 * reaches it, and it runs inside `safeParse` — which the route calls BEFORE
+	 * `chargeTurn` and before any model call.
+	 */
+	.superRefine((body, ctx) => {
+		if (JSON.stringify(body.messages).length <= MAX_REQUEST_CHARS) return;
+		ctx.addIssue({ code: "custom", message: REQUEST_TOO_LONG, path: ["messages"] });
+	});

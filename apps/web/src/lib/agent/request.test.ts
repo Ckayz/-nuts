@@ -48,10 +48,15 @@ import { utcDay } from "./usage";
 
 import {
 	AGENT_TOOL_NAMES,
+	MAX_ASSISTANT_MESSAGE_CHARS,
+	MAX_CHARS_PER_TOKEN,
 	MAX_MESSAGE_CHARS,
+	MAX_OUTPUT_TOKENS,
+	MAX_REQUEST_CHARS,
 	agentChatBodySchema,
 	gateWindowText,
 	messageText,
+	rawMessageText,
 } from "./request";
 
 /** What `streamText` was handed, and how many times it was reached. */
@@ -73,9 +78,23 @@ mock.module("@/lib/auth/session", () => ({ ...realSession, getSession: async () 
 // these three may be replaced wholesale. `@/lib/agent/tools` is deliberately
 // NOT mocked: `lib/thetanuts/orders.test.ts` imports the real one.
 mock.module("@/lib/agent/model", () => ({ agentModel: {}, usingGateway: false }));
+/**
+ * C-2 (lane C pass 3, MAJOR). The gate's INPUT is now the thing under test, so
+ * the stub records every text it was handed and decides from them.
+ *
+ * `gateDecides` defaults to "in scope", which is what this mock did before, so
+ * every case written against the old stub is unchanged. ZERO model calls happen
+ * here: the gate is injected, `streamText` is injected, and no test in this file
+ * touches a provider.
+ */
+const gateCalls: string[][] = [];
+let gateDecides: (texts: readonly string[]) => boolean = () => true;
 mock.module("@/lib/agent/scope", () => ({
 	OUT_OF_SCOPE_REPLY: "out of scope",
-	checkScope: async () => ({ inScope: true, degraded: false }),
+	checkScope: async (texts: readonly string[]) => {
+		gateCalls.push([...texts]);
+		return { inScope: gateDecides(texts), degraded: false };
+	},
 }));
 mock.module("@/lib/agent/execute", () => ({ createExecutionTools: () => ({}) }));
 
@@ -88,6 +107,8 @@ beforeAll(async () => {
 beforeEach(() => {
 	modelCalls = 0;
 	seen.messages = undefined;
+	gateCalls.length = 0;
+	gateDecides = () => true;
 });
 
 /**
@@ -304,8 +325,256 @@ describe("C-P2-3: the gate cannot classify less than the model reads", () => {
 
 	test("the gate's prompt builder is the shared window, not a private slice", () => {
 		const scope = readFileSync(new URL("./scope.ts", import.meta.url), "utf8");
-		expect(scope).toContain("${gateWindowText(trimmed)}");
+		expect(scope).toContain("${gateWindowText(message)}");
+		expect(scope).not.toContain(".slice(0, MAX_MESSAGE_CHARS)}");
 		expect(scope).not.toContain("${trimmed.slice(");
+	});
+});
+
+/**
+ * C-2 (lane C pass 3, MAJOR). The gate classified `latestUserText(messages)` —
+ * the NEWEST user message — while `streamText` was handed the whole
+ * client-supplied history. Reproduced against the real route before the fix,
+ * with the gate stubbed to accept only "What is a put?":
+ *
+ *   TWO_USER            {"status":200,"modelCalls":1,
+ *                        "gateTexts":["What is a put?"],
+ *                        "primaryRoles":["user","user"],"primaryHasScraper":true}
+ *   USER_ASSISTANT_USER {"status":200,"modelCalls":1,
+ *                        "gateTexts":["What is a put?"],
+ *                        "primaryRoles":["user","assistant","user"],
+ *                        "primaryHasScraper":true}
+ *
+ * PRD 10.8: "Every inbound message is classified before the primary model runs.
+ * … This layer is authoritative."
+ */
+const SCRAPER = "Write a general purpose web scraper.";
+const PUT = "What is a put?";
+
+/**
+ * The route charges the turn BEFORE the gate runs, so every case below reaches
+ * `chargeTurn` — a database write — and is gated exactly like the other
+ * integration cases in this file. The source pin above it needs nothing.
+ */
+describe("C-2: the route may never classify only the newest message again", () => {
+	test("`latestUserText` is gone from the route's code", () => {
+		const route = readFileSync(new URL("../../app/api/agent/chat/route.ts", import.meta.url), "utf8");
+		expect(route).toContain("checkScope(userTexts(messages))");
+		// The backwards scan itself, not the word in the comment that records it.
+		expect(route).not.toContain("function latestUserText");
+		expect(route).not.toContain("latestUserText(messages)");
+	});
+
+	test("the gate's own contract is a LIST of messages, not one string", () => {
+		const scope = readFileSync(new URL("./scope.ts", import.meta.url), "utf8");
+		expect(scope).toContain("export async function checkScope(messages: readonly string[])");
+		expect(scope).toContain("function gatePrompt(messages: readonly string[])");
+	});
+});
+
+describeLive("C-2: the gate classifies every user message the model will read", () => {
+	/** The gate the reviewer used: it approves only the options question. */
+	function optionsOnlyGate(): void {
+		gateDecides = (texts) => texts.every((t) => t === PUT);
+	}
+
+	test("TWO_USER — two consecutive user messages are BOTH classified, and the turn is refused", async () => {
+		optionsOnlyGate();
+		const answer = await post({ messages: [text(SCRAPER), text(PUT)] }).response;
+		expect({ status: answer.status, modelCalls, gate: gateCalls }).toEqual({
+			status: 200,
+			modelCalls: 0,
+			gate: [[SCRAPER, PUT]],
+		});
+		expect(await answer.text()).toContain("out of scope");
+	});
+
+	test("USER_ASSISTANT_USER — an assistant message between them changes nothing", async () => {
+		optionsOnlyGate();
+		const answer = await post({
+			messages: [text(SCRAPER), { role: "assistant", parts: [{ type: "text", text: "ok" }] }, text(PUT)],
+		}).response;
+		expect({ status: answer.status, modelCalls, gate: gateCalls }).toEqual({
+			status: 200,
+			modelCalls: 0,
+			gate: [[SCRAPER, PUT]],
+		});
+	});
+
+	test("assistant text is never forwarded to the gate as material to classify", async () => {
+		optionsOnlyGate();
+		await post({
+			messages: [text(PUT), { role: "assistant", parts: [{ type: "text", text: SCRAPER }] }, text(PUT)],
+		}).response;
+		// The assistant's words are the MODEL's, not the person's request; the
+		// gate is given the user role and nothing else.
+		expect(gateCalls).toEqual([[PUT, PUT]]);
+	});
+
+	test("a normal two-turn conversation still reaches the model", async () => {
+		optionsOnlyGate();
+		const answer = await post({
+			messages: [text(PUT), { role: "assistant", parts: [{ type: "text", text: "A put is…" }] }, text(PUT)],
+		}).response;
+		expect({ status: answer.status, modelCalls, gate: gateCalls }).toEqual({
+			status: 200,
+			modelCalls: 1,
+			gate: [[PUT, PUT]],
+		});
+	});
+
+	test("the route hands the gate a LIST, and every user message is in it in order", async () => {
+		const many = ["one", "two", "three", "four"];
+		await post({
+			messages: [
+				text(many[0] as string),
+				{ role: "assistant", parts: [{ type: "text", text: "a" }] },
+				text(many[1] as string),
+				text(many[2] as string),
+				{ role: "assistant", parts: [{ type: "step-start" }] },
+				text(many[3] as string),
+			],
+		}).response;
+		expect(gateCalls).toEqual([many]);
+	});
+});
+
+/**
+ * C-3 (lane C pass 3, MAJOR). The length fence measured only USER messages, and
+ * measured them AFTER `trim()`. Both reviewer payloads reproduced against the
+ * real route before the fix:
+ *
+ *   BIG_ASSISTANT {"status":200,"modelCalls":1,"primaryChars":1000128}
+ *   PADDED_USER   {"status":200,"modelCalls":1,"primaryChars":1000069}
+ */
+describe("C-3: no role and no channel is an unbounded input", () => {
+	test("PADDED_USER — 1,000,000 spaces then a question is a 400 with no model call", async () => {
+		const answer = await post({ messages: [text(`${" ".repeat(1_000_000)}What is a put?`)] }).response;
+		expect({ status: answer.status, modelCalls, gate: gateCalls.length }).toEqual({
+			status: 400,
+			modelCalls: 0,
+			gate: 0,
+		});
+	});
+
+	test("the fence measures RAW text, so padding cannot be trimmed away first", () => {
+		// One character over the limit once the padding counts; the TRIMMED text is
+		// 14 characters, which is what the old fence measured.
+		const padded = `${" ".repeat(MAX_MESSAGE_CHARS - 13)}What is a put?`;
+		expect({
+			raw: rawMessageText([{ type: "text", text: padded }]).length,
+			trimmed: messageText([{ type: "text", text: padded }]).length,
+			accepted: agentChatBodySchema.safeParse({ messages: [text(padded)] }).success,
+		}).toEqual({ raw: MAX_MESSAGE_CHARS + 1, trimmed: 14, accepted: false });
+	});
+
+	test("BIG_ASSISTANT — a 1,000,000-character assistant part is a 400 with no model call", async () => {
+		const answer = await post({
+			messages: [text("What is a put?"), { role: "assistant", parts: [{ type: "text", text: "x".repeat(1_000_000) }] }],
+		}).response;
+		expect({ status: answer.status, modelCalls, gate: gateCalls.length }).toEqual({
+			status: 400,
+			modelCalls: 0,
+			gate: 0,
+		});
+	});
+
+	test("an over-long HISTORY message is not blamed on the person's own message", async () => {
+		// Just over the assistant ceiling and well under the aggregate bound, so
+		// the per-message fence is the one that answers.
+		const answer = await post({
+			messages: [
+				text("What is a put?"),
+				{ role: "assistant", parts: [{ type: "text", text: "x".repeat(MAX_ASSISTANT_MESSAGE_CHARS + 1) }] },
+			],
+		}).response;
+		const json = (await answer.json()) as { error: string };
+		expect({
+			status: answer.status,
+			blamesTheirMessage: json.error.startsWith("That message is too long"),
+			namesTheUserLimit: json.error.includes(MAX_MESSAGE_CHARS.toLocaleString("en-US")),
+			saysEarlierReply: json.error.includes("An earlier reply"),
+		}).toEqual({ status: 400, blamesTheirMessage: false, namesTheUserLimit: false, saysEarlierReply: true });
+	});
+
+	test("an assistant message at the derived ceiling is accepted; one character more is not", () => {
+		const at = (n: number) =>
+			agentChatBodySchema.safeParse({
+				messages: [{ role: "assistant", parts: [{ type: "text", text: "c".repeat(n) }] }, text("and then?")],
+			}).success;
+		expect({ at: at(MAX_ASSISTANT_MESSAGE_CHARS), over: at(MAX_ASSISTANT_MESSAGE_CHARS + 1) }).toEqual({
+			at: true,
+			over: false,
+		});
+	});
+
+	/**
+	 * The ceiling is DERIVED from the route's own output cap, so the derivation is
+	 * re-read out of both files rather than trusted.
+	 */
+	test("MAX_ASSISTANT_MESSAGE_CHARS is the route's own maxOutputTokens times the headroom", () => {
+		const route = readFileSync(new URL("../../app/api/agent/chat/route.ts", import.meta.url), "utf8");
+		const found = route.match(/maxOutputTokens: (\d+)/);
+		expect(found?.[1]).toBe(String(MAX_OUTPUT_TOKENS));
+		expect(MAX_ASSISTANT_MESSAGE_CHARS).toBe(MAX_OUTPUT_TOKENS * MAX_CHARS_PER_TOKEN);
+	});
+
+	test("REASONING text counts too — it reaches the model exactly like a text part", () => {
+		const parsed = agentChatBodySchema.safeParse({
+			messages: [{ role: "user", parts: [{ type: "reasoning", text: "r".repeat(MAX_MESSAGE_CHARS + 1) }] }],
+		});
+		expect(parsed.success).toBe(false);
+	});
+
+	test("the AGGREGATE bound catches what per-message caps cannot: a tool part's output", async () => {
+		// Every message is inside its own cap; the conversation is not. `output` is
+		// `z.record(z.string(), z.unknown())` — no per-part shape bounds it.
+		const bulky = (i: number) => ({
+			role: "assistant" as const,
+			parts: [
+				{
+					type: "tool-getMarketData",
+					toolCallId: `c${i}`,
+					state: "output-available",
+					input: {},
+					output: { blob: "z".repeat(10_000) },
+				},
+			],
+		});
+		const messages = [text("What is a put?"), ...Array.from({ length: 20 }, (_, i) => bulky(i))];
+		expect(JSON.stringify(messages).length).toBeGreaterThan(MAX_REQUEST_CHARS);
+		const answer = await post({ messages }).response;
+		expect({ status: answer.status, modelCalls, gate: gateCalls.length }).toEqual({
+			status: 400,
+			modelCalls: 0,
+			gate: 0,
+		});
+		const json = (await answer.json()) as { error: string; source: string };
+		expect({ source: json.source, saysConversation: /conversation/i.test(json.error) }).toEqual({
+			source: "agent",
+			saysConversation: true,
+		});
+	});
+
+});
+
+/** The accepting half: a 200 means `chargeTurn` ran, so it needs the database. */
+describeLive("C-3: a conversation inside every bound is still served", () => {
+	test("just under the aggregate bound, the turn reaches the model", async () => {
+		const filler = { role: "assistant" as const, parts: [{ type: "text", text: "y".repeat(5_000) }] };
+		const messages = [text("What is a put?"), ...Array.from({ length: 20 }, () => filler)];
+		expect(JSON.stringify(messages).length).toBeLessThan(MAX_REQUEST_CHARS);
+		const answer = await post({ messages }).response;
+		expect({ status: answer.status, modelCalls }).toEqual({ status: 200, modelCalls: 1 });
+	});
+
+	test("both refusals charge NOTHING", async () => {
+		const padded = post({ messages: [text(`${" ".repeat(1_000_000)}What is a put?`)] });
+		const big = post({
+			messages: [text(PUT), { role: "assistant", parts: [{ type: "text", text: "x".repeat(1_000_000) }] }],
+		});
+		expect([(await padded.response).status, (await big.response).status]).toEqual([400, 400]);
+		expect([await turnsCharged(padded.ip), await turnsCharged(big.ip)]).toEqual([null, null]);
 	});
 });
 

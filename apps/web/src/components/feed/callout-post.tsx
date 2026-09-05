@@ -53,7 +53,7 @@ export function CalloutPost({
 					<Link className="p-name" href={`/u/${thesis.creator.handle}`}>
 						{thesis.creator.displayName}
 					</Link>
-					<span className="p-handle">@{thesis.creator.handle}</span>
+					<span className="p-handle">@{thesis.creator.handleLabel}</span>
 					<span className="p-time">{thesis.postedLabel}</span>
 					{thesis.status && thesis.statusLabel ? (
 						<StatusChip status={thesis.status} label={thesis.statusLabel} />

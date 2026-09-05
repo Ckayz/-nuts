@@ -34,7 +34,7 @@ export function CreatorStats({ creator, following = false, signedIn = false, dat
     <Avatar initials={creator.initials} size={profile ? "lg" : undefined} />
     {!profile ? <span className="t"><Link href={`/u/${creator.handle}`}><b>{creator.displayName}</b></Link><i>{[creator.walletAddress, creator.sinceLabel].filter(Boolean).join(" · ")}</i></span> : null}
    </div>
-   {profile ? <><div className="profile-identity"><h1>{creator.displayName}</h1><div className="handle">@{creator.handle}</div><div className="meta num">{[creator.walletAddress, creator.sinceLabel].filter(Boolean).join(" · ")}</div><div className="counts">{followers !== undefined ? <span><b className="num">{followers}</b> Followers</span> : null}{creator.thesesCount !== undefined ? <span><b className="num">{creator.thesesCount}</b> Theses</span> : null}</div></div><div className="prof-act">{!self ? follow : null}</div></> : null}
+   {profile ? <><div className="profile-identity"><h1>{creator.displayName}</h1><div className="handle">@{creator.handleLabel}</div><div className="meta num">{[creator.walletAddress, creator.sinceLabel].filter(Boolean).join(" · ")}</div><div className="counts">{followers !== undefined ? <span><b className="num">{followers}</b> Followers</span> : null}{creator.thesesCount !== undefined ? <span><b className="num">{creator.thesesCount}</b> Theses</span> : null}</div></div><div className="prof-act">{!self ? follow : null}</div></> : null}
   </div>
   <div className={profile ? "stats" : "creator-metrics"}>{stats}{!profile && followers !== undefined ? <span className="tile"><i>Followers</i><b className="num">{followers}</b></span> : null}</div>
  </section>;

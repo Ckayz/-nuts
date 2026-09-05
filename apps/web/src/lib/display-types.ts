@@ -22,7 +22,11 @@ export interface TxRef {
 export interface Creator {
     id?: string;
     followerCount?: number;
+    /** Route segment: the stored handle, or the full lowercase wallet address when none is set. */
     handle: string;
+    /** What is printed after "@": the handle, or the address shortened (`0xd990…512e`) when the handle IS the address. */
+    handleLabel: string;
+    /** The display name, or the shortened address when the person has not set one. Never "—". */
     displayName: string;
     /** Two-letter monogram used by the `.av` avatar. */
     initials: string;

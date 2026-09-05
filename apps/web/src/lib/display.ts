@@ -86,7 +86,16 @@ export function strikeSide(productType: string | null, isCall: boolean): boolean
 /** Market slugs are derived from the asset: the book, not a hardcoded list. */
 export function marketSlug(asset: string) { return asset.toLowerCase(); }
 export function creator(value: Domain.Creator): View.Creator {
-    return { id: value.id, followerCount: value.followers ?? undefined, handle: value.handle, displayName: value.displayName ?? "—", initials: value.initials,
+    // A person with no name is shown by their shortened address, never by a
+    // dash (walkthrough 2026-09-05 F4/F5: "—" reached bylines, the rail, the
+    // profile heading and the page <title>; the raw 42-character address as the
+    // handle overflowed the rail). The route keeps the full address in `handle`;
+    // only the printed text is shortened. TODO-OWNER: the wording for an unnamed
+    // person, if anything other than the address.
+    const address = value.walletAddress || value.mockWalletFragment || null;
+    const handleLabel = /^0x[0-9a-f]{40}$/i.test(value.handle) ? fragment(value.handle) : value.handle;
+    return { id: value.id, followerCount: value.followers ?? undefined, handle: value.handle, handleLabel,
+        displayName: value.displayName ?? (address === null ? handleLabel : fragment(address)), initials: value.initials,
         walletAddress: value.walletAddress ? fragment(value.walletAddress) : value.mockWalletFragment ?? undefined,
         sinceLabel: value.sinceLabel ?? undefined, winRatePct: value.winRatePct ?? undefined, thesesCount: value.thesesCount ?? undefined,
         followers: value.followers === null ? undefined : new Intl.NumberFormat("en-US").format(value.followers),

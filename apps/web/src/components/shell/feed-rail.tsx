@@ -25,7 +25,7 @@ export function FeedRail({ posts, limit = 5 }: { posts: Thesis[]; limit?: number
 						<Avatar initials={post.creator.initials} size={30} />
 						<div className="t">
 							<div className="n">
-								{post.creator.handle}
+								{post.creator.handleLabel}
 								{/* `postedLabel` carries the byline's leading "· "; the rail
 								    shows the bare time. */}
 								<span>{post.postedLabel.replace(/^·\s*/, "")}</span>

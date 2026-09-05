@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { OPTION_BOOK_ABI, buildPriceFeedSymbolMap, getChainConfigById, type OrderWithSignature } from "@thetanuts-finance/thetanuts-client";
+import { OPTION_BOOK_ABI, buildPriceFeedSymbolMap, getChainConfigById, getOptionImplementationInfo, type OrderWithSignature } from "@thetanuts-finance/thetanuts-client";
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, type Address, type Hex, type Log } from "viem";
 import { quoteSellFill, buildSellFillTransactions, takerSide, buildFillTransactions, createReadClient, deriveMarkets, expectOrderFilled, fetchLiveOrders, listAssets, listExpiries, listStructures, parseOrderFilled, premiumUsd8From, quoteFill, payoffAtExpiry, payoffCurve, maxLoss, maxPayout, breakEven, ThetanutsLogicError } from "../src";
 
@@ -165,7 +165,7 @@ describe("round 5 side and production evidence", () => {
   });
 
   // Source: supplied decoded transfers, not new chain observations. The four-strike
-  // implementation is intentionally unspecified: no implementation address was supplied.
+  // implementation is 0x9980ec85bc6fE07340adb36c76FA093bb6D4FcBc (SDK RANGER).
   test("reproduces supplied production premium, fee and collateral to the unit", () => {
     const fixtures = [
       { tx: "0x9c4bb145a85740323a14f99cfbbf69c7da18bef1a8fa8f087d2330d095828f8c", contracts: 389926n, price: 256458427n, collateralPerContract: 234000000000n, premium: 999998n, fee: 124999n, collateral: 912426840n, net: 874999n },
@@ -238,30 +238,57 @@ describe("sell collateral quote and encoding", () => {
   test("side and call opt-in gates", () => {
     expect(() => quoteSellFill({ client, order: order({}), collateralBudget: 22000000n, now })).toThrowError(expect.objectContaining({ code: "INVALID_SIDE" }));
     expect(() => quoteFill({ client, order: row(), budget: 22000000n, now })).toThrowError(expect.objectContaining({ code: "TAKER_SELL_UNVERIFIED" }));
-    expect(() => quoteSellFill({ client, order: order({ isLong: false, isCall: true }), collateralBudget: 22000000n, now })).toThrowError(expect.objectContaining({ code: "CALL_COLLATERAL_UNVERIFIED" }));
+    expect(() => quoteSellFill({ client, order: order({ isLong: false, isCall: true }), collateralBudget: 22000000n, now })).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" }));
   });
-  test("SDK differential caps and budget sizing across structures", () => {
-    const tokens = Object.values(client.chainConfig.collateralTokens);
-    const linear = tokens.find(t => t.decimals === 6)!;
-    const inverse = tokens.find(t => t.decimals === 18)!;
-    for (const fixture of [
-      { isCall: false, strikes: ["220000000000"], collateral: linear.address },
-      { isCall: true, strikes: ["220000000000"], collateral: inverse.address },
-      { isCall: true, strikes: ["220000000000"], collateral: linear.address },
-      { isCall: false, strikes: ["230000000000", "220000000000"], collateral: linear.address },
-      { isCall: true, strikes: ["230000000000", "220000000000", "240000000000", "210000000000"], collateral: linear.address },
-      { isCall: false, strikes: [], collateral: linear.address },
-    ]) {
-      const testOrder = order({ ...fixture, isLong: false, available: 1000000000000000000n, price: 212682750n });
-      const q = quoteSellFill({ client, order: testOrder, collateralBudget: testOrder.availableAmount / 2n, allowUnverifiedCallCollateral: true, now });
-      expect(q.maxContracts).toBe(client.optionBook.previewFillOrder(testOrder, undefined).maxContracts);
-      expect(q.numContracts).toBe(client.optionBook.previewFillOrder({ ...testOrder, availableAmount: testOrder.availableAmount / 2n }, undefined).numContracts);
+  test("SDK capacity caps stay separate from implementation collateral", () => {
+    for (const name of ["PUT", "LINEAR_CALL", "INVERSE_CALL", "PUT_SPREAD", "CALL_SPREAD", "CALL_FLY", "PUT_FLY", "CALL_CONDOR", "PUT_CONDOR", "IRON_CONDOR"]) {
+      const implementation = implementationFor(name);
+      const info = getOptionImplementationInfo(8453, implementation)!;
+      const strikes = ["220000000000", "230000000000", "240000000000", "250000000000"].slice(0, info.numStrikes);
+      const testOrder = order({ implementation, strikes, isCall: name.includes("CALL"), isLong: false, available: 1000000000000000000n, price: 212682750n });
+      const q = quoteSellFill({ client, order: testOrder, collateralBudget: testOrder.availableAmount / 2n, allowUnverifiedStructureCollateral: true, now });
+      expect(q.maxContracts).toBe(client.optionBook.calculateMaxContracts(testOrder));
       expect(q.collateralRequired).toBeLessThanOrEqual(testOrder.availableAmount / 2n);
+      if (name !== "PUT") expect(() => quoteSellFill({ client, order: testOrder, collateralBudget: 2000000n, now })).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" }));
+    }
+  });
+  test("RANGER and PUT_FLY collateral gates and exact approvals", async () => {
+    const ranger = "0x9980ec85bc6fE07340adb36c76FA093bb6D4FcBc";
+    expect(getOptionImplementationInfo(8453, ranger)).toEqual({ name: "RANGER", type: "RANGER", numStrikes: 4 });
+    // Supplied RANGER taker-BUY seller transfer; maker capacity and taker-SELL
+    // order are hypothetical, not a claim that a new sell fill was performed.
+    for (const f of [
+      { implementation: ranger, isCall: true, strikes: ["7950000000000", "8000000000000", "8100000000000", "8150000000000"], price: 23077332818n, available: 86666000n, budget: 43333000n, contracts: 43333n, collateral: 43333000n, premium: 10000100n, fee: 1250012n },
+      { implementation: implementationFor("PUT_FLY"), isCall: false, strikes: ["240000000000", "230000000000", "220000000000"], price: 100000000n, available: 2000000n, budget: 2000000n, contracts: 10000n, collateral: 1000000n, premium: 10000n, fee: 1250n },
+    ]) {
+      const testOrder = order({ implementation: f.implementation, isCall: f.isCall, strikes: f.strikes, price: f.price, available: f.available, isLong: false });
+      const params = { client, order: testOrder, collateralBudget: f.budget, now };
+      expect(() => quoteSellFill(params)).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" }));
+      const q = quoteSellFill({ ...params, allowUnverifiedStructureCollateral: true });
+      expect(q).toMatchObject({ numContracts: f.contracts, collateralRequired: f.collateral, premiumGross: f.premium, feeEstimate: f.fee, maxContracts: f.contracts });
+      const offline = { utils: client.utils, chainConfig: client.chainConfig, optionBook: client.optionBook, erc20: { getAllowance: async () => 0n, encodeApprove: client.erc20.encodeApprove.bind(client.erc20) } };
+      await expect(buildSellFillTransactions({ ...params, client: offline, account: A("5") as Address })).rejects.toMatchObject({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" });
+      const result = await buildSellFillTransactions({ ...params, client: offline, allowUnverifiedStructureCollateral: true, account: A("5") as Address });
+      expect(result.approve?.data).toBe(client.erc20.encodeApprove(q.collateralToken, result.fill.to, f.collateral).data as Hex);
+      expect(decodeFunctionData({ abi: OPTION_BOOK_ABI, data: result.fill.data }).args?.[0]).toMatchObject({ numContracts: f.contracts });
+    }
+  });
+  test("unsupported implementations remain gated even with opt-in", () => {
+    for (const fixture of [
+      { implementation: implementationFor("INVERSE_CALL_SPREAD"), strikes: ["220000000000", "230000000000"] },
+      { implementation: implementationFor("PHYSICAL_CALL"), strikes: ["220000000000"] },
+      { implementation: "0x6a1d5ce9e3bdef110a06d8d025c171189d926d72", strikes: ["220000000000", "230000000000"] },
+    ]) expect(() => quoteSellFill({ client, order: order({ ...fixture, isLong: false, isCall: true }), collateralBudget: 1000000n, now, allowUnverifiedStructureCollateral: true })).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" }));
+  });
+  test("unknown implementations and incompatible strikes fail closed", () => {
+    for (const allowUnverifiedStructureCollateral of [false, true]) {
+      expect(() => quoteSellFill({ client, order: order({ isLong: false, implementation: A("9") }), collateralBudget: 100n, now, allowUnverifiedStructureCollateral })).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" }));
+      expect(() => quoteSellFill({ client, order: order({ isLong: false, strikes: ["100", "200", "300"] }), collateralBudget: 100n, now, allowUnverifiedStructureCollateral })).toThrowError(expect.objectContaining({ code: "INVALID_ORDER" }));
     }
   });
   test("encodes exact sell count and collateral approval for SDK target", async () => {
     for (const collateralBudget of [22000000n, 11000000n, 44000000n]) {
-      const offline = { chainConfig: client.chainConfig, optionBook: client.optionBook, erc20: {
+      const offline = { utils: client.utils, chainConfig: client.chainConfig, optionBook: client.optionBook, erc20: {
         getAllowance: async (_token: string, _owner: string, spender: string) => { expect(spender).toBe(client.optionBook.encodeFillOrder(row()).to); return 0n; },
         encodeApprove: client.erc20.encodeApprove.bind(client.erc20),
       } };
@@ -272,7 +299,7 @@ describe("sell collateral quote and encoding", () => {
     }
   });
   test("unrepresentable count fails before allowance access", async () => {
-    const offline = { chainConfig: client.chainConfig, optionBook: client.optionBook, erc20: {
+    const offline = { utils: client.utils, chainConfig: client.chainConfig, optionBook: client.optionBook, erc20: {
       getAllowance: async () => { throw new Error("must not access allowance"); },
       encodeApprove: client.erc20.encodeApprove.bind(client.erc20),
     } };
@@ -286,7 +313,7 @@ describe("sell collateral quote and encoding", () => {
       [order({ isLong: false, price: 1n }), 100n, "ZERO_PREMIUM"],
       [order({ isLong: false, strikes: ["1"], available: 1n, price: 100000000n }), 1n, "ZERO_COLLATERAL"],
     ] as const) {
-      const guardClient = code === "ZERO_COLLATERAL" ? { chainConfig: client.chainConfig, optionBook: { previewFillOrder: client.optionBook.previewFillOrder.bind(client.optionBook), calculateMaxContracts: () => 1n } } : client;
+      const guardClient = code === "ZERO_COLLATERAL" ? { utils: client.utils, chainConfig: client.chainConfig, optionBook: { previewFillOrder: client.optionBook.previewFillOrder.bind(client.optionBook), calculateMaxContracts: () => 1n } } : client;
       expect(() => quoteSellFill({ client: guardClient, order: testOrder, collateralBudget, now })).toThrowError(expect.objectContaining({ code }));
     }
   });

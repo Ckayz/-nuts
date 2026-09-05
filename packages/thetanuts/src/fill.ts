@@ -49,7 +49,8 @@ export interface SellFillTransactions {
   readonly expected: Pick<SellFillQuote, "numContracts" | "collateralRequired" | "premiumGross" | "feeEstimate" | "premiumNet" | "collateralToken">;
 }
 
-/** Exact collateral approval; call collateral and on-chain rounding remain UNVERIFIED.
+/** Exact implementation collateral approval; unverified structures require explicit opt-in.
+ * On-chain rounding remains UNVERIFIED.
  * Rejects contract counts not representable by the SDK's integer premium input.
  * Chain validation remains the caller's responsibility via assertBaseChain.
  */

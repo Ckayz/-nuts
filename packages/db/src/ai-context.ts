@@ -153,7 +153,7 @@ const confirmedStatuses = new Set(["confirmed", "indexed", "expired", "settled"]
 export function buildThesisAiContext(input: BuildThesisAiContextInput): ThesisAiContext {
   const position = input.creatorPosition;
   if (position === null) {
-    throw new ThesisAiContextError("NO_CREATOR_POSITION", "Cannot build ThesisAiContext without creator position: structure.contracts is required by PRD §10.2");
+    throw new ThesisAiContextError("NO_CREATOR_POSITION", "Cannot build ThesisAiContext without creator position: structure.contracts is required by PRD v2.0 §10.3");
   }
   const mismatch = input.thesis.creatorUserId !== input.creator.id || position.thesisId !== input.thesis.id || position.userId !== input.creator.id || position.id !== input.thesis.creatorPositionId || position.walletAddress.toLowerCase() !== input.creator.walletAddress.toLowerCase();
   if (mismatch) throw new ThesisAiContextError("POSITION_MISMATCH", "Creator position does not belong to the thesis creator");

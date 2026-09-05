@@ -144,6 +144,37 @@ if (!databaseUrl) {
     await client.query("SET CONSTRAINTS ALL DEFERRED");
     await rejects(client, "UPDATE public.users SET wallet_address='0xaaa' WHERE id=$1", [u1], { code: "23514", message: "cannot change wallet of a public thesis creator" });
   });
+  for (const variant of ["position", "wallet"] as const) {
+    for (const alreadyPublished of [false, true]) {
+      probe(`${variant} intermediate-invalid final-valid (published=${alreadyPublished})`, async (client) => {
+        if (alreadyPublished) await publish(client);
+        if (variant === "position") {
+          await client.query("UPDATE public.positions SET status='failed' WHERE id=$1", [p1]);
+          await client.query("UPDATE public.positions SET status='confirmed' WHERE id=$1", [p1]);
+        } else {
+          await client.query("UPDATE public.users SET wallet_address='0xaaa' WHERE id=$1", [u1]);
+          await client.query("UPDATE public.users SET wallet_address='0xabc' WHERE id=$1", [u1]);
+        }
+        if (!alreadyPublished) await publish(client);
+        await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+        const result = await client.query("SELECT p.status,p.wallet_address=u.wallet_address AS matching FROM public.positions p JOIN public.users u ON u.id=p.user_id WHERE p.id=$1", [p1]);
+        expect(result.rows).toEqual([{ status: "confirmed", matching: true }]);
+      });
+    }
+    probe(`${variant} restored then final-invalid is rejected`, async (client) => {
+      await publish(client);
+      const invalid = variant === "position"
+        ? "UPDATE public.positions SET status='failed' WHERE id=$1"
+        : "UPDATE public.users SET wallet_address='0xaaa' WHERE id=$1";
+      const restore = variant === "position"
+        ? "UPDATE public.positions SET status='confirmed' WHERE id=$1"
+        : "UPDATE public.users SET wallet_address='0xabc' WHERE id=$1";
+      const id = variant === "position" ? p1 : u1;
+      await client.query(invalid, [id]);
+      await client.query(restore, [id]);
+      await rejects(client, invalid, [id], { code: "23514" });
+    });
+  }
   probe("same wallet remains accepted for public creator", async (client) => {
     await publish(client);
     await client.query("UPDATE public.users SET wallet_address=wallet_address WHERE id=$1", [u1]);

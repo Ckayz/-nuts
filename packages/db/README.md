@@ -20,9 +20,9 @@ USD display values use Postgres `numeric` and cross application interfaces as de
 
 Wallet addresses are normalized to lowercase before persistence. Database checks enforce lowercase values in `users`, `auth_challenges`, and `positions`.
 
-On thesis writes and referenced-position updates or deletes, constraint triggers fence every referenced creator position to the same thesis and creator, creator role, Base mainnet, a confirmed lifecycle status, and a non-null confirmation timestamp. Raw SQL writers must explicitly maintain `users.updated_at`; Drizzle updates apply its `$onUpdate` callback.
+On thesis writes and referenced-position updates or deletes, constraint triggers fence every referenced creator position to the same thesis and creator, creator role, Base mainnet, a confirmed lifecycle status, and a non-null confirmation timestamp. Thesis validation self-assigns the linked position's `status` and updates the creator user's `updated_at` as guard-row writes. Other raw SQL writers must explicitly maintain `users.updated_at`; Drizzle updates apply its `$onUpdate` callback.
 
-Those validations also require the position wallet to equal the creator user's wallet. A deferred user-wallet trigger rejects a changed wallet while that user has an open, expired, or settled thesis (same-value updates are allowed). Draft, pending, and cancelled theses may retain a linked position after a later user-wallet change; the user-wallet trigger does not fence those statuses. The AI availability wrapper returns `not_published` for drafts and cancelled theses; the strict builder rejects a wallet mismatch with `POSITION_MISMATCH`. For pending theses with a mismatched position, the wrapper returns `invalid_position`.
+Those validations also require the position wallet to equal the creator user's wallet. A deferred user-wallet trigger validates the final wallet against linked positions while that user has an open, expired, or settled thesis (same-value updates and intermediate changes restored before validation are allowed). Draft, pending, and cancelled theses may retain a linked position after a later user-wallet change; the user-wallet trigger does not fence those statuses. The AI availability wrapper returns `not_published` for drafts and cancelled theses; the strict builder rejects a wallet mismatch with `POSITION_MISMATCH`. For pending theses with a mismatched position, the wrapper returns `invalid_position`.
 
 `positions.chain_id` and `auth_challenges.chain_id` must be 8453. Confirmed, indexed, expired, and settled positions require a non-null `fill_event` with version 1; write it through `encodeFillEventSnapshot`. SQL NULL, a missing version, and JSON null cannot satisfy the check.
 
@@ -57,28 +57,40 @@ bunx drizzle-kit generate
 bunx drizzle-kit check
 ```
 
-Apply migrations to the local database by providing its URL:
+The config chooses `DIRECT_DATABASE_URL` before `DATABASE_URL`. The shared env loader reads `.env.local` before `.env` (including `apps/web`), with explicit process environment taking precedence. Setting only `DATABASE_URL` does not override a loaded `DIRECT_DATABASE_URL`. Every migrate invocation, including after a local reset, must explicitly set both URLs to the intended target. The config prints `drizzle-kit target: <host>:<port>/<db>` to stderr without credentials. Hosts other than `127.0.0.1` and `localhost` require `DRIZZLE_ALLOW_REMOTE=1`; inspect the printed target before proceeding.
+
+Apply migrations to the local database by providing both URLs:
 
 ```bash
 cd packages/db
-DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres bunx drizzle-kit migrate
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+DIRECT_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+bunx drizzle-kit migrate
 ```
 
 Apply to production only with `drizzle-kit migrate` and the intended production URL explicitly supplied. Git pushes do not migrate the database:
 
 ```bash
 cd packages/db
-DATABASE_URL='<production-postgres-url>' bunx drizzle-kit migrate
+DATABASE_URL='<production-direct-postgres-url>' \
+DIRECT_DATABASE_URL='<production-direct-postgres-url>' \
+DRIZZLE_ALLOW_REMOTE=1 bunx drizzle-kit migrate
 ```
 
 Never run `drizzle-kit push` (or `bun run db:push`) against the shared Supabase project. `push` reshapes the database to match the schema of whoever runs it, so a tree missing the other developer's tables can drop them; and because Drizzle does not model functions or triggers, `push` would never apply the `0002_core_triggers` layer at all. `push` is for a local throwaway database and nowhere else.
 
 Existing rows must satisfy the checks in `0001_core_schema` before migration can succeed. No backfill values are invented here.
 
-After applying migrations, run `DATABASE_URL='<intended-test-postgres-url>' bun test test/schema.integration.test.ts`. Each integration case seeds its own transaction and rolls it back. Without `DATABASE_URL`, the file emits one skipped test. The isolated trigger tests temporarily drop the overlapping Base CHECK or creator-position FK inside their rollback transaction to prove the trigger itself rejects the invalid relationship. Use a test database whose role owns these tables. Run `DATABASE_URL='<intended-test-postgres-url>' bun test test/schema.concurrency.test.ts` for the two-connection publication/status and publication/wallet races in both orders. These tests commit unique fixtures and delete them in cleanup, observe blocking with `pg_blocking_pids`, and set a statement timeout on both connections. Without `DATABASE_URL`, the concurrency file also emits one skipped test.
+After applying migrations, run `DATABASE_URL='<intended-test-postgres-url>' bun test test/schema.integration.test.ts`. Each integration case seeds its own transaction and rolls it back. Without `DATABASE_URL`, the file emits one skipped test. The isolated trigger tests temporarily drop the overlapping Base CHECK or creator-position FK inside their rollback transaction to prove the trigger itself rejects the invalid relationship. Use a test database whose role owns these tables. Run `DATABASE_URL='<intended-test-postgres-url>' bun test test/schema.concurrency.test.ts` for the two-connection publication/status and publication/wallet races in both orders under READ COMMITTED and REPEATABLE READ, plus stale snapshots whose mutations start after publication commits. These tests commit unique fixtures and delete them in cleanup, observe blocking with `pg_blocking_pids`, and set a statement timeout on both connections. Without `DATABASE_URL`, the concurrency file also emits one skipped test.
+
+## Commit-time blocking and retries
+
+Deferred creator validation runs at COMMIT unless constraints are made immediate earlier. A conflicting writer blocks until the transaction holding the row lock commits or rolls back. Thesis validation keeps `FOR SHARE` reads and writes the linked position and user guard rows, so a REPEATABLE READ writer with an older snapshot conflicts with the write even if it cannot see the published thesis. Deferred position and wallet events validate current rows, allowing intermediate invalid states restored before validation.
+
+Deployments must set server-side `lock_timeout` and `statement_timeout`; both values are `TODO-OWNER`. The client in `src/index.ts` supplies neither timeout. A timeout or serialization error aborts the whole transaction; the application must roll it back and retry the entire transaction from the beginning, not just COMMIT or the failing statement. The concurrency tests' timeouts bound test execution and are not deployment policy.
 
 ## AI teammate handoff
 
-`src/ai-context.ts` exports the exact PRD §10.2 `ThesisAiContext`, `ThesisDirection`, and `ThesisStatus` types, the `thesisAiContextSchema` validator, and the pure `buildThesisAiContext` row mapper. It performs representation conversion only and never calls the SDK or calculates financial values.
+`src/ai-context.ts` exports the exact PRD v2.0 §10.3 `ThesisAiContext`, `ThesisDirection`, and `ThesisStatus` types, the `thesisAiContextSchema` validator, and the pure `buildThesisAiContext` row mapper. It performs representation conversion only and never calls the SDK or calculates financial values.
 
 Four offline examples—open, expired, settled, and partially missing—are exported from `src/fixtures/thesis-ai-context.example.ts`. The exact PRD contract requires a non-null `structure.contracts`, so `buildThesisAiContext` rejects a missing position while `buildThesisAiContextOrUnavailable` returns an explicit unavailable result. `TODO-OWNER`: the owner and AI teammate must coordinate the draft/pending product behavior under PRD §15 without changing the shared context object.

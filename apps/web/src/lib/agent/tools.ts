@@ -2,6 +2,7 @@ import "server-only";
 
 import { tool } from "ai";
 import { z } from "zod";
+import { getThesisContext as loadThesisContext } from "@/lib/thesis-context";
 
 import { instrumentKey, findByInstrumentKey } from "@/lib/thetanuts/instrument";
 import {
@@ -187,14 +188,12 @@ export const getThesisContext = tool({
 	description:
 		"Look up a thesis posted on Thesis.fun by id, including its option structure and economics.",
 	inputSchema: z.object({ thesisId: z.string() }),
-	execute: async ({ thesisId }) => ({
-		found: false as const,
-		reason:
-			"Thesis data is not available yet: the social product's tables are still being built. " +
-			"Tell the user theses cannot be looked up right now, and offer to search live market liquidity instead. " +
-			"Do not invent a thesis.",
-		thesisId,
-	}),
+	execute: async ({ thesisId }) => {
+		const result = await loadThesisContext(thesisId);
+		return result.available
+			? { found: true as const, context: result.context }
+			: { found: false as const, reason: result.reason, thesisId };
+	},
 });
 
 /** Every read tool. Safe to run without user approval. */

@@ -1,0 +1,21 @@
+{
+  // `bun run check-types` used to run five turbo tasks, none of which covered
+  // this directory — so `verify.ts`, the harness every other check runs
+  // through, had zero type coverage and three real diagnostics. The root
+  // `check-types` script now runs this project before turbo.
+  //
+  // typeRoots: these scripts use Bun globals (`Bun.spawn`, `Bun.Glob`), so they
+  // need `@types/bun`. The repository root installs only `@types/node`; the
+  // package that already depends on `@types/bun` is `@nuts/env`, and bun's
+  // isolated store links both type packages into its `node_modules/@types`.
+  // Pointing at both directories keeps this working with no new dependency, and
+  // fails LOUDLY ("cannot find type definition file for 'bun'") rather than
+  // silently if that link ever goes away.
+  "extends": "@nuts/config/tsconfig.base.json",
+  "include": ["**/*.ts"],
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["bun", "node"],
+    "typeRoots": ["../node_modules/@types", "../packages/env/node_modules/@types"]
+  }
+}

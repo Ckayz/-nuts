@@ -1,23 +1,8 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import ts from "typescript";
+import { schemaKeys } from "../src/schema-keys";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
-function schemaKeys(source: string): string[] {
-  const file = ts.createSourceFile("env.ts", source, ts.ScriptTarget.Latest, true);
-  const keys: string[] = [];
-  function visit(node: ts.Node): void {
-    if (ts.isPropertyAssignment(node) && ["server", "client", "shared"].includes(node.name.getText(file)) && ts.isObjectLiteralExpression(node.initializer)) {
-      for (const property of node.initializer.properties) {
-        if (!ts.isPropertyAssignment(property)) throw new Error("Unsupported env schema property");
-        keys.push(property.name.getText(file).replace(/["']/g, ""));
-      }
-    }
-    ts.forEachChild(node, visit);
-  }
-  visit(file);
-  return keys;
-}
 function entries(source: string): [string, string][] {
   return source.split(/\r?\n/).flatMap((line) => {
     if (!line.trim() || line.trimStart().startsWith("#")) return [];

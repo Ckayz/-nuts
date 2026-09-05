@@ -154,11 +154,12 @@ bun run deploy:setup
 openssl rand -base64 48
 ```
 
-Store the generated secret privately as `SESSION_SECRET` (random, at least 32 characters). Configure `apps/web/.env` for the deployment: `DATABASE_URL` is the transaction pooler; `DIRECT_DATABASE_URL` is unset or the session pooler; `DATA_SOURCE=db`; provide `OPENROUTER_API_KEY`, the owner-approved `THESIS_REFERRER`, and `BASE_RPC_URL`. Do not commit that file. The sync script reads `.env`, **not `.env.local`**, by default. Remove unused blank assignments before syncing; the script sends every parsed key except its explicit skip list and does not delete stale remote keys.
+Store the generated secret privately as `SESSION_SECRET` (random, at least 32 characters). Configure `apps/web/.env` for the deployment: `DATABASE_URL` is the transaction pooler; `DIRECT_DATABASE_URL` is unset or the session pooler; `DATA_SOURCE=db`; provide `OPENROUTER_API_KEY`, the owner-approved `THESIS_REFERRER`, and `BASE_RPC_URL`. Do not commit that file. The sync script reads `.env`, **not `.env.local`**, by default, and it is fail-closed: it sends ONLY keys that appear in the validated schemas (`packages/env/src/server.ts` + `web.ts`, minus `NODE_ENV`, which Vercel sets itself) and prints the name of every other key it skips, so `PROD_*`/`SUPABASE_*` values are never uploaded; it REFUSES the whole run (exit 1, before any `vercel` call) when a value it would push is local (`localhost`, `127.0.0.1`, `0.0.0.0`, `file:`) or, for `production`, empty; and because `vercel env add --force` overwrites, it refuses without an explicit `--yes`, printing the key names it would change. It never prints a value, and it does not delete stale remote keys. `--dry-run` prints the plan (key names and value lengths) and calls nothing, but the refusals run first, so a local or empty value refuses even a dry run.
 
 ```sh
-bun run env:preview
-bun run env:production
+bun run env:preview -- --dry-run     # key names and value LENGTHS only; runs no vercel command
+bun run env:preview -- --yes
+bun run env:production -- --yes
 bun run deploy
 ```
 

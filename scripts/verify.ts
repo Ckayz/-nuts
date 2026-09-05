@@ -192,7 +192,7 @@ for (const step of steps) {
     });
     let captured = "";
     if (watchForSkips) {
-      const tee = async (stream: ReadableStream<Uint8Array>, sink: typeof process.stdout) => {
+      const tee = async (stream: ReadableStream<Uint8Array>, sink: { write(text: string): unknown }) => {
         const decoder = new TextDecoder();
         for await (const chunk of stream) {
           const text = decoder.decode(chunk, { stream: true });
@@ -200,7 +200,14 @@ for (const step of steps) {
           sink.write(text);
         }
       };
-      await Promise.all([tee(child.stdout, process.stdout), tee(child.stderr, process.stderr)]);
+      // `stdout`/`stderr` are typed optional because they are only streams when
+      // the spawn asked for "pipe" — which is exactly what `watchForSkips` set
+      // three lines above. The guard can therefore never fire; it exists so the
+      // step fails loudly instead of silently losing the skip-sentinel check if
+      // that pairing is ever broken.
+      const { stdout, stderr } = child;
+      if (!stdout || !stderr) throw new Error("Expected piped stdout and stderr for a live step");
+      await Promise.all([tee(stdout, process.stdout), tee(stderr, process.stderr)]);
     }
     const code = await child.exited;
     if (code === 0 && watchForSkips && captured.includes(SKIP_SENTINEL)) {

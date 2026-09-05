@@ -67,6 +67,8 @@ const thesisStatusSchema = z.enum(["draft", "pending", "open", "expired", "settl
 export const thesisAiContextSchema: z.ZodType<ThesisAiContext> = z.object({
   thesis: z.object({
     id: z.string(),
+    // ECMA-262 TrimString: WhiteSpace + LineTerminator (https://tc39.es/ecma262/#sec-trimstring).
+    // SQL uses the explicit equivalent set in schema/theses.ts; keep trim().
     headline: z.string().trim().min(1),
     rationale: z.string().nullable(),
     direction: thesisDirectionSchema,

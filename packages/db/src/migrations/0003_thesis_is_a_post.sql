@@ -32,7 +32,8 @@ WHERE "underlying_asset" IS NOT NULL AND "tagged_asset" IS NULL;
 --> statement-breakpoint
 ALTER TABLE "theses" ENABLE TRIGGER "theses_creator_position_invariant";
 --> statement-breakpoint
-ALTER TABLE "theses" ADD CONSTRAINT "theses_headline_nonblank" CHECK ("theses"."headline" ~ '[^[:space:]]');
+-- ECMAScript trim set; source: src/schema/theses.ts, JS contract: src/ai-context.ts.
+ALTER TABLE "theses" ADD CONSTRAINT "theses_headline_nonblank" CHECK (btrim("theses"."headline", E'\u0009\u000A\u000B\u000C\u000D\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF') <> '');
 --> statement-breakpoint
 ALTER TABLE "theses" ADD CONSTRAINT "theses_structure_all_or_nothing" CHECK (("theses"."direction" is null and "theses"."underlying_asset" is null and "theses"."expiry_at" is null and "theses"."product_type" is null and "theses"."is_call" is null and "theses"."is_long" is null and "theses"."strikes" is null and "theses"."strike_decimals" is null and "theses"."collateral_address" is null and "theses"."collateral_symbol" is null and "theses"."collateral_decimals" is null and "theses"."creator_order_snapshot" is null) or ("theses"."direction" is not null and "theses"."underlying_asset" is not null and "theses"."expiry_at" is not null and "theses"."product_type" is not null and "theses"."is_call" is not null and "theses"."is_long" is not null and "theses"."strikes" is not null and "theses"."strike_decimals" is not null and "theses"."collateral_address" is not null and "theses"."collateral_symbol" is not null and "theses"."collateral_decimals" is not null and "theses"."creator_order_snapshot" is not null));--> statement-breakpoint
 ALTER TABLE "theses" ADD CONSTRAINT "theses_tagged_asset_uppercase" CHECK ("theses"."tagged_asset" = upper("theses"."tagged_asset"));--> statement-breakpoint

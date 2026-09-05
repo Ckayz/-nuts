@@ -44,16 +44,19 @@ if (!databaseUrl) {
   console.log("schema integration skipped: DATABASE_URL is not set");
   test.skip("migrated schema constraints require DATABASE_URL", () => {});
 } else describe("migrated schema constraints", () => {
-  for (const headline of ["", "   ", "\n\t"]) {
+  for (const headline of ["", "   ", "\n\t", "\u00a0", "\u2007", "\ufeff", "\u202f"]) {
     probe(`headline rejects ${JSON.stringify(headline)} on insert and update`, async (client) => {
       await rejects(client, "INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,$2,'open')", [u1, headline], check("theses_headline_nonblank"));
       await rejects(client, "UPDATE public.theses SET headline=$1 WHERE id=$2", [headline, t1], check("theses_headline_nonblank"));
     });
   }
-  probe("normal headline accepted", async (client) => {
-    const result = await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,'A normal headline','open') RETURNING headline", [u1]);
-    expect(result.rows).toEqual([{ headline: "A normal headline" }]);
-  });
+  for (const headline of ["A normal headline", "Words\u00a0between"]) {
+    probe(`headline accepts ${JSON.stringify(headline)}`, async (client) => {
+      const result = await client.query("INSERT INTO public.theses(creator_user_id,headline,status) VALUES ($1,$2,'open') RETURNING headline", [u1, headline]);
+      expect(result.rows).toEqual([{ headline }]);
+      await client.query("UPDATE public.theses SET headline=$1 WHERE id=$2", [headline, t1]);
+    });
+  }
 
   async function backfillLinkedDraft(client: Client) {
     // Recreate the pre-0003 tag state within the rolled-back test transaction.

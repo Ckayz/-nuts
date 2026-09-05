@@ -230,7 +230,7 @@ describe("ThesisAiContext", () => {
   });
 });
 
-for (const headline of ["", "   ", "\n\t"]) {
+for (const headline of ["", "   ", "\n\t", "\u00a0", "\u2007", "\ufeff", "\u202f"]) {
   test(`context rejects blank headline ${JSON.stringify(headline)}`, () => {
     const example = thesisAiContextExamples[0];
     expect(thesisAiContextSchema.safeParse({ ...example, thesis: { ...example.thesis, headline } }).success).toBe(false);
@@ -246,4 +246,9 @@ for (const headline of ["", "   ", "\n\t"]) {
 test("context accepts and trims a normal headline", () => {
   const example = thesisAiContextExamples[0];
   expect(thesisAiContextSchema.parse({ ...example, thesis: { ...example.thesis, headline: "  A normal headline  " } }).thesis.headline).toBe("A normal headline");
+});
+
+test("context preserves an NBSP between words", () => {
+  const example = thesisAiContextExamples[0]!;
+  expect(thesisAiContextSchema.parse({ ...example, thesis: { ...example.thesis, headline: "Words\u00a0between" } }).thesis.headline).toBe("Words\u00a0between");
 });

@@ -6,13 +6,15 @@ const databaseUrl = process.env.DATABASE_URL;
 type Phase = "mutation" | "validation" | "commit";
 type Outcome = { committed: true } | { committed: false; code?: string; phase: Phase };
 
-async function finish(client: Client, sql: string, params: string[]): Promise<Outcome> {
+async function finish(client: Client, sql: string, params: string[], deferred = false): Promise<Outcome> {
   let phase: Phase = "mutation";
   try {
     phase = "mutation";
     await client.query(sql, params);
-    phase = "validation";
-    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    if (!deferred) {
+      phase = "validation";
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    }
     phase = "commit";
     await client.query("COMMIT");
     return { committed: true };
@@ -39,10 +41,11 @@ if (!databaseUrl) {
   console.log("schema concurrency skipped: DATABASE_URL is not set");
   test.skip("creator invariant concurrency requires DATABASE_URL", () => {});
 } else describe("creator invariant concurrency", () => {
+  for (const publisherIsolation of ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] as const) {
   for (const isolation of ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] as const) {
     for (const variant of ["position", "wallet"] as const) {
-      for (const first of ["publication", "mutation", ...(isolation !== "READ COMMITTED" ? ["publication-committed" as const] : [])] as const) {
-        test(`${isolation} ${variant}: ${first} validates first`, async () => {
+      for (const first of ["publication", "mutation", "mutation-commit", "publication-commit", ...(isolation !== "READ COMMITTED" ? ["publication-committed" as const] : [])] as const) {
+        test(`${publisherIsolation} publisher / ${isolation} mutator ${variant}: ${first} validates first`, async () => {
           const a = new Client({ connectionString: databaseUrl });
           const b = new Client({ connectionString: databaseUrl });
           const ids = { u1: crypto.randomUUID(), u2: crypto.randomUUID(), t1: crypto.randomUUID(), t2: crypto.randomUUID(), p1: crypto.randomUUID() };
@@ -60,7 +63,9 @@ if (!databaseUrl) {
             await a.query("COMMIT");
             const aPid = (await a.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
             const bPid = (await b.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
-            await a.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+            await a.query(`BEGIN ISOLATION LEVEL ${publisherIsolation}`);
+            const publisherSnapshot = await a.query("SELECT status FROM public.theses WHERE id=$1", [ids.t1]);
+            expect(publisherSnapshot.rows).toEqual([{ status: "draft" }]);
             await b.query(`BEGIN ISOLATION LEVEL ${isolation}`);
             // BEGIN alone does not open a REPEATABLE READ/SERIALIZABLE snapshot. Pin it before
             // A publishes, including the schedule where B mutates after A commits.
@@ -74,10 +79,10 @@ if (!databaseUrl) {
             const mutateParams = [variant === "position" ? ids.p1 : ids.u1];
             let settled = false;
             let results: Outcome[];
-            if (first === "publication-committed") {
+            if (first === "publication-committed" || first === "publication-commit") {
               // No overlap in row locks: without touch writes B can update P/U
               // and miss the published link entirely in its pre-publication snapshot.
-              const publication = await finish(a, publish, publishParams);
+              const publication = await finish(a, publish, publishParams, first === "publication-commit");
               expect(publication).toEqual({ committed: true });
               results = [publication, await finish(b, mutate, mutateParams)];
             } else if (first === "publication") {
@@ -98,13 +103,22 @@ if (!databaseUrl) {
               // would not revalidate the values read before B committed).
               await b.query(mutate, mutateParams);
               await b.query("SET CONSTRAINTS ALL IMMEDIATE");
-              pending = finish(a, publish, publishParams).then((result) => { settled = true; return result; });
+              pending = finish(a, publish, publishParams, first === "mutation-commit").then((result) => { settled = true; return result; });
               await waitForBlock(b, aPid, bPid, () => settled);
               await b.query("COMMIT");
               results = [await pending, { committed: true }];
             }
             expect(results.filter((result) => result.committed)).toHaveLength(1);
-            expect(results.filter((result) => !result.committed)).toEqual([{ committed: false, code: isolation !== "READ COMMITTED" && first !== "mutation" ? "40001" : "23514", phase: isolation !== "READ COMMITTED" && first !== "mutation" ? "mutation" : "validation" }]);
+            const mutationFirst = first === "mutation" || first === "mutation-commit";
+            const serialization = mutationFirst
+              ? publisherIsolation !== "READ COMMITTED"
+              : isolation !== "READ COMMITTED";
+            const rejectionPhase: Phase = mutationFirst
+              ? first === "mutation-commit" ? "commit" : "validation"
+              : serialization ? "mutation" : "validation";
+            expect(results.filter((result) => !result.committed)).toEqual([
+              { committed: false, code: serialization ? "40001" : "23514", phase: rejectionPhase },
+            ]);
             const invalid = await a.query(`SELECT t.id FROM public.theses t
               LEFT JOIN public.positions p ON p.id=t.creator_position_id
               JOIN public.users u ON u.id=t.creator_user_id
@@ -147,5 +161,6 @@ if (!databaseUrl) {
         }, 30_000);
       }
     }
+  }
   }
 });

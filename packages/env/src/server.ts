@@ -80,9 +80,23 @@ export const env = createEnv({
 		 * unavailable right now. Please try again." The scope gate's failure path
 		 * covers `AGENT_GATE_MODEL` the same way.
 		 *
+		 * MEASURED 2026-09-06: the previous default `minimax/minimax-m3:free` is an
+		 * OPENROUTER id, and this app routes through Vercel AI Gateway whenever
+		 * `AI_GATEWAY_API_KEY` is set (`lib/agent/model.ts`). The gateway lists 373
+		 * models and NONE carries a `:free` suffix, so every agent turn failed with
+		 * `GatewayModelNotFoundError: Model 'minimax/minimax-m3:free' not found`
+		 * and the browser showed only "Something went wrong." That was true in
+		 * production too, wherever the gateway key is set.
+		 *
+		 * The default below is a model the gateway actually serves, verified by a
+		 * live turn on the same date: HTTP 200 with real book data across all six
+		 * live assets. A free-tier model can come back the moment one exists on
+		 * whichever provider this deployment routes through — the id and the
+		 * provider have to agree, which is the trap this comment exists to record.
+		 *
 		 * TODO-OWNER: the model id.
 		 */
-		AGENT_MODEL: z.string().min(1).default("minimax/minimax-m3:free"),
+		AGENT_MODEL: z.string().min(1).default("anthropic/claude-haiku-4.5"),
 		/**
 		 * Small, fast model for the pre-model scope gate (PRD 10.8 layer 1).
 		 * Runs on every inbound message, so it must stay cheap.

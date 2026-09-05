@@ -7,7 +7,7 @@ import {
 } from "ai";
 
 import { getSession } from "@/lib/auth/session";
-import { readTools } from "@/lib/agent/tools";
+import { createReadTools } from "@/lib/agent/tools";
 import { createExecutionTools } from "@/lib/agent/execute";
 import { agentModel } from "@/lib/agent/model";
 import { SYSTEM_PROMPT } from "@/lib/agent/prompt";
@@ -54,6 +54,10 @@ export async function POST(request: Request) {
 	// record the fill.
 	const session = await getSession();
 	const thesisId = body.data.thesisId?.toLowerCase() ?? null;
+	// Uppercased to match the tickers the order feed publishes. Only defaults the
+	// agent's search; it is bound into the tool by closure, never offered to the
+	// model as an argument.
+	const asset = body.data.asset?.toUpperCase() ?? null;
 
 	/**
 	 * C6-r2. PRD 10.2's daily model limits, charged BEFORE any model is called —
@@ -100,7 +104,7 @@ export async function POST(request: Request) {
 		model: agentModel,
 		system: SYSTEM_PROMPT,
 		messages: await convertToModelMessages(messages),
-		tools: { ...readTools, ...createExecutionTools({ account, session, thesisId }) },
+		tools: { ...createReadTools({ asset }), ...createExecutionTools({ account, session, thesisId }) },
 		/**
 		 * PRD 10.1 and 14: no transaction is prepared without an explicit answer from
 		 * the user. The runtime suspends the tool call and emits an approval request,

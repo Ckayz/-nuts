@@ -3,6 +3,7 @@ import { Manrope } from "next/font/google";
 import "../index.css";
 import { marketSummariesData } from "@/lib/market/summaries";
 import { Nav } from "@/components/shell/nav";
+import { AgentLauncher } from "@/components/agent/agent-launcher";
 import { TopBar } from "@/components/shell/top-bar";
 import Providers from "@/components/providers";
 import { usingDatabase } from "@/lib/data/source";
@@ -38,6 +39,7 @@ export default async function RootLayout({
 					<TopBar />
 					<Nav firstMarketSlug={markets.markets[0]?.slug} unavailable={markets.unavailable} />
 					<main className="wrap">{children}</main>
+					<AgentLauncher />
 					{/* The mockup's footer line, minus its "mockup only". The
 					    provenance string is the fixtures' own and is true of them
 					    alone, so database mode states only the venue. */}

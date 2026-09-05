@@ -42,6 +42,9 @@ export function Nav({ firstMarketSlug, unavailable = false }: { firstMarketSlug?
 			<Link href="/portfolio" aria-current={pathname === "/portfolio" ? "page" : undefined}>
 				Portfolio
 			</Link>
+			<Link href="/agent" aria-current={pathname.startsWith("/agent") ? "page" : undefined}>
+				Agent
+			</Link>
 			<span className="spacer" />
 			<Link href="/new" className="btn acc">
 				Create

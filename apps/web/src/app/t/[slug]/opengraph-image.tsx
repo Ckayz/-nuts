@@ -13,24 +13,24 @@ export default async function Image({ params }: { params: Promise<{ slug: string
   if (!detail) notFound();
   const { thesis, verified, pnl } = detail;
   return new ImageResponse(
-    <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", fontFamily: "Manrope", background: "#0b0b10", color: "#f2f2f5", padding: 48, gap: 28 }}>
+    <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", fontFamily: "Manrope", background: "#070511", color: "#f7f7f7", padding: 48, gap: 28 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 32 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 52, height: 52, borderRadius: 15, background: "#f2f2f5" }}>
-          <div style={{ display: "flex", width: 21, height: 21, borderRadius: 5, fontFamily: "Manrope", background: "#0b0b10", transform: "rotate(45deg)" }} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 52, height: 52, borderRadius: 15, background: "#f7f7f7" }}>
+          <div style={{ display: "flex", width: 21, height: 21, borderRadius: 5, fontFamily: "Manrope", background: "#070511", transform: "rotate(45deg)" }} />
         </div>
         <span>Thesis.fun</span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#14141b", border: "1px solid #25252f", borderRadius: 20, padding: 32, gap: 22 }}>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#181623", border: "1px solid #282438", borderRadius: 20, padding: 32, gap: 22 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 24 }}>
           <span>{ogTextOrNull(thesis.creator.handle ? `@${thesis.creator.handle}` : thesis.creator.walletAddress)}</span>
-          {verified ? <span style={{ color: "#f2f2f5" }}>Verified</span> : null}
-          {thesis.tag ? <span style={{ border: "1px solid #25252f", borderRadius: 10, padding: "6px 12px" }}>{ogText(thesis.tag.asset)}</span> : null}
+          {verified ? <span style={{ color: "#f7f7f7" }}>Verified</span> : null}
+          {thesis.tag ? <span style={{ border: "1px solid #282438", borderRadius: 10, padding: "6px 12px" }}>{ogText(thesis.tag.asset)}</span> : null}
         </div>
         <div style={{ display: "flex", fontSize: 42, lineHeight: 1.15, flex: 1, overflow: "hidden" }}>{ogText(thesis.headline)}</div>
         {thesis.structure ? <div style={{ display: "flex", fontSize: 24 }}>{ogText(`${thesis.structure.productType} · ${thesis.structure.strikesLabel} · ${thesis.structure.expiryLabel}`)}</div> : null}
         {pnl && pnl.raw !== "—" ? <div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 28 }}>
           <span>{ogTextOrNull(thesis.backing?.creatorPnlLabel)}</span>
-          <span style={{ color: pnl.pnlClass === "bull" ? "#22c55e" : pnl.pnlClass === "bear" ? "#f4634f" : "#f2f2f5" }}>{ogText(pnl.signed)}</span>
+          <span style={{ color: pnl.pnlClass === "bull" ? "#1cce59" : pnl.pnlClass === "bear" ? "#fd6536" : "#f7f7f7" }}>{ogText(pnl.signed)}</span>
         </div> : null}
       </div>
     </div>, { ...size, fonts: await ogFonts() },

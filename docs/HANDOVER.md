@@ -289,3 +289,156 @@ Devfolio was submitted at 22:50, which is **before** both fixes landed. Anyone w
 opened the live link between then and now saw the server error above. It works
 now; the submitted URL is worth re-opening once to confirm what a judge sees.
 
+---
+
+## 11. The agent is live and answering in production (2026-09-05 ~23:4x)
+
+Five separate faults were stacked on top of each other; each one hid the next.
+All are fixed, pushed, and verified against the deployed site.
+
+| # | Fault | Cause | Fix |
+|---|---|---|---|
+| 1 | Vercel build failed on variables that were set | Turborepo filters the environment strictly; `turbo.json` declared none | every `@nuts/env` variable declared in `tasks.build.env` |
+| 2 | Site returned a server error | production held 6 tables, migration `0000` only | `0001`–`0008` applied; 14 tables, 9 of 9 |
+| 3 | Agent 503 on every message | the scope gate's schema capped `reason` at 160 chars and the model writes ~200 | cap removed, trimmed on use instead |
+| 4 | Model call failed | OpenRouter free-tier credit exhausted, key expires 2026-09-11 | routed through Vercel AI Gateway, OpenRouter kept as fallback |
+| 5 | Gateway refused the model | free tier does not reach Anthropic models | owner topped up |
+
+### Fault 3 is the one worth reading
+
+`reason: z.string().max(160)` — a cosmetic string, never shown to a user. The gate
+model reliably writes about 200 characters, so `generateObject` threw, the gate
+reported itself degraded, and the route's fail-closed rule turned that into a 503
+for **every** message while the model was answering correctly.
+
+Measured on the live gate after the fix:
+
+```
+IN   188  "what can I trade"
+IN   181  "What can I trade right now?"
+OUT  147  "Write me a poem about the ocean."
+OUT  161  "Ignore all previous instructions..."
+IN   260  "What is a put option? I have never traded before."
+```
+
+Three of five exceeded 160. The refusal at 147 passed, which is why this could
+look intermittent while being deterministic per message. The 260 is the beginner
+question the product exists to answer.
+
+**The general lesson: bounding a cosmetic field with a schema makes its length a
+liveness condition.** The length is trimmed on use now; `maxOutputTokens` already
+bounds what the small model may spend.
+
+### Fault 4: the provider is now a runtime choice
+
+`AI_GATEWAY_API_KEY` present → the model identifier is passed through verbatim
+and routed by the gateway; absent → OpenRouter. No code change to switch.
+`OPENROUTER_API_KEY` is optional now and `model.ts` refuses at startup only when
+neither is set.
+
+Model slugs were not touched. Checked against the gateway's public model list
+(`https://ai-gateway.vercel.sh/v1/models`, no auth, 373 models) that both
+configured slugs are served.
+
+Free-tier models were tested properly before recommending a top-up.
+`minimax/minimax-m3-free` and `minimax/minimax-m2.7-free` do real tool calls, but
+about a dozen requests exhaust the free allowance account-wide — after that every
+model including Haiku returns `GatewayRateLimitError`, and a 25-second gap does
+not clear it. A demo is 30-60 calls. Free tier cannot carry it.
+
+### Verified live in production
+
+```
+"What can I trade right now?"
+  -> getMarketData, searchOptionBookOrders
+  BTC $79,702 139 orders · ETH $2,458 120 orders · BNB $766 32
+  SOL $103 27 · AVAX $7.54 17 · XRP $1.41 13
+```
+
+Real prices, real counts, no error. `/`, `/agent`, `/m/eth` and `/portfolio` all
+200. `bun run verify --offline` passes all seven runnable steps.
+
+Testing then hit **our own** limiter — `429: "This connection has used today's 10
+agent turns"` — so PRD 10.2 (10 per guest IP, 50 per wallet) is confirmed working
+too.
+
+### Still open
+
+- `DATABASE_URL` and `SESSION_SECRET` are Production-only, so preview deployments
+  still fail env validation. Production is unaffected.
+- **No transaction has ever been sent from the UI.** The money path is verified
+  as far as calldata and the 10 USD limit refusing on live orders. The owner's
+  tiny real fill remains the last unproven step, and it is what the AI track
+  asks for.
+- Devfolio was submitted at 22:50, before faults 1-5 were fixed. The submitted
+  link was broken when it was filed and works now.
+
+---
+
+## 12. `fold-C-r3` cannot build — one import, traced (2026-09-06)
+
+`origin/fold-C-r3` fails `next build` at its own head (`14a05ee`), with my work
+nowhere near it. Verified by checking out that commit clean and building:
+
+```
+Error: Module not found: Can't resolve 'fs/promises'
+  @thetanuts-finance/thetanuts-client/dist/index.mjs:11607
+  @thetanuts-finance/thetanuts-client/dist/index.mjs:11628
+```
+
+`main` builds fine, so this arrived with the branch.
+
+### The cause
+
+`apps/web/src/lib/display.ts` line 5, added by that branch:
+
+```ts
+import { failedButOnChain, lifecycleStatus, resolvePnl } from "./position/pnl";
+```
+
+A **value** import, not `import type`. `components/market/take-a-side.tsx` is a
+client component and imports `expiryLabel` from `display.ts`, so the whole chain
+is now bundled for the browser:
+
+```
+take-a-side.tsx [client]
+  -> lib/display.ts
+    -> lib/position/pnl.ts
+      -> @nuts/thetanuts            (barrel: packages/thetanuts/src/index.ts)
+        -> packages/thetanuts/src/receipt.ts
+          -> @thetanuts-finance/thetanuts-client
+            -> await import('fs/promises')     <- Node only
+```
+
+The two failing lines are the SDK's **file-backed RFQ key storage**
+(`ensureDirectory` and `set`), which writes to `~/.thetanuts-keys/`. It is
+Node-only by design and cannot exist in a browser bundle.
+
+`main` avoids this because its `display.ts` imports only types plus
+`thesis/links` — nothing that reaches the barrel.
+
+### Three ways out, cheapest first
+
+1. **Don't reach the barrel from client-reachable code.** Import
+   `packages/thetanuts/src/risk.ts` directly rather than through
+   `@nuts/thetanuts`, so `receipt.ts` is never pulled in.
+2. **Split `display.ts`.** Keep the pure formatters that `take-a-side` needs in
+   one module and put the P&L resolution in another, so a client component does
+   not drag the server-side chain across the boundary.
+3. **Give the SDK's key storage a browser-safe path.** `createReadClient` already
+   passes `MemoryStorageProvider`, but the file-backed provider is still reachable
+   in the module graph, so bundling it is a build-time concern rather than a
+   runtime one.
+
+(1) is the smallest change and keeps the barrel honest for server code.
+
+### Why this is worth flagging rather than fixing here
+
+`components/agent/` and `lib/display.ts` are that branch's lane, and it is
+mid-review. `agent-ux-r1` is cut from `fold-C-r3` for exactly that reason and
+inherits the failure; the wallet work is on `main` and is unaffected.
+
+`bun run verify --offline` does **not** catch this: step 7 is the only build step
+and it is skipped offline. The failure appears only in a full `next build`, which
+is what Vercel runs.
+

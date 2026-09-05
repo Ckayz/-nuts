@@ -5,6 +5,7 @@ import { useConfig, useConnection, useSendTransaction, useSwitchChain } from "wa
 import { waitForTransactionReceipt } from "wagmi/actions";
 
 import { Button } from "@nuts/ui/components/button";
+import { TodoOwner } from "@/components/primitives";
 // C3-r2: the AGENT's preparation action, which re-applies the PRD 10.2
 // ceiling to what the second leg actually prepares. `prepareTrade` (the market
 // ticket's) does not, and this leg is the one that produces the fill calldata.
@@ -132,6 +133,89 @@ export function displayFrom(
 /** Base mainnet. The app is Base-only (`lib/wagmi.ts`), so this is a constant, not a choice. */
 const BASE_CHAIN_ID = 8453 as const;
 
+/**
+ * D-C2 (lane D confirming pass). EVERY user-facing sentence this card can show,
+ * in one place.
+ *
+ * The mockup draws no agent view and the PRD sets no wording for one, so every
+ * string below is this file's own. Owner rule (CLAUDE.md, "Product numbers and
+ * copy are the owner's"): they are all `TODO-OWNER`. Collecting them here is
+ * what makes that auditable — a reviewer greps one block instead of twenty
+ * `setMessage` calls, and `trade-execution.copy.test.ts` fails if a new literal
+ * is introduced anywhere else in the file.
+ *
+ * Each sentence states something the code actually does. When one is reworded,
+ * check the claim as well as the tone.
+ */
+const COPY = {
+	/** TODO-OWNER: recovery line shown when a sent fill is restored on mount. */
+	heldFillRestored:
+		"A fill you sent earlier is not recorded yet. Press the button to record it; it will not send a second trade.",
+	/** TODO-OWNER: the fill is on chain and unrecorded; the button records, never re-sends. */
+	recordAgain: "The fill is on chain; press again to record it.",
+	/** TODO-OWNER: a durable row says the transaction reverted. */
+	reverted: "The fill reverted on Base. Nothing was bought and nothing was counted.",
+	/** TODO-OWNER: the maker signature died before the user signed. */
+	quoteExpired: "This quote expired before it was signed. Ask the agent for a fresh one.",
+	/** TODO-OWNER: the connected wallet is not the one the calldata was bound to. */
+	walletChanged: "Your connected wallet changed since this was prepared. Ask for a fresh quote.",
+	/** TODO-OWNER: the allowance is not on chain yet. */
+	approvalNotLanded: "The approval has not landed yet. Try again in a moment.",
+	/** TODO-OWNER: C#5 — the approval carries no decoded allowance. */
+	approvalUnreadable:
+		"This approval does not say what it would allow, so it was not sent. Ask the agent for a fresh quote.",
+	/** TODO-OWNER: the approval transaction did not succeed. */
+	approvalFailed: "The approval did not succeed on Base, so nothing was filled.",
+	/** TODO-OWNER: C#5 — the bytes disagree with the printed allowance. */
+	approvalNotSent: "Nothing was sent.",
+	/** TODO-OWNER: C5 — the fresh quote differs from what the card showed. */
+	priceMoved:
+		"The price moved while this was prepared. The figures above have been replaced with the server's current ones — check them and press again to sign for those.",
+	/** TODO-OWNER: C#8 — PRD 14's 30-second fetch-to-broadcast window, cited in `approval.ts`. */
+	tooOldToSend:
+		"This trade could not be refreshed inside the 30 seconds a fill has to reach Base, so nothing was sent. Ask the agent for a fresh quote.",
+	/** TODO-OWNER: a wallet rejection is a normal outcome, not a failure. */
+	cancelled: "You cancelled the transaction.",
+	/** TODO-OWNER: fallback when the wallet gives no message at all. */
+	transactionFailed: "Transaction failed.",
+	/** TODO-OWNER: card title when the agent named no instrument. */
+	untitled: "Prepared trade",
+	/** TODO-OWNER: label above the amount leaving the wallet. */
+	youPay: "You pay",
+	/** TODO-OWNER: label above the maximum loss. */
+	maxLoss: "Most you can lose",
+	/** TODO-OWNER: label above the contract count. */
+	contracts: "Contracts",
+	/** TODO-OWNER: C#5 — the decoded allowance line. */
+	allowanceLabel: "This approval allows",
+	/** TODO-OWNER: the capped-order sentence, first half. */
+	cappedPrefix: "This order could not absorb the full",
+	/** TODO-OWNER: the capped-order sentence, second half. */
+	cappedSuffix: "you asked for. Only the amount above will be spent.",
+	/** TODO-OWNER: the two-confirmations note. */
+	twoConfirmations: "Two confirmations: first an exact spending approval, then the trade itself.",
+	/** TODO-OWNER: the confirmed state. */
+	confirmed: "Confirmed on Base and recorded.",
+	/** TODO-OWNER: link to this fill's own page. */
+	openPosition: "Open the position",
+	/** TODO-OWNER: link to the confirmed transaction. */
+	viewOnExplorer: "View on BaseScan",
+	/** TODO-OWNER: link to a sent-but-unconfirmed transaction. */
+	viewSent: "View the sent transaction on BaseScan",
+	/** TODO-OWNER: every label the one button can carry, one per phase. */
+	button: {
+		approving: "Confirm approval…",
+		preparing: "Checking the order…",
+		filling: "Confirm trade…",
+		recording: "Waiting for the fill…",
+		record: "Record the fill",
+		expired: "Quote expired",
+		idle: "Sign in wallet",
+	},
+	/** TODO-OWNER: shown when no wallet is connected. */
+	connectFirst: "Connect a wallet first.",
+} as const;
+
 export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 	const { address, isConnected, chainId: walletChainId } = useConnection();
 	const { switchChain } = useSwitchChain();
@@ -181,7 +265,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 		setTxHash(held.txHash as `0x${string}`);
 		setPhase("error");
 		// TODO-OWNER: recovery copy.
-		setMessage("A fill you sent earlier is not recorded yet. Press the button to record it; it will not send a second trade.");
+		setMessage(COPY.heldFillRestored);
 	}, [holdChain, holdWallet]);
 	const [positionPath, setPositionPath] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
@@ -244,7 +328,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				// No durable row: the fill is on chain and still unrecorded, so the
 				// hold STAYS and the button keeps recording.
 				setPhase("error");
-				setMessage(`${recorded.reason} The fill is on chain; press again to record it.`);
+				setMessage(`${recorded.reason} ${COPY.recordAgain}`);
 				return;
 			}
 			// A durable row exists — confirmed, or failed because the fill reverted.
@@ -252,7 +336,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 			holdSent(null);
 			if (recorded.status === "failed") {
 				setPhase("error");
-				setMessage("The fill reverted on Base. Nothing was bought and nothing was counted.");
+				setMessage(COPY.reverted);
 				return;
 			}
 			setPositionPath(`/p/${recorded.positionId}`);
@@ -265,7 +349,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 	const recordingThrew = useCallback((error: unknown) => {
 		setPhase("error");
 		const first = error instanceof Error ? (error.message.split("\n")[0] ?? "") : "";
-		setMessage(`${first} The fill is on chain; press again to record it.`.trim());
+		setMessage(`${first} ${COPY.recordAgain}`.trim());
 	}, []);
 
 	const send = useCallback(async () => {
@@ -289,7 +373,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 
 		if (expiresAt !== null && expiresAt <= Date.now()) {
 			setPhase("expired");
-			setMessage("This quote expired before it was signed. Ask the agent for a fresh one.");
+			setMessage(COPY.quoteExpired);
 			return;
 		}
 		// The prepared calldata is bound to one account: the server read the
@@ -297,7 +381,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 		// wrong balance.
 		if (trade.account && address && trade.account.toLowerCase() !== address.toLowerCase()) {
 			setPhase("error");
-			setMessage("Your connected wallet changed since this was prepared. Ask for a fresh quote.");
+			setMessage(COPY.walletChanged);
 			return;
 		}
 
@@ -357,7 +441,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 					thesisId: trade.thesisId,
 				});
 				if (!fresh.ok) return fresh.reason;
-				if (fresh.stage !== "fill") return "The approval has not landed yet. Try again in a moment.";
+				if (fresh.stage !== "fill") return COPY.approvalNotLanded;
 				ready = {
 					stage: "fill",
 					fill: fresh.fill,
@@ -379,7 +463,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				if (trade.allowance === undefined) {
 					setPhase("error");
 					// TODO-OWNER: wording.
-					setMessage("This approval does not say what it would allow, so it was not sent. Ask the agent for a fresh quote.");
+					setMessage(COPY.approvalUnreadable);
 					return;
 				}
 				const exact = approvalMatches({
@@ -390,7 +474,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				if (!exact.ok) {
 					setPhase("error");
 					// TODO-OWNER: wording.
-					setMessage(`${exact.reason} Nothing was sent.`);
+					setMessage(`${exact.reason} ${COPY.approvalNotSent}`);
 					return;
 				}
 				setPhase("approving");
@@ -409,7 +493,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				});
 				if (approvalReceipt.status !== "success") {
 					setPhase("error");
-					setMessage("The approval did not succeed on Base, so nothing was filled.");
+					setMessage(COPY.approvalFailed);
 					return;
 				}
 				setPhase("preparing");
@@ -426,7 +510,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				}
 				if (second.stage !== "fill") {
 					setPhase("error");
-					setMessage("The approval has not landed yet. Try again in a moment.");
+					setMessage(COPY.approvalNotLanded);
 					return;
 				}
 				ready = {
@@ -459,9 +543,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				// second click cannot authorise something the user never saw.
 				setShownQuote(ready.expected);
 				setPhase("idle");
-				setMessage(
-					"The price moved while this was prepared. The figures above have been replaced with the server's current ones — check them and press again to sign for those.",
-				);
+				setMessage(COPY.priceMoved);
 				return;
 			}
 
@@ -471,7 +553,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 			if (fillIsStale(ready.preparedAt, Date.now())) {
 				setPhase("expired");
 				// TODO-OWNER: wording.
-				setMessage("This trade could not be refreshed inside the 30 seconds a fill has to reach Base, so nothing was sent. Ask the agent for a fresh quote.");
+				setMessage(COPY.tooOldToSend);
 				return;
 			}
 
@@ -499,9 +581,9 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 			}
 		} catch (error) {
 			setPhase("error");
-			const text = error instanceof Error ? error.message : "Transaction failed.";
+			const text = error instanceof Error ? error.message : COPY.transactionFailed;
 			// Wallet rejections are a normal outcome, not a failure to report loudly.
-			setMessage(/rejected|denied|User denied/i.test(text) ? "You cancelled the transaction." : text);
+			setMessage(/rejected|denied|User denied/i.test(text) ? COPY.cancelled : text);
 		}
 	}, [
 		acknowledged,
@@ -523,24 +605,24 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 
 	return (
 		<div className="rounded-lg border p-4">
-			<p className="font-medium text-sm">{trade.label ?? "Prepared trade"}</p>
+			<p className="font-medium text-sm">{trade.label ?? COPY.untitled}</p>
 
 			<dl className="mt-3 space-y-1 text-sm">
 				{displayed.pay && (
 					<div className="flex justify-between gap-4">
-						<dt className="text-muted-foreground">You pay</dt>
+						<dt className="text-muted-foreground">{COPY.youPay}</dt>
 						<dd className="num">{displayed.pay}</dd>
 					</div>
 				)}
 				{displayed.maxLossUsd && (
 					<div className="flex justify-between gap-4">
-						<dt className="text-muted-foreground">Most you can lose</dt>
+						<dt className="text-muted-foreground">{COPY.maxLoss}</dt>
 						<dd className="num">${displayed.maxLossUsd}</dd>
 					</div>
 				)}
 				{displayed.contracts && (
 					<div className="flex justify-between gap-4">
-						<dt className="text-muted-foreground">Contracts</dt>
+						<dt className="text-muted-foreground">{COPY.contracts}</dt>
 						<dd className="num">{displayed.contracts}</dd>
 					</div>
 				)}
@@ -550,32 +632,32 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				// Design rule (CLAUDE.md): one accent, `Manrope` only, colour on
 				// money alone — so no amber and no mono anywhere in here.
 				<p className="mt-3 text-muted-foreground text-xs">
-					This order could not absorb the full {trade.preview.requestedBudget.amount}{" "}
-					{trade.preview.requestedBudget.token} you asked for. Only the amount above will be spent.
+					{COPY.cappedPrefix} {trade.preview.requestedBudget.amount}{" "}
+					{trade.preview.requestedBudget.token} {COPY.cappedSuffix} <TodoOwner />
 				</p>
 			)}
 
 			{allowance !== null && (
 				<div className="mt-3 flex justify-between gap-4 text-sm">
 					{/* C#5: read out of the approval calldata itself. TODO-OWNER: wording. */}
-					<span className="text-muted-foreground">This approval allows</span>
+					<span className="text-muted-foreground">{COPY.allowanceLabel} <TodoOwner /></span>
 					<span className="num">{allowance}</span>
 				</div>
 			)}
 
 			{trade.stage === "approve" && (
 				<p className="mt-3 text-muted-foreground text-xs">
-					Two confirmations: first an exact spending approval, then the trade itself.
+					{COPY.twoConfirmations} <TodoOwner />
 				</p>
 			)}
 
 			{phase === "done" && hash ? (
 				<div className="mt-4">
-					<p className="text-sm">Confirmed on Base and recorded.</p>
+					<p className="text-sm">{COPY.confirmed} <TodoOwner /></p>
 					<div className="flex gap-4">
 						{positionPath && (
 							<a className="text-sm underline underline-offset-4" href={positionPath}>
-								Open the position
+								{COPY.openPosition}
 							</a>
 						)}
 						<a
@@ -584,7 +666,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 							target="_blank"
 							rel="noreferrer"
 						>
-							View on BaseScan
+							{COPY.viewOnExplorer}
 						</a>
 					</div>
 				</div>
@@ -594,20 +676,20 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 					    has already been sent. */}
 					<Button size="sm" onClick={() => void send()} disabled={busy || (expired && sent === null) || !address}>
 						{phase === "approving"
-							? "Confirm approval…"
+							? COPY.button.approving
 							: phase === "preparing"
-								? "Checking the order…"
+								? COPY.button.preparing
 								: phase === "filling"
-									? "Confirm trade…"
+									? COPY.button.filling
 									: phase === "recording"
-										? "Waiting for the fill…"
+										? COPY.button.recording
 										: sent !== null
-											? "Record the fill"
+											? COPY.button.record
 											: expired
-												? "Quote expired"
-												: "Sign in wallet"}
+												? COPY.button.expired
+												: COPY.button.idle}
 					</Button>
-					{!address && <span className="text-muted-foreground text-xs">Connect a wallet first.</span>}
+					{!address && <span className="text-muted-foreground text-xs">{COPY.connectFirst}</span>}
 				</div>
 			)}
 
@@ -618,7 +700,7 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 					target="_blank"
 					rel="noreferrer"
 				>
-					View the sent transaction on BaseScan
+					{COPY.viewSent}
 				</a>
 			)}
 

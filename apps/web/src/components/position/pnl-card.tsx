@@ -1,22 +1,27 @@
-import { CheckIcon } from "@/components/icons";
-import { Avatar, StatusChip } from "@/components/primitives";
+import { Avatar } from "@/components/primitives";
 import type { PnlBasis, PnlCard as PnlCardView } from "@/lib/display-types";
 
 /**
- * The live P&L card a trader copies a link to.
+ * The share card — the signature object of the whole product.
  *
- * Shape from the owner's reference (fomo's post-trade share card, 2026-09-05):
- * owner + status chip + date, the instrument, one big signed figure with the
- * percent in brackets, then three stat tiles. fomo's wiggly price line is
- * deliberately absent — Thetanuts publishes a spot price and no history, and the
- * owner removed the charts rather than draw an example series.
+ * Shape and every pixel from `docs/mockups/thesis-fun-mockup.html`, template
+ * `#tpl-sharecard` (lines 1004-1032): an accent frame around a near-black inner
+ * card, owner + status chip + date across the top, the instrument, one very
+ * large signed figure with the percent beside it, three stat tiles, and the
+ * `thesis.fun` watermark on the frame's own footer. It is the hero of `/p/[id]`,
+ * the body of the post-fill dialog, and the picture the Open Graph image draws.
  *
- * Colours follow the house rule: colour is for numbers only. The figure carries
- * `pnlClass`; the labels, the name and the tiles stay neutral.
+ * No price line. Thetanuts publishes a spot price and no history, and the owner
+ * removed the charts rather than draw an example series.
  *
- * `compact` is a size, not a different card: the same values, tightened for a
- * feed unfurl, with the long basis sentence replaced by the one word that says
- * what kind of number it is. Nothing is hidden that changes its meaning.
+ * Colour rule, from the mockup's header: colour is on money only. The figure
+ * carries the amount's own `.bull` / `.bear` class, which `src/index.css`
+ * paints with the mockup's `--gain` / `--loss`; the name, the labels, the tiles
+ * and the chip stay neutral, and the frame is the one accent surface.
+ *
+ * `compact` is a size, not a different card: same values, tightened for a feed
+ * unfurl, with the long basis sentence replaced by the one word that says what
+ * kind of number it is. Nothing that changes the number's meaning is dropped.
  */
 const BASIS_SHORT: Record<PnlBasis, string> = {
 	settled: "settled result",
@@ -26,101 +31,78 @@ const BASIS_SHORT: Record<PnlBasis, string> = {
 };
 
 export function PnlCard({ card, compact }: { card: PnlCardView; compact?: boolean }) {
-	const figureSize = compact ? "28px" : "44px";
+	const tone = card.pnl.pnlClass;
+	// The mockup's ▲ / ▼ next to the percent. It is drawn only when the sign is
+	// known: an unavailable P&L gets no arrow rather than a flat one that reads
+	// as "no change".
+	const arrow = tone === "bull" ? "▲" : tone === "bear" ? "▼" : null;
 	return (
-		<div
-			className="panel"
-			style={{ gap: compact ? "9px" : "14px", padding: compact ? "12px" : "18px" }}
-		>
-			<div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-				<Avatar initials={card.owner.initials} size={compact ? "s" : undefined} />
-				<span style={{ display: "flex", flexDirection: "column", lineHeight: 1.2, minWidth: 0 }}>
-					<b style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-						{card.owner.displayName}
-					</b>
-					<span className="mono" style={{ fontSize: "12px", color: "var(--tn-m)" }}>
-						@{card.owner.handle}
-					</span>
-				</span>
-				<StatusChip status={card.statusTone} label={card.statusLabel} style={{ marginLeft: "6px" }} />
-				<span
-					className="mono"
-					style={{ marginLeft: "auto", fontSize: "12px", color: "var(--tn-dim)", whiteSpace: "nowrap" }}
-				>
-					{card.dateLabel}
-				</span>
-			</div>
+		<div className={compact ? "frame compact" : "frame"}>
+			<div className="sc">
+				<div className="sc-top">
+					<Avatar initials={card.owner.initials} />
+					<div style={{ minWidth: 0 }}>
+						<div className="sc-name">{card.owner.displayName}</div>
+						<span className={card.statusTone === "settled" ? "chip flat" : "chip"}>
+							{card.statusLabel}
+						</span>
+					</div>
+					<span className="sc-date num">{card.dateLabel}</span>
+				</div>
 
-			<div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-				<span
-					className="mono"
-					style={{ fontSize: compact ? "12px" : "13px", color: "var(--tn-k)" }}
-				>
-					{card.instrumentLabel}
-				</span>
-				<span className={card.side} style={{ fontSize: "12px", fontWeight: 600 }}>
-					{card.sideLabel}
-				</span>
-				{card.verified ? (
-					<span className="verified">
-						<CheckIcon />
-						verified
-					</span>
+				<div className="sc-inst">
+					{card.asset === null ? null : (
+						<span className={compact ? "av av-26 av-asset" : "av av-30 av-asset"} aria-hidden="true">
+								{card.asset}
+							</span>
+					)}
+					<b>{card.instrumentLabel}</b>
+				</div>
+				<div className="sc-strikes">
+					{card.sideLabel} · Base · Thetanuts OptionBook
+				</div>
+
+				<div className="sc-pnl">
+					{/* A figure that does not exist is set at the strikes' size: a 48px
+					    em dash reads as a graphic rule, not as "no number yet". */}
+					<b className={`${tone} num${card.pnl.signed2 === "—" ? " none" : ""}`}>{card.pnl.signed2}</b>
+					{card.pnlPctLabel === null ? null : (
+						<span className="num">
+							({arrow === null ? null : <em className={tone}>{arrow} </em>}
+							{card.pnlPctLabel})
+						</span>
+					)}
+				</div>
+				{/* What kind of number that was. An estimate must never read as a
+				    settled result (PRD 14), so this sentence is part of the card at
+				    both sizes, never a tooltip. */}
+				<p className="sc-basis">
+					{card.pnlLabel} · {compact ? BASIS_SHORT[card.basis] : card.pnlBasisLabel}
+				</p>
+
+				<div className="tiles">
+					{card.stats.map((stat) => (
+						<span className="tile" key={stat.label}>
+							<i>{stat.label}</i>
+							<b className="num">{stat.value}</b>
+						</span>
+					))}
+				</div>
+
+				{card.tx ? (
+					<a className="sc-tx num" href={card.tx.href} rel="noreferrer noopener" target="_blank">
+						{card.tx.label}
+					</a>
 				) : null}
 			</div>
 
-			<div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-				<div style={{ display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap" }}>
-					<span
-						className={`mono ${card.pnl.pnlClass}`}
-						style={{ fontSize: figureSize, fontWeight: 700, letterSpacing: "-.02em", lineHeight: 1 }}
-					>
-						{card.pnl.signed2}
-					</span>
-					{card.pnlPctLabel ? (
-						<span className="mono" style={{ fontSize: compact ? "12px" : "15px", color: "var(--tn-m)" }}>
-							({card.pnlPctLabel})
-						</span>
-					) : null}
-				</div>
-				<span className="lbl">{card.pnlLabel}</span>
-				<span className="note">{compact ? BASIS_SHORT[card.basis] : card.pnlBasisLabel}</span>
+			<div className="frame-f">
+				<span className="wm">thesis.fun</span>
+				{/* The mockup's footer reads "Verified onchain · Base". It says so only
+				    when the receipt says so (PRD 7.3); an unconfirmed fill gets the
+				    honest line instead of the badge. */}
+				<span className="fine">{card.verified ? "Verified onchain · Base" : "Base · not confirmed yet"}</span>
 			</div>
-
-			{/* The mockup's `.board` lays tiles out in one row. Here they wrap instead
-			    of overflowing: a P&L figure that runs past the card edge is the one
-			    thing this card must never do. */}
-			<div
-				className="board"
-				style={{
-					gridAutoFlow: "row",
-					gridTemplateColumns: "repeat(auto-fit, minmax(112px, 1fr))",
-				}}
-			>
-				{card.stats.map((stat) => (
-					<div
-						key={stat.label}
-						style={{ padding: compact ? "8px 12px" : "10px 16px", minWidth: 0 }}
-					>
-						<span className="lbl">{stat.label}</span>
-						<span
-							className="v"
-							style={{
-								fontSize: compact ? "15px" : "19px",
-								overflowWrap: "anywhere",
-							}}
-						>
-							{stat.value}
-						</span>
-					</div>
-				))}
-			</div>
-
-			{card.tx ? (
-				<a className="tx" href={card.tx.href} target="_blank" rel="noreferrer noopener">
-					tx {card.tx.label}
-				</a>
-			) : null}
 		</div>
 	);
 }

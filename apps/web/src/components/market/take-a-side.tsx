@@ -12,11 +12,18 @@ import type { FillCard, TicketQuoteView, TradePanelContext } from "@/lib/trade/t
  * The Bull/Bear ticket. Owner 2026-09-05: trading lives on the market page, so
  * this panel is rendered there and never inside a post.
  *
- * Without `trade` it renders exactly what it always did: the mockup's static
- * panel over fixture data, with an inert button. With `trade` it is wired to the
+ * Look from the mockup's `#market` "Take a side" card (lines 860-899): the
+ * segmented side control filled with the one accent, a 58px amount field with
+ * the preset chips under it, the six-row key/value list, and a big accent
+ * "Trade" button with "Sign with wallet" as its secondary line.
+ *
+ * Behaviour is unchanged by the redesign. Without `trade` it renders the static
+ * panel over fixture data with an inert button. With `trade` it is wired to the
  * live book and the connected wallet — the server quotes, the server builds the
  * calldata, and the wallet signs. The app never holds a key and never sends a
- * transaction itself.
+ * transaction itself. The side control is still a radiogroup with roving focus
+ * and arrow keys (the mockup's `role="group"` + `aria-pressed` would announce
+ * two independent toggles for what is one choice).
  */
 export type TicketPhase =
 	| "idle"
@@ -28,15 +35,18 @@ export type TicketPhase =
 	| "confirmed"
 	| "failed";
 
-const PHASE_LABEL: Record<TicketPhase, string> = {
-	idle: "Sign with wallet",
+/**
+ * What the button says while the ticket is working. `idle` and `failed` are
+ * absent on purpose: at rest the button reads "Trade" and the line under it
+ * reads "Sign with wallet", exactly as the mockup has them.
+ */
+const PHASE_LABEL: Partial<Record<TicketPhase, string>> = {
 	quoting: "Quoting…",
 	preparing: "Checking the order…",
 	approving: "Approving…",
 	filling: "Confirm in your wallet…",
 	recording: "Waiting for the fill…",
 	confirmed: "Filled",
-	failed: "Sign with wallet",
 };
 
 export function TakeASide({
@@ -216,11 +226,12 @@ export function TakeASide({
 	const blocked = trade !== undefined && (view === null || !view.executable);
 
 	return (
-		<div className="panel">
-			<h3>Take a side</h3>
-			<span className="note">
-				{structureLabel} · expires <b className="mono">{expiryLabel}</b>
+		<section className="card pad ticket">
+			<h3 style={{ fontSize: "16px" }}>Take a side</h3>
+			<span className="sub num">
+				{structureLabel} · expires {expiryLabel}
 			</span>
+
 			<div
 				className="seg"
 				role="radiogroup"
@@ -235,7 +246,6 @@ export function TakeASide({
 			>
 				<button
 					type="button"
-					className="bull"
 					role="radio"
 					aria-checked={side === "bull"}
 					ref={bullRef}
@@ -243,11 +253,10 @@ export function TakeASide({
 					disabled={bull !== undefined && !bull.available}
 					onClick={() => chooseSide("bull")}
 				>
-					Bull · buy it
+					Bull · buy
 				</button>
 				<button
 					type="button"
-					className="bear"
 					role="radio"
 					aria-checked={side === "bear"}
 					ref={bearRef}
@@ -255,90 +264,121 @@ export function TakeASide({
 					disabled={bear !== undefined && !bear.available}
 					onClick={() => chooseSide("bear")}
 				>
-					Bear · sell it
+					Bear · sell
 				</button>
 			</div>
-			<span className="note">{sideNote}</span>
+			<p className="fine">{sideNote}</p>
 			{bull !== undefined && !bull.available && bull.reason !== null ? (
-				<span className="note">Bull: {bull.reason}</span>
+				<span className="msg">
+					<b>Bull</b> {bull.reason}
+				</span>
 			) : null}
 			{bear !== undefined && !bear.available && bear.reason !== null ? (
-				<span className="note">Bear: {bear.reason}</span>
-			) : null}
-			<div className="field">
-				<span className="lbl">Your max loss</span>
-				<div className="inp">
-					<span>$</span>
-					{trade === undefined ? (
-						<span>{shown.maxLossUsd.raw}</span>
-					) : (
-						<input
-							value={budgetInput}
-							inputMode="decimal"
-							aria-label={`Amount in ${shown.collateralSymbol}`}
-							onChange={(event) => setBudgetInput(event.target.value)}
-							onBlur={() => requote(side, budgetInput)}
-						/>
-					)}
-					<span className="u">{shown.collateralSymbol}</span>
-				</div>
-				<div className="presets">
-					{shown.presetsUsd.map((v) => (
-						<button
-							type="button"
-							key={v.raw}
-							onClick={
-								trade === undefined
-									? undefined
-									: () => {
-											setBudgetInput(v.raw);
-											requote(side, v.raw);
-										}
-							}
-						>
-							{usd(v)}
-						</button>
-					))}
-				</div>
-				<span className="note">
-					Preset values <TodoOwner />
+				<span className="msg">
+					<b>Bear</b> {bear.reason}
 				</span>
+			) : null}
+
+			<span className="lbl">Your max loss</span>
+			<div className="amt">
+				<span className="cur">$</span>
+				{trade === undefined ? (
+					<span className="val num">{shown.maxLossUsd.raw}</span>
+				) : (
+					<input
+						value={budgetInput}
+						inputMode="decimal"
+						aria-label={`Amount in ${shown.collateralSymbol}`}
+						onChange={(event) => setBudgetInput(event.target.value)}
+						onBlur={() => requote(side, budgetInput)}
+					/>
+				)}
+				<span className="unit">{shown.collateralSymbol}</span>
 			</div>
+			<div className="pills">
+				{shown.presetsUsd.map((v) => (
+					<button
+						type="button"
+						className="pill"
+						key={v.raw}
+						onClick={
+							trade === undefined
+								? undefined
+								: () => {
+										setBudgetInput(v.raw);
+										requote(side, v.raw);
+									}
+						}
+					>
+						{usd(v)}
+					</button>
+				))}
+			</div>
+			<span className="under">
+				Preset amounts
+				<TodoOwner />
+			</span>
+
 			<dl className="kv">
-				<dt>Order</dt>
-				<dd>{shown.orderLabel}</dd>
-				<dt>Contracts</dt>
-				<dd>{shown.contracts}</dd>
-				<dt>Max loss</dt>
-				<dd className="bear">{usd2(shown.maxLossUsd)}</dd>
-				<dt>Max payout</dt>
-				<dd className="big bull">{signedUsd(shown.maxPayoutUsd)}</dd>
-				<dt>Break-even</dt>
-				<dd>{usd(shown.breakEvenUsd)}</dd>
-				<dt>Liquidity left</dt>
-				<dd>{usd(shown.liquidityLeftUsd)}</dd>
+				<div>
+					<dt className="k">Order</dt>
+					<dd className="v num">{shown.orderLabel}</dd>
+				</div>
+				<div>
+					<dt className="k">Contracts</dt>
+					<dd className="v num">{shown.contracts}</dd>
+				</div>
+				<div>
+					<dt className="k">Max loss</dt>
+					<dd className="v num">{usd2(shown.maxLossUsd)}</dd>
+				</div>
+				<div>
+					<dt className="k">Max payout</dt>
+					<dd className={`v num ${shown.maxPayoutUsd.pnlClass}`}>{signedUsd(shown.maxPayoutUsd)}</dd>
+				</div>
+				<div>
+					<dt className="k">Break-even</dt>
+					<dd className="v num">{usd(shown.breakEvenUsd)}</dd>
+				</div>
+				<div>
+					<dt className="k">Liquidity left</dt>
+					<dd className="v num">{usd(shown.liquidityLeftUsd)}</dd>
+				</div>
 			</dl>
+
 			<button
 				type="button"
-				className="btn primary block"
+				className="btn acc big block go"
 				disabled={trade !== undefined && (busy || blocked || switching)}
 				onClick={trade === undefined ? undefined : sign}
 			>
-				{trade === undefined ? "Sign with wallet" : PHASE_LABEL[phase]}
+				{(trade === undefined ? undefined : PHASE_LABEL[phase]) ?? "Trade"}
 			</button>
-			<span className="note">
+			<span className="sign">Sign with wallet</span>
+			<p className="fine" style={{ marginTop: "12px" }}>
 				Approve USDC once, then one fill on Base. Your fill is public the moment it confirms.
-			</span>
+			</p>
+
 			{trade !== undefined && view !== null && !view.executable && view.reason !== null ? (
-				<span className="note">{view.reason}</span>
+				<span className="msg">{view.reason}</span>
 			) : null}
 			{trade !== undefined && view !== null && view.signatureExpiresAt !== null ? (
-				<span className="note">
-					Maker signature valid until <b className="mono">{view.signatureExpiresAt}</b>. It is refetched when
-					you sign. <TodoOwner />
+				<span className="msg">
+					Maker signature valid until <b className="num">{view.signatureExpiresAt}</b>. It is refetched when
+					you sign.
+					<TodoOwner />
 				</span>
 			) : null}
-			{message !== null ? <span className="note">{message}</span> : null}
+			{message !== null ? <span className="msg">{message}</span> : null}
+			{txHash !== null && trade !== undefined ? (
+				<a className="tx" href={`${trade.explorerTxBase}${txHash}`} rel="noreferrer" target="_blank">
+					{txHash.slice(0, 8)}…{txHash.slice(-6)} ↗
+				</a>
+			) : null}
+			{trade !== undefined && trade.thesis !== null ? (
+				<span className="msg">On {trade.thesis.headline}</span>
+			) : null}
+
 			{card !== null && trade !== undefined && txHash !== null ? (
 				<FillDialog
 					card={card}
@@ -347,14 +387,6 @@ export function TakeASide({
 					onClose={() => setCard(null)}
 				/>
 			) : null}
-			{txHash !== null && trade !== undefined ? (
-				<a className="tx" href={`${trade.explorerTxBase}${txHash}`} rel="noreferrer" target="_blank">
-					{txHash.slice(0, 8)}…{txHash.slice(-6)} ↗
-				</a>
-			) : null}
-			{trade !== undefined && trade.thesis !== null ? (
-				<span className="note">On {trade.thesis.headline}</span>
-			) : null}
-		</div>
+		</section>
 	);
 }

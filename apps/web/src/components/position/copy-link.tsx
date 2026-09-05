@@ -42,31 +42,22 @@ export function CopyLink({ label = "Copy link" }: { label?: string }) {
 	}
 
 	return (
-		<span style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: 0 }}>
-			<button type="button" className="btn" onClick={copy} aria-live="polite">
+		<span className="copy">
+			<button type="button" className="btn sec" onClick={copy} aria-live="polite">
 				{state === "copied" ? "Link copied" : label}
 			</button>
 			{state === "manual" ? (
 				<>
-					<label className="note" htmlFor="position-share-url">
+					<label className="copy-fallback" htmlFor="position-share-url">
 						Copying was blocked by the browser. Select and copy this address:
 					</label>
 					<input
 						id="position-share-url"
 						ref={inputRef}
-						className="mono"
+						className="copy-url num"
 						readOnly
 						value={url}
 						onFocus={(event) => event.currentTarget.select()}
-						style={{
-							background: "var(--tn-s2)",
-							border: "1px solid var(--tn-l2)",
-							borderRadius: "8px",
-							padding: "8px 10px",
-							color: "var(--tn-k)",
-							fontSize: "12px",
-							width: "100%",
-						}}
 					/>
 				</>
 			) : null}

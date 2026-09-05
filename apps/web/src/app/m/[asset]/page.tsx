@@ -7,23 +7,30 @@ import { getSession } from "@/lib/auth/session";
 import { MarketRail } from "@/components/market/market-rail";
 import { StructuresList } from "@/components/market/structures-list";
 import { TakeASide } from "@/components/market/take-a-side";
-import { TodoOwner } from "@/components/primitives";
-import { usingDatabase } from "@/lib/data/source";
 import { usd, usd2 } from "@/lib/format";
-import { markets, marketBySlug, marketSummaries, thesesByMarket } from "@/lib/view-data";
+import { usingDatabase } from "@/lib/data/source";
+import { marketBySlug, marketSummaries, thesesByMarket } from "@/lib/view-data";
 import type { Market, MarketSummary, Thesis } from "@/lib/display-types";
 import type { TradePanelContext } from "@/lib/trade/types";
+import "@/styles/market.css";
+import "@/styles/position.css";
 
 /**
- * The market page. Owner 2026-09-05, from the fomo demo: trading lives here,
- * not in a post — the live book in the centre, the ticket on the right, and the
- * posts tagged to this market below.
+ * The market page — the mockup's `#market` view (lines 743-925).
+ *
+ * Owner 2026-09-05, from the fomo demo: trading lives here, not in a post. Three
+ * columns: the shell's feed rail on the left, the asset header / live book /
+ * posts about this market in the centre, and the ticket, "About <asset>" and
+ * "Your <asset> positions" on the right.
  *
  * NO PRICE CHART (owner 2026-09-05, "remove the chart then"): Thetanuts
  * publishes a spot price and no history — `api.getMarketData()` returns
  * `{prices, metadata}` and nothing else, measured the same day — and this app
  * does not call a third-party price API, so there is no series to draw and the
  * owner will not ship an example one. The live spot stays, as a number.
+ *
+ * `src/styles/position.css` is imported here as well as on `/p/[id]`: the
+ * post-fill dialog renders the same share card, and the card is defined once.
  */
 
 /**
@@ -106,111 +113,167 @@ export default async function MarketPage({
 	}
 
 	return (
-		<div className="work">
-			<aside className="col l">
-				<div className="sec">
-					<div className="sec-h">
-						<h2 className="h2">Markets</h2>
-						<span className="mono dim" style={{ fontSize: "11px" }}>
-							{summaries.length} live
-						</span>
-					</div>
-					<div className="tl">
-						{summaries.map((m) => (
-							<Link className="it" href={`/m/${m.slug}`} key={m.slug}>
-								<span className={`thumb ${m.slug}`}>{m.asset}</span>
-								<div className="b">
-									<span className="n">{m.name}</span>
-									<span className="d">
-										<span>{m.spotUsd.usd2.replace("$", "")}</span>
-										<span className={m.changeClass || undefined}>{m.changeLabel}</span>
-									</span>
-								</div>
-							</Link>
-						))}
-					</div>
-					<span className="note">
-						Assets, strikes and expiries come from live OptionBook orders. Nothing here is a hardcoded list.
-					</span>
-				</div>
-				<YourPositionsRail asset={market.asset} />
-			</aside>
+		<main className="wrap">
+<div className="cols page no-left">
+				{/* MERGE: this is `PageFrame` (shell lane, `components/shell/page-frame.tsx`)
+				    written out, because that module does not exist in this lane's tree.
+				    At merge, replace this element and its two rails with:
+				      <PageFrame left={<FeedRail posts={...} />} right={<>…right column…</>}>
+				        …centre…
+				      </PageFrame>
+				    `no-left` drops the rail's grid track until then, so the page is not
+				    left with an empty 264px column. */}
 
-			<main className="col">
-				<header className="mkthead">
-					<span className={`thumb ${market.slug}`}>{market.asset}</span>
-					<div>
-						<h1>{market.name}</h1>
-						<span className="sub">
-							<span>{market.asset}</span>
-							<span>{market.venueLabel}</span>
-							<span>{market.bookLabel}</span>
-						</span>
-					</div>
-					<span className="px">
-						{usd2(market.spotUsd)}
-						<span className={`ch ${market.changeClass}`}>{market.changeLabel} · 24h</span>
-					</span>
-				</header>
-
-				{unavailable !== null ? <span className="note">{unavailable}</span> : null}
-
-				<div className="board">
-					<div>
-						<span className="lbl">Spot</span>
-						<span className="v">{usd(market.spotUsd)}</span>
-					</div>
-					<div>
-						<span className="lbl">24h</span>
-						<span className={`v ${market.changeClass}`}>{market.changeLabel}</span>
-					</div>
-					<div>
-						<span className="lbl">Structures</span>
-						<span className="v">{market.structureCount}</span>
-					</div>
-					<div>
-						<span className="lbl">Tagged posts</span>
-						<span className="v">{tagged.length}</span>
-					</div>
-				</div>
-
-				<StructuresList
-					rows={market.structures}
-					slug={market.slug}
-					query={carried}
-					live={trade !== null}
-				/>
-
-				<TaggedPostsTabs posts={tagged} signedIn={signedIn} databaseMode={databaseMode} />
-			</main>
-
-			<aside className="col r">
-				{trade === null ? (
-					<>
-						<TakeASide
-							ticket={market.ticket}
-							structureLabel={market.selectedLabel}
-							expiryLabel={market.selectedExpiryLabel}
-						/>
-						<div className="panel">
-							<h3>Post about {market.asset}</h3>
-							<span className="note">
-								Write your read on this market. A post is text first — tag this structure if you want,
-								and it shows the verified badge only once your own fill confirms.
+				<div className="stack lg">
+					<section className="card pad">
+						<div className="mkt-head">
+							<span className="av av-44 av-asset" aria-hidden="true">
+								{market.asset}
 							</span>
-							<Link className="btn block" href="/new">
-								Write a post
-							</Link>
+							<div>
+								<h1>{market.name}</h1>
+								<span className="sub">
+									{market.asset} · {market.venueLabel}
+								</span>
+							</div>
+							<span className="px">
+								<b className="num">{usd2(market.spotUsd)}</b>
+								<i className={`${market.changeClass} num`}>
+									{market.changeLabel} <span className="mut">24h</span>
+								</i>
+							</span>
 						</div>
-					</>
-				) : (
-					<MarketRail
-						trade={trade}
-						structureLabel={market.selectedLabel}
-						expiryLabel={market.selectedExpiryLabel}
+						<div className="stats">
+							<span className="tile">
+								<i>Spot</i>
+								<b className="num">{usd(market.spotUsd)}</b>
+							</span>
+							<span className="tile">
+								<i>24h</i>
+								<b className={`${market.changeClass} num`}>{market.changeLabel}</b>
+							</span>
+							<span className="tile">
+								<i>Structures</i>
+								<b className="num">{market.structureCount}</b>
+							</span>
+							<span className="tile">
+								<i>Tagged posts</i>
+								<b className="num">{tagged.length}</b>
+							</span>
+						</div>
+					</section>
+
+					{unavailable !== null ? <span className="mkt-warn">{unavailable}</span> : null}
+
+					<StructuresList
+						rows={market.structures}
+						slug={market.slug}
+						query={carried}
+						live={trade !== null}
 					/>
-				)}
-			</aside>
-		</div>
+
+					<TaggedPostsTabs
+						posts={tagged}
+						asset={market.asset}
+						signedIn={signedIn}
+						databaseMode={databaseMode}
+					/>
+				</div>
+
+				<div className="col-right">
+					<div className="sticky stack">
+						{trade === null ? (
+							<>
+								<TakeASide
+									ticket={market.ticket}
+									structureLabel={market.selectedLabel}
+									expiryLabel={market.selectedExpiryLabel}
+								/>
+								<section className="card pad mkt-panel">
+									<h3 style={{ fontSize: "15px" }}>Post about {market.asset}</h3>
+									<p className="fine">
+										Write your read on this market. A post is text first — tag this structure if you
+										want, and it shows the verified badge only once your own fill confirms.
+									</p>
+									<Link className="btn sec block" style={{ marginTop: "14px" }} href="/new">
+										Write a post
+									</Link>
+								</section>
+							</>
+						) : (
+							<MarketRail
+								trade={trade}
+								structureLabel={market.selectedLabel}
+								expiryLabel={market.selectedExpiryLabel}
+							/>
+						)}
+
+						<section className="card">
+							<div className="card-h">
+								<h3>About {market.asset}</h3>
+							</div>
+							<div className="card-b" style={{ padding: "0 20px 16px" }}>
+								<dl className="kv">
+									<div>
+										<dt className="k">Venue</dt>
+										<dd className="v">Thetanuts OptionBook</dd>
+									</div>
+									<div>
+										<dt className="k">Network</dt>
+										<dd className="v">Base · 8453</dd>
+									</div>
+									<div>
+										<dt className="k">Expiries</dt>
+										<dd className="v num">{market.expiryCount}</dd>
+									</div>
+									<div>
+										<dt className="k">Structures</dt>
+										<dd className="v num">{market.structureCount}</dd>
+									</div>
+									<div>
+										<dt className="k">Settlement</dt>
+										<dd className="v">Thetanuts TWAP</dd>
+									</div>
+								</dl>
+							</div>
+						</section>
+
+						<YourPositionsRail asset={market.asset} />
+
+						{summaries.length > 0 ? (
+							<section className="card">
+								<div className="card-h">
+									<h3>Markets</h3>
+									<span className="x num">{summaries.length} live</span>
+								</div>
+								<div className="card-b">
+									{summaries.map((m) => (
+										<Link className="row" href={`/m/${m.slug}`} key={m.slug}>
+											<span className="av av-30 av-asset" aria-hidden="true">
+												{m.asset}
+											</span>
+											<span className="t">
+												<b>{m.name}</b>
+												<i>
+													{m.asset} · Base
+												</i>
+											</span>
+											<span className="v">
+												<b className="num">{usd2(m.spotUsd)}</b>
+												<i className={`${m.changeClass} num`}>{m.changeLabel}</i>
+											</span>
+										</Link>
+									))}
+								</div>
+								<div className="card-f">
+									Assets, strikes and expiries come from live OptionBook orders. Nothing here is a
+									hardcoded list.
+								</div>
+							</section>
+						) : null}
+					</div>
+				</div>
+			</div>
+		</main>
 	);
 }

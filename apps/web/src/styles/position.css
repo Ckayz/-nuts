@@ -1,0 +1,213 @@
+/*
+ * The share card and the post-fill dialog — page-scoped styles.
+ *
+ * The card and the dialog themselves — `.frame`, `.sc`, `.sc-top`, `.sc-name`,
+ * `.sc-date`, `.sc-inst`, `.sc-strikes`, `.sc-pnl`, `.frame-f`, `.scrim`,
+ * `.dlg`, `.dlg-h`, `.dlg-x` and their keyframes — are ported class-for-class in
+ * `src/index.css`, which the shell lane owns (read at
+ * `.claude/worktrees/ui-feed-r1/apps/web/src/index.css`, lines 256-378).
+ * Nothing here repeats them.
+ *
+ * What IS here is what this product needs and the mockup has no example of:
+ * the sentence that says where the P&L number came from, the card's compact
+ * size, the fill link, the dialog's two action buttons, and the position page's
+ * own panels and copy-link fallback.
+ *
+ * Imported by `/p/[id]` and by `/m/[asset]` — the post-fill dialog renders the
+ * same card, and the card is defined once.
+ */
+
+/* ---------- share card additions ---------- */
+/* One sentence saying where the number came from. An estimate must never read
+   as a settled result (PRD 14), so the basis is part of the card at both sizes
+   rather than a tooltip or a thing dropped for looks. */
+.sc-basis {
+	margin-top: 8px;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--muted);
+	line-height: 1.45;
+}
+.sc-tx {
+	display: inline-block;
+	margin-top: 14px;
+	font-size: 12.5px;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	color: var(--muted);
+}
+.sc-tx:hover {
+	color: var(--accent-lift);
+}
+
+/* The compact size used inside a feed post. Same card, same values, tightened —
+   nothing that changes what the number means is dropped. */
+.frame.compact {
+	padding: 12px 12px 9px;
+}
+.frame.compact .sc {
+	padding: 14px 15px 13px;
+	border-radius: var(--r-panel);
+}
+.frame.compact .sc-name {
+	font-size: 15px;
+}
+.frame.compact .sc-inst {
+	margin-top: 14px;
+}
+.frame.compact .sc-pnl b {
+	font-size: 28px;
+}
+.frame.compact .sc-pnl span {
+	font-size: 14px;
+}
+.frame.compact .sc .tiles {
+	margin-top: 14px;
+	padding-top: 13px;
+}
+.frame.compact .sc .tile b {
+	font-size: 14px;
+}
+.frame.compact .frame-f {
+	padding: 9px 4px 1px;
+}
+.frame.compact .frame-f .wm {
+	font-size: 13px;
+}
+.frame.compact .frame-f .fine {
+	font-size: 11.5px;
+}
+
+/* ---------- dialog additions (mockup lines 1044-1047, inline there) ---------- */
+.dlg-acts {
+	display: flex;
+	gap: 10px;
+	margin-top: 16px;
+}
+.dlg-acts > * {
+	flex: 1;
+}
+.dlg-note {
+	display: block;
+	margin-top: 12px;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--muted);
+	line-height: 1.5;
+	text-align: center;
+}
+/* The mockup's dialog is one screenful of example data; a real one can be
+   taller than the viewport. */
+.dlg {
+	max-height: calc(100vh - 48px);
+	overflow-y: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+	.scrim,
+	.dlg {
+		animation: none;
+	}
+}
+
+/* ---------- position page (mockup lines 936-941) ---------- */
+.pos-acts {
+	display: flex;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+.pos-panel .sub {
+	display: block;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--muted);
+	margin-top: 4px;
+	line-height: 1.5;
+}
+.pos-panel .fine {
+	display: block;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--muted);
+	margin-top: 12px;
+	line-height: 1.5;
+}
+.owner-row {
+	padding-left: 0;
+	padding-right: 0;
+}
+
+/* ---------- copy link, with its manual fallback ---------- */
+.copy {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	min-width: 0;
+}
+.copy-fallback {
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--muted);
+	line-height: 1.5;
+}
+.copy-url {
+	width: 100%;
+	padding: 9px 12px;
+	background: var(--surface2);
+	border: 1px solid var(--line);
+	border-radius: var(--r-row);
+	color: var(--text);
+	font-size: 12.5px;
+	font-variant-numeric: tabular-nums;
+}
+.copy-url:focus-visible {
+	border-color: var(--accent);
+}
+
+@media (max-width: 900px) {
+	.dlg-acts {
+		flex-wrap: wrap;
+	}
+	/* `.tile b` is nowrap + ellipsis in `index.css`, which is right in a feed
+	   post. On the share card it truncates money: at 390px the dialog's three
+	   tiles are ~85px each and "1,153.00 USDC" rendered as "1,153.…". A share
+	   card that cuts a number in half is the one thing it must never do, so
+	   here the value wraps instead — at the space before the unit, never inside
+	   the digits (no `overflow-wrap: anywhere`). */
+	.sc .tile b {
+		white-space: normal;
+		overflow: visible;
+		text-overflow: clip;
+	}
+}
+
+/* Person avatars come from `components/primitives.tsx`'s `Avatar`, which the
+   shell lane owns. It emits the size as a class (`.av-34` by default) and the
+   colour as one of the mockup's eight `.a-*` tones; these two rules set the
+   sizes this card and this page need without depending on the prop shape.
+   MERGE: once the shell's `Avatar` (with its numeric `size`) is in this tree,
+   pass `size={40}` / `size={30}` and delete both rules. */
+.sc-top .av {
+	width: 40px;
+	height: 40px;
+	font-size: 14px;
+}
+.frame.compact .sc-top .av {
+	width: 30px;
+	height: 30px;
+	font-size: 11.5px;
+}
+.owner-row .av {
+	width: 40px;
+	height: 40px;
+	font-size: 14px;
+}
+
+/* The hero figure when there is no number to show. At 48px an em dash reads as
+   a graphic rule; at the strikes' size it reads as what it is. The sentence
+   under it (`.sc-basis`) always says why. */
+.sc-pnl b.none {
+	font-size: 19px;
+	font-weight: 700;
+	color: var(--muted);
+	letter-spacing: 0;
+}

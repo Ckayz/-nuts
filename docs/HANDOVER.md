@@ -101,3 +101,52 @@ answers questions about live liquidity today.
 
 Next: approval-gated execution — approve USDC, re-fetch, hand calldata to the
 user's wallet.
+
+---
+
+## 8. Update 2026-09-05 20:xx — for the fold's Writer A
+
+### F15 is already fixed on `origin/agent-exec-r1`. Do not fix it twice.
+
+`OPEN-WORK.md` lists F15 as a BLOCKER: `/agent` posts to `/api/chat` instead of
+`/api/agent/chat`.
+
+Correct on `main`, where `agent-chat.tsx` calls bare `useChat()` and so falls
+back to the SDK default `/api/chat`. **Already fixed on the branch you are
+merging**, in the second commit (`03186d1`), at `agent-chat.tsx:44`:
+
+```ts
+const [transport] = useState(() => new DefaultChatTransport({
+  api: "/api/agent/chat",
+  prepareSendMessagesRequest: ({ messages, body }) => ({
+    body: { ...body, messages, walletAddress: addressRef.current },
+  }),
+}));
+```
+
+The transport is not only about the path. `prepareSendMessagesRequest` attaches
+the connected wallet to **every** request, including the turn the runtime resumes
+by itself after a tool approval, which a per-send `body` would miss. The address
+is read through a ref so the transport, created once, is never rebuilt mid-stream.
+
+So: take the branch's version of that file. A separate fix that only changes the
+URL would drop the wallet plumbing and the approval resume with it.
+
+### Two other things in that branch worth knowing before review
+
+- **F14 (chain guard) is partly handled already.** `trade-execution.tsx` switches
+  to Base before sending and compares the connected wallet against the account
+  the calldata was built for, refusing if they differ. It does not yet re-check
+  after an in-flight account switch.
+- **The signature deadline is enforced twice**, server and client. Maker
+  signatures last 59–113s, and a prepared trade can sit on screen for minutes, so
+  the button refuses rather than spending gas on a certain revert.
+
+### Still unsent
+
+No transaction has been sent from this UI. The money path is verified only as far
+as calldata: real `approve` + `fillOrder` bytes, the 10 USD limit genuinely
+refusing on live orders (13.107829 and 19.999996 USD on two ETH puts). The tiny
+real fill remains the owner's step, and it is what proves the non-USDC contract
+units and unlocks the gated buy orders.
+

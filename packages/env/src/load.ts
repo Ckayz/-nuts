@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,12 +34,40 @@ const candidates = [
 
 let loaded = false;
 
+function existingCandidates(): string[] {
+	return [...new Set(candidates)].filter((p) => existsSync(p));
+}
+
 export function loadEnvFiles(): void {
 	if (loaded) return;
 	loaded = true;
 
-	const paths = [...new Set(candidates)].filter((p) => existsSync(p));
+	const paths = existingCandidates();
 	if (paths.length > 0) dotenv.config({ path: paths, quiet: true });
+}
+
+/**
+ * What the env FILES alone would supply, with the same precedence, and without
+ * touching `process.env`.
+ *
+ * The test fence (`packages/db/src/test-fence.ts`) needs to tell "the operator
+ * chose this database" from "an env file happened to name one". It cannot do
+ * that by reading `process.env` alone: bun loads the current directory's `.env`
+ * into the process environment itself, BEFORE any preload runs (measured
+ * 2026-09-06: `cd apps/web && env -u DATABASE_URL bun -e 'console.log(...)'`
+ * prints the file's value; `bun --no-env-file` prints undefined). So by the time
+ * any code runs, a file-supplied value is indistinguishable from a shell-supplied
+ * one unless the files are read back and compared — which is what this does.
+ */
+export function envFileValues(): Record<string, string> {
+	const values: Record<string, string> = {};
+	// `candidates` is highest priority first and dotenv keeps the FIRST value it
+	// sees, so build the effective map lowest-priority first and let higher
+	// priority overwrite.
+	for (const path of existingCandidates().reverse()) {
+		Object.assign(values, dotenv.parse(readFileSync(path)));
+	}
+	return values;
 }
 
 loadEnvFiles();

@@ -92,7 +92,17 @@ bun run build               # turbo build
 bun run check-types         # tsc --noEmit across packages
 bun run verify              # scripts/verify.ts: typecheck + every suite + ONE db-mode next build (--offline skips live DB suites and the build)
 cd packages/thetanuts && bun test          # offline unit tests for the trade logic
-cd apps/web && DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/<migrated-throwaway> bun test   # web suite incl. integration files (they skip without DATABASE_URL)
+cd apps/web && DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/<migrated-throwaway> bun test   # web suite incl. integration files
+# The live suites run ONLY against a database PASSED TO THE COMMAND. Measured 2026-09-06:
+# `cd apps/web && env -u DATABASE_URL bun test src/lib/trade/record.integration.test.ts` used to run
+# 32 deleting tests against whatever `apps/web/.env` named, because BUN loads the working
+# directory's `.env` into the environment before any preload runs (`bun --no-env-file` does not).
+# The preload (packages/db/src/test-fence.ts) now ignores an env-file-supplied value, so that
+# same command skips; and it refuses the whole run if the resolved host is not loopback, if any
+# destination-override query parameter is present (host, hostaddr, port, dbname, database,
+# options, connectionString, service, servicefile), or if PGOPTIONS is set. It proves the HOST,
+# not that the database NAME is a throwaway - any database on a loopback host passes. Override
+# with TEST_DATABASE_OK=1.
 # Smoke a PRODUCTION build only in DB mode against a migrated throwaway (next start refuses mock fixtures by design):
 # cd apps/web && DATA_SOURCE=db DATABASE_URL=... bunx next start -p 3124
 cd packages/thetanuts && bunx tsc --noEmit
@@ -136,7 +146,7 @@ Turborepo monorepo, all TypeScript, ESM. Workspaces: `apps/*` and `packages/*`. 
 apps/web             Next.js 16 app (App Router, React 19, React Compiler on, typedRoutes on)
 packages/thetanuts   @nuts/thetanuts: framework-agnostic trade logic on the Thetanuts SDK (+ bun tests)
 packages/db          Drizzle ORM + node-postgres. Schema in src/schema, migrations in src/migrations
-packages/env         Validated env via t3-env. `@nuts/env/server` (DATABASE_URL, DIRECT_DATABASE_URL?, SESSION_SECRET (≥32; required in production), DATA_SOURCE (mock|db; production — including `next build` — refuses mock; mock is `next dev` only), NODE_ENV, OPENROUTER_API_KEY, AGENT_MODEL, AGENT_GATE_MODEL, BASE_RPC_URL, THESIS_REFERRER, THETANUTS_ORDERS_URL), `@nuts/env/web`, `@nuts/env/load` (repo-relative .env.local/.env loader; note: it also fills values into test/probe processes, so an "unset" probe must set the variable to an empty string)
+packages/env         Validated env via t3-env. `@nuts/env/server` (DATABASE_URL, DIRECT_DATABASE_URL?, SESSION_SECRET (≥32; required in production), DATA_SOURCE (mock|db; production — including `next build` — refuses mock; mock is `next dev` only), NODE_ENV, OPENROUTER_API_KEY, AGENT_MODEL, AGENT_GATE_MODEL, BASE_RPC_URL, THESIS_REFERRER, THETANUTS_ORDERS_URL), `@nuts/env/web`, `@nuts/env/load` (repo-relative .env.local/.env loader; note: it also fills values into test/probe processes, so an "unset" probe must set the variable to an empty string - and so does BUN ITSELF for the working directory's own `.env`, before any `--preload` module runs, measured 2026-09-06; `bun --no-env-file` is the only way to see the real parent environment. `envFileValues()` exports what the files alone would supply, which is how the test fence tells an operator's choice from an env file's)
 packages/ui          Shared shadcn/ui components on @base-ui/react + Tailwind v4. Exports globals.css, components/*, lib/*, hooks/*
 packages/config      Shared tsconfig.base.json (strict, noUncheckedIndexedAccess, noUnused*)
 docs/                PRD.md (v2.0), DEPLOY.md (runbook), HANDOVER.md (teammate), thetanuts-sdk-research.md (+ dated corrections), mockups/ (the spec + README)

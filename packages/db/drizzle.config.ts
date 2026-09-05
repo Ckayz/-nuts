@@ -5,6 +5,10 @@ import { Client } from "pg";
 // the current working directory. See packages/env/src/load.ts.
 import "@nuts/env/load";
 
+// ONE list, shared with both bun-test preloads and scripts/verify.ts. It used to
+// be four copies that disagreed; see src/test-fence.ts.
+import { DESTINATION_OVERRIDE_PARAMETERS } from "./src/test-fence";
+
 // Schema changes must not run through Supabase's transaction pooler, so
 // migrations use the direct connection when one is configured. Locally the two
 // are the same. Set BOTH URLs explicitly when selecting a migration target.
@@ -12,10 +16,10 @@ const url = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL || "";
 
 if (url) {
   // URLSearchParams decodes percent-encoded names before the case-insensitive check.
-  const overrides = new Set(["host", "hostaddr", "port", "dbname", "database", "options"]);
+  const overrides = new Set<string>(DESTINATION_OVERRIDE_PARAMETERS);
   for (const name of new URL(url).searchParams.keys()) {
     if (overrides.has(name.toLowerCase())) {
-      throw new Error("Drizzle-kit destination query overrides (host, hostaddr, port, dbname, database, options) are forbidden");
+      throw new Error(`Drizzle-kit destination query overrides (${[...overrides].join(", ")}) are forbidden`);
     }
   }
   // Constructing a Client parses exactly as Pool does; it does not connect.

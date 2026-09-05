@@ -44,6 +44,22 @@ bun run verify --offline
 
 Offline mode sets both database URLs to empty and `SKIP_ENV_VALIDATION=1`, preventing env-file fallback. The runner prints and excludes integration and concurrency test files (including live RPC suites); both builds skip because they are outside the offline writer's authorization. This is partial verification, not deployment clearance. Each command streams output; the first failure stops execution and the final table includes unrun steps.
 
+## Smoke-testing a production build locally
+
+`next start` runs as production, and in production the app refuses to serve
+fixture data (`DATA_SOURCE` must be `db`; see `apps/web/src/lib/data/source.ts`).
+So a production build is smoke-tested only in database mode, against a
+throwaway database that has every migration applied — the shared local
+`postgres` database may be behind and will fail the first query.
+
+```sh
+cd apps/web
+DATA_SOURCE=db DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/<migrated-throwaway> bunx next start -p 3124
+# / /m/btc /new /portfolio -> 200; unseeded /t /u /p ids -> 404; server log free of "⨯"
+```
+
+For the mock-mode look use `bun run dev:web` (development mode has no such guard).
+
 ## Production migration
 
 The review must be GREEN before production migration. The owner's reported production baseline is only `0000`; it cannot be re-verified offline. The checked-in journal has `0000`–`0007`. Confirm the baseline in the Supabase SQL editor before proceeding:

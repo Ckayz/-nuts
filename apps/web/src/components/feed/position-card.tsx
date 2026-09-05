@@ -1,24 +1,39 @@
+import { CheckIcon } from "@/components/icons";
 import { SplitBar } from "@/components/primitives";
 import { pnlClass, signedUsd, usd } from "@/lib/format";
-import type { Thesis } from "@/lib/display-types";
+import type { Backing, Structure } from "@/lib/display-types";
 
-export function PositionCard({ thesis }: { thesis: Thesis }) {
-	const settled = thesis.status === "settled";
+/**
+ * The creator's own fill, nested inside a backed post. Only a backed post has
+ * one, which is why the verified badge lives here: it marks the onchain fill,
+ * not the author.
+ */
+export function PositionCard({
+	asset,
+	structure,
+	backing,
+}: {
+	asset: string | null;
+	structure: Structure | null;
+	backing: Backing;
+}) {
 	return (
 		<div className="poscard">
 			<div className="nm">
 				<span className="a">
-					{thesis.asset} {thesis.structure.productType}{" "}
-					<span className="chip">{thesis.structure.strikesLabel}</span>
-					<span className="chip">{thesis.structure.expiryLabel}</span>
+					{[asset, structure?.productType].filter(Boolean).join(" ")}
+					<span className="verified">
+						<CheckIcon />
+						verified
+					</span>
 				</span>
 				<span className="d">
-					{thesis.detailParts.join(" · ")}
-					{thesis.detailTx ? (
+					{backing.detailParts.join(" · ")}
+					{backing.detailTx ? (
 						<>
 							{" · tx "}
-							<a className="tx" href={thesis.detailTx.href}>
-								{thesis.detailTx.label}
+							<a className="tx" href={backing.detailTx.href}>
+								{backing.detailTx.label}
 							</a>
 						</>
 					) : null}
@@ -26,19 +41,19 @@ export function PositionCard({ thesis }: { thesis: Thesis }) {
 			</div>
 			<div className="kv2">
 				<span className="l">Risked</span>
-				<span className="v">{usd(thesis.creatorRiskedUsd)}</span>
+				<span className="v">{usd(backing.creatorRiskedUsd)}</span>
 			</div>
 			<div className="kv2">
-				<span className="l">{thesis.creatorPnlLabel}</span>
-				<span className={`v ${pnlClass(thesis.creatorLivePnlUsd)}`}>
-					{signedUsd(thesis.creatorLivePnlUsd)}
+				<span className="l">{backing.creatorPnlLabel}</span>
+				<span className={`v ${pnlClass(backing.creatorLivePnlUsd)}`}>
+					{signedUsd(backing.creatorLivePnlUsd)}
 				</span>
 			</div>
 			<SplitBar
-				bullLabel={`${thesis.bull.pct}% Bull · ${thesis.bull.count} · ${thesis.bull.amountLabel}`}
-				bearLabel={`${thesis.bear.pct}% Bear · ${thesis.bear.count} · ${thesis.bear.amountLabel}`}
-				bullPct={thesis.bull.pct}
-				bearMuted={settled}
+				bullLabel={`${backing.bull.pct}% Bull · ${backing.bull.count} · ${backing.bull.amountLabel}`}
+				bearLabel={`${backing.bear.pct}% Bear · ${backing.bear.count} · ${backing.bear.amountLabel}`}
+				bullPct={backing.bull.pct}
+				bearMuted={backing.settled}
 			/>
 		</div>
 	);

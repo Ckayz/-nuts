@@ -340,7 +340,25 @@ export function pnlCard(input: PnlCardInput): View.PnlCard {
 }
 
 export function position(value: Domain.Position): View.Position {
-    return { id: value.id, thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(value.status === "settled" ? value.economics.finalPnlUsd : value.economics.estimatedPnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled: value.status === "settled" };
+    // D5. The list row carries the SAME lifecycle vocabulary and P&L basis the
+    // share card does, so an expired or failed position no longer renders
+    // identically to an open one and no number is printed without saying where
+    // it came from. The P&L itself follows PRD 14's recorded-value rule: a
+    // finished option shows its recorded result or nothing, never an estimate.
+    const display = POSITION_STATUS_DISPLAY[value.status];
+    const settled = value.status === "settled";
+    const finished = settled || value.status === "expired";
+    const pnlUsd = finished ? value.economics.finalPnlUsd : value.status === "pending" || value.status === "failed" ? null : value.economics.estimatedPnlUsd;
+    const basis: View.PnlBasis = pnlUsd === null ? "unavailable" : settled ? "settled" : "estimate";
+    const pnlBasisLabel =
+        value.status === "failed" ? "This transaction failed, so there is no position."
+        : value.status === "pending" ? "This fill has not been confirmed on Base yet."
+        : pnlUsd === null && finished ? "Settlement pending: Thetanuts has not published this option's settlement yet."
+        : pnlUsd === null ? "No P&L recorded for this fill yet."
+        : settled ? "Final P&L recorded at settlement."
+        : "Estimated P&L recorded with the fill.";
+    return { id: value.id, thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(pnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled,
+        statusLabel: display.label, statusTone: display.tone, pnlLabel: settled ? "Result" : "Live P&L", pnlBasisLabel, basis };
 }
 export function participant(value: Domain.Participant): View.Participant {
     return { ...position(value), creator: creator(value.creator), says: value.says, isCreator: value.role === "creator" };

@@ -1,5 +1,5 @@
 /**
- * Domain types: PRD §10.2 names, decimal strings and lifecycle enums.
+ * Domain types: PRD §10.3 names, decimal strings and lifecycle enums.
  * Owner notes: LIVE / ENDING / SETTLED are display chips, not domain statuses.
  * TODO-OWNER: ending rules remain undecided; fixtures carry explicit endingSoon.
  * TODO-OWNER: mock contracts and collateral absent from the mockup are nullable

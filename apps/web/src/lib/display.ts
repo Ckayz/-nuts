@@ -1,26 +1,40 @@
 /** Pure domain → presentation boundary. Decimal values are never used for trading math. */
 import type * as Domain from "@/types";
 import type * as View from "./display-types";
-/** Validate the entire decimal before an explicitly lossy, display-only conversion. */
-export function parseDisplayDecimal(value: string): number {
+/** Validate and split decimal strings without a binary floating-point conversion. */
+function decimal(value: string) {
     if (!/^-?\d+(?:\.\d+)?$/.test(value))
         throw new Error(`Invalid display decimal: ${value}`);
-    const parsed = parseFloat(value);
-    if (!Number.isFinite(parsed))
-        throw new Error("Display decimal is out of range");
-    return parsed;
+    const negative = value.startsWith("-");
+    const [integer, fraction = ""] = (negative ? value.slice(1) : value).split(".");
+    const nonzero = /[1-9]/.test(integer! + fraction);
+    return { integer: integer!.replace(/^0+(?=\d)/, ""), fraction, sign: nonzero ? negative ? -1 : 1 : 0 };
 }
+/** Round magnitude half-up in decimal arithmetic, then group the integer digits. */
 function group(value: string, digits = 0): string {
-    return new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Math.abs(parseDisplayDecimal(value)));
+    const { integer, fraction } = decimal(value);
+    let scaled = BigInt(integer + fraction.slice(0, digits).padEnd(digits, "0"));
+    if ((fraction[digits] ?? "0") >= "5") scaled += BigInt(1);
+    const rounded = scaled.toString().padStart(digits + 1, "0");
+    const whole = digits ? rounded.slice(0, -digits) : rounded;
+    return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (digits ? `.${rounded.slice(-digits)}` : "");
 }
 export function amount(value: string | null): View.DisplayAmount {
     if (value === null)
         return { raw: "—", usd: "—", usd2: "—", signed: "—", pnlClass: "" };
-    const n = parseDisplayDecimal(value);
-    return { raw: value, usd: `$${group(value)}`, usd2: `$${group(value, 2)}`, signed: `${n > 0 ? "+" : n < 0 ? "−" : ""}$${group(value)}`, pnlClass: n > 0 ? "bull" : n < 0 ? "bear" : "" };
+    const { sign } = decimal(value);
+    const minus = sign < 0 ? "−" : "";
+    return { raw: value, usd: `${minus}$${group(value)}`, usd2: `${minus}$${group(value, 2)}`, signed: `${sign > 0 ? "+" : minus}$${group(value)}`, pnlClass: sign > 0 ? "bull" : sign < 0 ? "bear" : "" };
 }
 function optionalAmount(value: string | null) { return value === null ? undefined : amount(value); }
-function quantity(value: string | null) { return value === null ? undefined : parseDisplayDecimal(value).toFixed(4); }
+/** Preserve the exact input when a nonzero quantity would round to zero. */
+export function quantity(value: string | null) {
+    if (value === null) return undefined;
+    const { sign } = decimal(value);
+    const rounded = group(value, 4);
+    if (sign !== 0 && rounded === "0.0000") return value;
+    return `${sign < 0 ? "-" : ""}${rounded}`;
+}
 function fragment(value: string, leading = 6, trailing = 4) { return value.length > leading + trailing + 1 ? `${value.slice(0, leading)}…${value.slice(-trailing)}` : value; }
 function tx(hash: string | null, mockFragment: string | null): View.TxRef | undefined {
     if (!hash && !mockFragment)
@@ -90,7 +104,7 @@ export function ticket(value: Domain.Ticket): View.Ticket {
     return { sideNote: value.sideNote, maxLossUsd: amount(value.maximumLossUsd), collateralSymbol: value.collateralSymbol, presetsUsd: value.presetsUsd.map(amount), orderLabel: value.orderLabel, contracts: quantity(value.contracts)!, maxPayoutUsd: amount(value.maximumPayoutUsd), breakEvenUsd: amount(value.breakEvenPricesUsd[0] ?? null), liquidityLeftUsd: amount(value.liquidityLeftUsd) };
 }
 export function detail(value: Domain.ThesisDetail): View.ThesisDetail {
-    return { thesis: thesis(value.thesis), shareUrl: value.shareUrl, shareHeadline: value.shareHeadline, expiryLabel: expiryLabel(value.thesis.market.expiryAt, true), settlementLabel: value.settlementLabel, launchedLabel: `launched ${elapsed(value.thesis.thesis.createdAt, value.thesis.market.dataAsOf)} ago`, spotUsd: amount(value.thesis.market.currentSpotPriceUsd), spotChangeLabel: `${parseDisplayDecimal(value.spotChangePct) > 0 ? "+" : ""}${value.spotChangePct}%`, maxPayoutUsd: amount(value.thesis.economics.maximumPayoutUsd), breakEvenUsd: amount(value.thesis.economics.breakEvenPricesUsd[0] ?? null), participants: value.participants.map(participant), comments: value.comments.map(v => ({ creator: creator(v.creator), postedLabel: `· ${elapsed(v.createdAt, value.thesis.market.dataAsOf)}`, body: v.body })), activity: value.activity.map(activity), activityCount: value.activityCount, participantCount: value.participantCount, ticket: ticket(value.ticket) };
+    return { thesis: thesis(value.thesis), shareUrl: value.shareUrl, shareHeadline: value.shareHeadline, expiryLabel: expiryLabel(value.thesis.market.expiryAt, true), settlementLabel: value.settlementLabel, launchedLabel: `launched ${elapsed(value.thesis.thesis.createdAt, value.thesis.market.dataAsOf)} ago`, spotUsd: amount(value.thesis.market.currentSpotPriceUsd), spotChangeLabel: `${decimal(value.spotChangePct).sign > 0 ? "+" : ""}${value.spotChangePct}%`, maxPayoutUsd: amount(value.thesis.economics.maximumPayoutUsd), breakEvenUsd: amount(value.thesis.economics.breakEvenPricesUsd[0] ?? null), participants: value.participants.map(participant), comments: value.comments.map(v => ({ creator: creator(v.creator), postedLabel: `· ${elapsed(v.createdAt, value.thesis.market.dataAsOf)}`, body: v.body })), activity: value.activity.map(activity), activityCount: value.activityCount, participantCount: value.participantCount, ticket: ticket(value.ticket) };
 }
 export function trending(value: Domain.TrendingItem): View.TrendingItem {
     return { slug: value.slug, asset: value.underlyingAsset, headline: value.headline, creatorHandle: value.creatorHandle, timeLabel: `${value.remainingDays}d`, pnlUsd: amount(value.estimatedPnlUsd), bullPct: value.bullPct };
@@ -100,5 +114,5 @@ export function price(value: {
     currentSpotPriceUsd: string;
     changePct: string;
 }) {
-    return { asset: value.underlyingAsset, price: group(value.currentSpotPriceUsd, 2), change: `${parseDisplayDecimal(value.changePct) > 0 ? "+" : ""}${value.changePct}%` };
+    return { asset: value.underlyingAsset, price: group(value.currentSpotPriceUsd, 2), change: `${decimal(value.changePct).sign > 0 ? "+" : ""}${value.changePct}%` };
 }

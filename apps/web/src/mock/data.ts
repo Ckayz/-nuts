@@ -1,4 +1,4 @@
-// Base mainnet chainId 8453 is pinned by docs/PRD.md §10.2 (not a mockup number).
+// Base mainnet chainId 8453 is pinned by docs/PRD.md §10.3 (not a mockup number).
 // EXAMPLE DATA: financial values and copy transcribed from docs/mockups/thesis-fun-mockup.html.
 // TODO-OWNER: IDs prefixed mock-, non-BTC slugs and the wh handle are fixture identifiers, not DB IDs.
 // TODO-OWNER: no full wallet/transaction/option addresses are supplied. Empty required wallet strings
@@ -9,6 +9,7 @@
 // collateralSymbol and pooledUsd remain null; unknown economics remain null, never zero.
 // TODO-OWNER: fixture directions follow headlines; only BTC direction is explicitly owner-specified.
 // TODO-OWNER: preset amounts reproduce the mockup, not approved product defaults.
+// TODO-OWNER: sinceLabel and followers remain null where the mockup supplies no value.
 // Creator rates, ranking, trending, remaining thesis details and connected-user identity stay TODO-OWNER.
 import type { Creator, Thesis, Position, ThesisDetail, TrendingItem } from "@/types";
 export const merkleMike: Creator = {
@@ -667,7 +668,7 @@ export const btcNfpDetail: ThesisDetail = {
     "spotChangePct": "1.65",
     "participants": [
         {
-            "id": "mock-participant-0",
+            "id": "mock-creator-position-btc-nfp-4a2c",
             "thesisId": "btc-nfp-4a2c",
             "userId": "mock-user-merkle_mike",
             "role": "creator",

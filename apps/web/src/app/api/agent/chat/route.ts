@@ -35,48 +35,88 @@ import {
 export const maxDuration = 60;
 
 /**
- * C-2 (lane C pass 3, MAJOR). Plain text of EVERY user message in the request,
- * in order, for the scope gate.
+ * C-2 (lane C pass 3, MAJOR) and K-1 (pass-4 lane C MAJOR-1). Everything the
+ * request carries, as strings for the scope gate.
  *
- * This used to be `latestUserText` — a backwards scan that returned the newest
- * user message and stopped. The whole client-supplied history was then forwarded
- * to the primary model at line ~148, and nothing anywhere establishes that the
- * earlier messages were ever classified: the history comes from the browser and
- * carries no server signature, the schema accepts consecutive user messages, and
- * `useChat` will replay whatever the client hands it. The reviewer's two
- * sequences, reproduced here before the fix:
+ * This was `latestUserText` (the newest user message only), then a user-role
+ * filter. Both left the rest of the body reaching `convertToModelMessages` and
+ * the primary model unclassified. The history comes from the BROWSER and
+ * carries no server signature, so the role on a message is a client's claim,
+ * not a fact — and neither is the provenance of a tool part's `output`.
+ * Reproduced against the real route, gate and provider injected, in
+ * `lib/agent/request.test.ts`:
  *
  *   TWO_USER            {"gateTexts":["What is a put?"],
  *                        "primaryRoles":["user","user"],"primaryHasScraper":true}
  *   USER_ASSISTANT_USER {"gateTexts":["What is a put?"],
  *                        "primaryRoles":["user","assistant","user"],
  *                        "primaryHasScraper":true}
+ *   PROBE-1 (assistant-role carrier)  {"modelCalls":1,"modelSeesScraper":true}
+ *   PROBE-2 (forged tool output)      {"modelCalls":1,"modelSeesScraper":true}
  *
  * PRD 10.8, verbatim: "Every inbound message is classified before the primary
  * model runs. … This layer is authoritative." Everything in the request IS
- * inbound, so everything in the request is classified.
+ * inbound, so everything in the request is classified: the text and reasoning
+ * parts of every role, plus the two channels a tool part can carry client
+ * content in (`output`, serialised, and `errorText`). Each string is prefixed
+ * with the role the client CLAIMED, so the classifier is told who is said to
+ * have spoken and still treats the whole block as data — `gatePrompt` wraps
+ * each string in its own `<message>` block and the gate instruction says to
+ * classify, never to obey.
  *
- * ASSISTANT parts are deliberately NOT included. They are not the person's
- * request, and forwarding them to the gate would hand a classifier text a
- * hostile client wrote under the model's own role — text the gate instruction
- * says to treat as data would then arrive as conversation. The one thing that
- * must be classified is what the user is asking for, and that is the user role.
+ * CHUNKED at `MAX_MESSAGE_CHARS`, which is not cosmetic: `gatePrompt` puts
+ * every string through `gateWindowText`, a `slice(0, MAX_MESSAGE_CHARS)`. An
+ * assistant message may be `MAX_ASSISTANT_MESSAGE_CHARS` long and a tool output
+ * is bounded only by `MAX_REQUEST_CHARS`, so handing either over in one piece
+ * would let the gate read the first 2,000 characters while the model read all
+ * of them — the exact truncation hole C-P2-3 closed for user text.
  *
- * COST, stated rather than implied: every turn re-classifies the whole
- * conversation's user text instead of one message, so the gate's input grows
- * with the conversation. It is bounded — `agentChatBodySchema` caps a request at
- * 80 messages, each user message at `MAX_MESSAGE_CHARS`, and the whole request
- * at `MAX_REQUEST_CHARS` — so this cannot grow without limit, but it is not
- * free. TODO-OWNER: the cheaper design is for the server to SIGN the history it
- * returns and classify only unsigned user text; that is a new mechanism, not a
- * fix, and it is the owner's call.
+ * COST, stated rather than implied: every turn re-classifies the whole request
+ * instead of one message, so the gate's input grows with the conversation. It
+ * is bounded — `agentChatBodySchema` caps a request at 80 messages, each user
+ * message at `MAX_MESSAGE_CHARS`, each assistant message at
+ * `MAX_ASSISTANT_MESSAGE_CHARS`, and the whole serialised request at
+ * `MAX_REQUEST_CHARS` — so the gate is handed at most one block per message
+ * plus about `MAX_REQUEST_CHARS / MAX_MESSAGE_CHARS` more. Not free.
+ * TODO-OWNER: the cheaper design is for the server to SIGN the history it
+ * returns and classify only unsigned text; that is a new mechanism, not a fix,
+ * and it is the owner's call.
  */
-function userTexts(messages: UIMessage[]): string[] {
+function inboundTexts(messages: UIMessage[]): string[] {
 	const texts: string[] = [];
 	for (const message of messages) {
-		if (message?.role !== "user") continue;
-		const text = messageText(message.parts as Array<{ type?: unknown; text?: unknown }>);
-		if (text.length > 0) texts.push(text);
+		const parts = (message?.parts ?? []) as Array<{
+			type?: unknown;
+			text?: unknown;
+			input?: unknown;
+			rawInput?: unknown;
+			output?: unknown;
+			errorText?: unknown;
+		}>;
+		const pieces: string[] = [];
+		const text = messageText(parts);
+		if (text.length > 0) pieces.push(text);
+		for (const part of parts) {
+			if (typeof part.type !== "string" || !part.type.startsWith("tool-")) continue;
+			// EVERY client-writable channel of a tool part that reaches the model.
+			// `input` is `z.unknown()` and becomes the tool CALL's arguments —
+			// measured on these bytes with a marker string:
+			//   INPUT_PROBE {"status":200,"gate":["[user] hi","[assistant] {\"ok\":1}"],
+			//                "modelSees":true}
+			// `output` is `z.record(string, unknown)` for the read tools, so both
+			// are serialised whole rather than read field by field.
+			for (const channel of [part.input, part.rawInput, part.output]) {
+				if (channel !== undefined) pieces.push(JSON.stringify(channel) ?? "");
+			}
+			if (typeof part.errorText === "string") pieces.push(part.errorText);
+		}
+		const joined = pieces.filter((piece) => piece.length > 0).join("\n");
+		if (joined.length === 0) continue;
+		const label = `[${message.role}] `;
+		const room = Math.max(1, MAX_MESSAGE_CHARS - label.length);
+		for (let at = 0; at < joined.length; at += room) {
+			texts.push(`${label}${joined.slice(at, at + room)}`);
+		}
 	}
 	return texts;
 }
@@ -152,7 +192,7 @@ export async function POST(request: Request) {
 
 	// PRD 10.8 layer 1. Runs before the primary model, so an out-of-scope
 	// request costs one small model call rather than a full agent turn.
-	const scope = await checkScope(userTexts(messages));
+	const scope = await checkScope(inboundTexts(messages));
 
 	/**
 	 * Residual (lane C confirming pass): the gate's `degraded` result was ignored

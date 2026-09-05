@@ -424,13 +424,26 @@ describe("C#8: fill calldata is never broadcast past PRD 14's 30-second window",
  */
 describe("C-R1: a second mounted card must not send a second fill", () => {
 	/**
-	 * `prepareTradeFor`'s own rule, modelled: while the wallet holds a `pending`
-	 * row (written by `recordTrade`), preparation is refused with
-	 * `UNRECORDED_FILL` (`lib/trade/prepare.ts:84`).
+	 * K-1 (pass-4 lane C BLOCKER-1). `prepareTradeFor`'s rule, modelled
+	 * FAITHFULLY.
+	 *
+	 * It used to be `calls.records.length > 0` — the CLIENT's mock of
+	 * `recordTrade` pushes that array (`src/test/trade-mocks.ts`), so it counted
+	 * the browser having ATTEMPTED the call. `NO_STORAGE_REMOUNT` then set
+	 * `replies.record` to `{ok:false, code:"LOST"}` — a request that by its own
+	 * name never arrived — and had the server refuse BECAUSE it arrived. The
+	 * check was self-fulfilling in exactly the case it is named for.
+	 *
+	 * The real server has two kinds of evidence, and neither is the browser's:
+	 *  - the CHAIN: every broadcast the wallet answered for is an `OrderFilled`
+	 *    log (`lib/trade/chain-fills.ts`);
+	 *  - its own `positions` rows, written only when the `recordTrade` handler
+	 *    RAN and succeeded (`lib/trade/record.ts`).
+	 * A fill on the chain with no row of its own refuses the preparation.
 	 */
 	function serverWithUnrecordedFence(): void {
 		replies.agentPrepare = async () => {
-			if (calls.records.length > 0) {
+			if (calls.broadcast.some((hash) => !calls.recorded.includes(hash))) {
 				return { ok: false, code: "UNRECORDED_FILL", reason: "Your last fill is not recorded yet." };
 			}
 			return {
@@ -548,6 +561,36 @@ describe("C-R1: a second mounted card must not send a second fill", () => {
 			sends: ["0xFRESH"],
 		});
 	});
+
+	/**
+	 * K-1. The other half of the fence, and the half that tells a FAITHFUL server
+	 * model from the old `calls.records.length > 0` one: a fill that WAS recorded
+	 * releases the ticket. Both models refuse after a lost recording; only the
+	 * client-evidence model keeps refusing after a successful one, because it
+	 * counts the attempt rather than the row.
+	 */
+	test("a fill whose recording SUCCEEDED releases the fence, and the next card trades", async () => {
+		reset();
+		serverWithUnrecordedFence();
+		const first = mount(TradeExecution, { trade: fillTrade() });
+		press(first);
+		await first.settle();
+		const afterFirst = {
+			sends: calls.sends.length,
+			broadcast: calls.broadcast.length,
+			recorded: calls.recorded.length,
+		};
+
+		first.unmount();
+		const second = mount(TradeExecution, { trade: fillTrade() });
+		press(second);
+		await second.settle();
+
+		expect({ afterFirst, afterSecond: { sends: calls.sends.length, prepares: calls.agentPrepares } }).toEqual({
+			afterFirst: { sends: 1, broadcast: 1, recorded: 1 },
+			afterSecond: { sends: 2, prepares: 2 },
+		});
+	});
 });
 
 /**
@@ -597,9 +640,10 @@ describe("M5: the agent card stops waiting for an approval and says so", () => {
  * to this component.
  */
 describe("C-P2-1: a second TAB cannot bypass the server's unrecorded-fill fence", () => {
+	/** K-1. The same faithful model as above: chain evidence minus recorded rows. */
 	function serverFence(): void {
 		replies.agentPrepare = async () => {
-			if (calls.records.length > 0) {
+			if (calls.broadcast.some((hash) => !calls.recorded.includes(hash))) {
 				return { ok: false, code: "UNRECORDED_FILL", reason: "Your last fill is not recorded yet." };
 			}
 			return {

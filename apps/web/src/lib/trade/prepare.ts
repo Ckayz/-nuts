@@ -32,8 +32,9 @@ import { isFeedUnavailable } from "@/lib/thetanuts/orders";
 import { strikesLabel } from "@/lib/display";
 import { approvalMatches, decodeApproval } from "./approval";
 import { instrumentMismatch } from "./attachment";
-import { findThesis, findUnrecordedFill, unrecordedFillReason } from "./store";
-import { simulateFill } from "./chain";
+import { findThesis, findUnrecordedFill, firstUnknownFill, unrecordedFillReason } from "./store";
+import { recentFillsByWallet, type FillReader } from "./chain-fills";
+import { publicClient, simulateFill } from "./chain";
 import { encodeTradeTicket, type TradeTicketPayload } from "./ticket";
 import { directionOfSide, rawOf, takerFor } from "./view";
 import type { PrepareResult, TakerSide, TicketSide, TxRequest } from "./types";
@@ -95,6 +96,13 @@ export interface PrepareTradeInput {
 export async function prepareTradeFor(
 	session: { userId: string; walletAddress: string } | null,
 	input: PrepareTradeInput,
+	/**
+	 * K-1. The chain reader the unrecorded-fill fence uses, supplied by the
+	 * caller exactly as `recordTradeFor(session, input, reader = publicClient())`
+	 * does, so a test can drive the fence without a chain. The exported action
+	 * always passes the real read-only Base client.
+	 */
+	fills: FillReader = publicClient(),
 ): Promise<PrepareResult> {
 	if (session === null) {
 		return fail("NO_SESSION", "Sign in with your wallet before signing a trade.", true);
@@ -107,6 +115,45 @@ export async function prepareTradeFor(
 	const unrecorded = await findUnrecordedFill(db, session.walletAddress, new Date());
 	if (unrecorded !== null) {
 		return fail("UNRECORDED_FILL", unrecordedFillReason(unrecorded.txHash));
+	}
+
+	// K-1 (pass-4 lane C BLOCKER-1). The pending row above exists only once
+	// `recordTrade` REACHED the server. When that request was lost — offline, a
+	// closed tab, a 502 at the edge — and the browser holds no store, NOTHING on
+	// the server knew about the fill and this wallet could fill the same order
+	// again. Measured on the pre-fix bytes with the market ticket and a server
+	// modelled faithfully:
+	//   MIN1_MARKET {"afterFirst":{"sends":1,"serverPendingRows":0},
+	//                "secondLabel":"Trade","afterSecond":{"sends":2},
+	//                "sent":["0xBUY_A","0xBUY_A"]}
+	//
+	// So the chain is asked directly: every OptionBook fill this wallet took
+	// inside the lookback must have a `positions` row of its own, or the ticket
+	// is refused with the same sentence the pending fence uses.
+	//
+	// FAIL-CLOSED, deliberately: a read that could not run is a refusal, never a
+	// pass. That means a Base outage stops trading — the alternative is a fence
+	// that disappears exactly when the chain cannot be checked.
+	//
+	// Residuals, stated rather than implied:
+	//  - a fill BROADCAST but not yet MINED is not in the logs yet (Base blocks
+	//    are 2 s, measured). Inside that gap only the pending row and the
+	//    browser's own held fill stand; with neither, two wallet prompts inside
+	//    one block can both fill. NOT VERIFIED how long a wallet takes to hand
+	//    the hash back. Recorded in docs/OPEN-WORK.md §7.
+	//  - a fill this wallet took OUTSIDE this app has no row and never will, so
+	//    it refuses the ticket for the length of the window. It self-heals, the
+	//    same way the pending fence does. Recorded in docs/OPEN-WORK.md §7.
+	let chainFills: ReadonlyArray<{ txHash: string }>;
+	try {
+		chainFills = await recentFillsByWallet(session.walletAddress as Address, fills);
+	} catch {
+		// TODO-OWNER: wording. The refusal itself is not a choice — see above.
+		return fail("CHAIN_UNAVAILABLE", "Base could not be read to check your recent fills, so nothing was prepared. Try again.");
+	}
+	const unknown = await firstUnknownFill(db, session.walletAddress, chainFills);
+	if (unknown !== null) {
+		return fail("UNRECORDED_FILL", unrecordedFillReason(unknown.txHash));
 	}
 
 	let budget: bigint;

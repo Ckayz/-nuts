@@ -677,10 +677,22 @@ async function claimPending(
 
 	// Conditional on the row still being pending AND still the other wallet's,
 	// so a holder that legitimately confirmed in the meantime is not clobbered.
+	//
+	// K-1 (pass-4 lane C MINOR-1). The wallet predicate used to be in the
+	// sentence only, not in the SQL. No code path changes `wallet_address` —
+	// `grep -rn "update(positions)" apps/web/src` returns four sites
+	// (`record.ts` 151 / 235 / 314 / 681) and none sets it — so the property
+	// held; it is written down now so the claim and the statement cannot drift.
 	await db
 		.update(positions)
 		.set({ status: "failed", failureReason: "superseded_by_onchain_taker" })
-		.where(and(eq(positions.id, held.id), eq(positions.status, "pending")));
+		.where(
+			and(
+				eq(positions.id, held.id),
+				eq(positions.status, "pending"),
+				eq(positions.walletAddress, held.walletAddress),
+			),
+		);
 
 	const second = await insertPending(ticket, txHash, identity);
 	if (second.kind === "row") return { ok: true, row: second.row };

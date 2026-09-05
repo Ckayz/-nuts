@@ -319,6 +319,103 @@ describe("C#2: a remount must not put a second fill in front of the user", () =>
 	});
 });
 
+/**
+ * K-1 (pass-4 lane C BLOCKER-1). The same remount, with the SERVER modelled.
+ *
+ * The block above swaps `replies.record` for a lost answer and leans on the
+ * browser's own hold (`lib/trade/held-fill.ts`). That hold lives in
+ * `sessionStorage`, so a private window, a cleared store, a second tab or
+ * another device has none — and until this fold nothing on the server did
+ * either, because the only `pending` row is written by `recordTrade` itself.
+ * Measured on the pre-fix bytes, with the fence below and no store:
+ *
+ *   MIN1_MARKET {"afterFirst":{"sends":1,"serverPendingRows":0},
+ *                "secondLabel":"Trade","afterSecond":{"sends":2},
+ *                "sent":["0xBUY_A","0xBUY_A"]}
+ *
+ * Two identical `eth_sendTransaction` calls on an OptionBook fill, which is
+ * final and has no cancel. `lib/trade/prepare.ts` now reads `OrderFilled` logs
+ * for this wallet, so the evidence is the chain rather than the browser; the
+ * model here is that rule, and NOT `calls.records`, which counts what the
+ * browser ATTEMPTED.
+ */
+describe("K-1: with no store, the SERVER fence stops a second fill of the same order", () => {
+	/** Chain evidence (`calls.broadcast`) minus the rows recording actually wrote. */
+	function serverWithChainFence(): void {
+		replies.prepare = async () =>
+			calls.broadcast.some((hash) => !calls.recorded.includes(hash))
+				? { ok: false, code: "UNRECORDED_FILL", reason: "Your last fill is not recorded yet." }
+				: fill("0xBUY_A", RAW_BUY);
+	}
+
+	/** A private window: no `sessionStorage` at all, the way `held-fill.ts` sees one. */
+	function withoutStorage<T>(run: () => Promise<T>): Promise<T> {
+		const real = (globalThis as { sessionStorage?: unknown }).sessionStorage;
+		(globalThis as { sessionStorage?: unknown }).sessionStorage = undefined;
+		return run().finally(() => {
+			(globalThis as { sessionStorage?: unknown }).sessionStorage = real;
+		});
+	}
+
+	test("NO_STORAGE_REMOUNT — a lost recording answer leaves sends at 1", async () => {
+		reset();
+		serverWithChainFence();
+		// The request never arrived: the handler never ran, so no row was written.
+		replies.record = async () => ({ ok: false, code: "LOST", reason: "The server did not answer." });
+		await withoutStorage(async () => {
+			const trade = context();
+			const first = mountTicket(trade);
+			first.click(first.button(/Trade/) as NonNullable<ReturnType<typeof first.button>>);
+			await first.settle();
+			const afterFirst = { sends: calls.sends.length, recorded: calls.recorded.length };
+
+			first.unmount();
+			const second = mountTicket(trade);
+			await second.settle();
+			second.click(primary(second));
+			await second.settle();
+
+			expect({
+				afterFirst,
+				afterSecond: { sends: calls.sends.length },
+				refused: second.text().includes("not recorded yet"),
+			}).toEqual({
+				afterFirst: { sends: 1, recorded: 0 },
+				afterSecond: { sends: 1 },
+				refused: true,
+			});
+		});
+	});
+
+	/**
+	 * The half that separates a faithful model from `calls.records.length > 0`:
+	 * a recording that SUCCEEDED releases the ticket. Both models refuse after a
+	 * lost answer; only the client-evidence one keeps refusing after a good one.
+	 */
+	test("a recording that SUCCEEDED releases the ticket, with no store either", async () => {
+		reset();
+		serverWithChainFence();
+		await withoutStorage(async () => {
+			const trade = context();
+			const first = mountTicket(trade);
+			first.click(first.button(/Trade/) as NonNullable<ReturnType<typeof first.button>>);
+			await first.settle();
+
+			first.unmount();
+			const second = mountTicket(trade);
+			await second.settle();
+			second.click(primary(second));
+			await second.settle();
+
+			expect({
+				sends: calls.sends.length,
+				recorded: calls.recorded.length,
+				label: primary(second).text,
+			}).toEqual({ sends: 2, recorded: 2, label: "Filled" });
+		});
+	});
+});
+
 // ----------------------------------------------- C-R2: PRD 14's 30-second window
 
 /**

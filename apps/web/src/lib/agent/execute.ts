@@ -200,8 +200,14 @@ export function createExecutionTools({ account, session, thesisId }: ExecutionTo
 			// `recordTrade` needs to bind the receipt to a position.
 			const prepared = await prepareTradeFor(session, {
 				structureId,
-				// The agent prepares BUYS only (refused above otherwise), which is
-				// the Bull side of the ticket's vocabulary.
+				// The agent prepares BUYS only (refused above otherwise). This
+				// request names no `taker`, which `prepareTradeFor` reads as the
+				// LEGACY mapping in `lib/trade/view.ts` — `takerFor("bull")` is a
+				// taker BUY whatever the instrument. Since I-1 the WORD "bull" no
+				// longer means "buy" on the ticket (on a put, Bull sells), so this
+				// is not a direction claim: it is the legacy code path, kept so the
+				// agent's behaviour is unchanged. `lib/trade/view.ts` carries the
+				// follow-up that lets this send `taker: "buy"` outright.
 				side: "bull",
 				budgetInput: budget,
 				thesisId: attachment.attach,

@@ -23,6 +23,7 @@ import {
 	signOut,
 	verifySignInSignature,
 } from "@/lib/auth/actions";
+import { useSessionMismatch } from "./use-session-mismatch";
 import { config } from "@/lib/wagmi";
 import { readableError } from "@/lib/messages";
 
@@ -134,15 +135,13 @@ export function WalletBar() {
 		setSession(null);
 	}, []);
 
+	// B-m3: a wallet connected as somebody else signs the stale server session
+	// out, so the chip and the actions can never disagree about who is signed in.
+	const mismatched = useSessionMismatch(session?.walletAddress ?? null, isConnected, address, () => setSession(null));
+
 	if (phase === "loading") return <span className="wallet mut">…</span>;
 
-	// The session belongs to one address. If the wallet is now on a different
-	// account, the header must not keep showing the old identity — it drops back
-	// to the sign-in control so the connected account can sign for itself. A
-	// disconnected wallet is not a mismatch: the server session is still real.
-	const sessionMatchesAccount =
-		session !== null &&
-		(!isConnected || !address || address.toLowerCase() === session.walletAddress.toLowerCase());
+	const sessionMatchesAccount = session !== null && !mismatched;
 
 	if (session !== null && sessionMatchesAccount) {
   return <details className="wallet-menu"><summary className="wallet"><Avatar seed={session.walletAddress.toLowerCase()} initials={session.truncatedAddress.slice(2, 4).toUpperCase()} size={26} /><span className="dot" aria-hidden="true" /><span className="num">{session.truncatedAddress}</span></summary><div className="card pad"><span className="mut">{networkLabel(chain, chainId) ?? config.chains[0].name}</span>{/* TODO-OWNER: profile and reconnect menu labels. */}<Link className="btn sec" href={`/u/${session.walletAddress.toLowerCase()}`}>Profile</Link>{!isConnected ? connectors.map(c => <button type="button" key={c.uid} className="btn sec" disabled={connectPending} onClick={() => connect({ connector: c })}>Connect {c.name}</button>) : null}<button type="button" className="btn sec" onClick={runSignOut}>Sign out</button></div></details>;

@@ -1,4 +1,5 @@
 import { ogFonts } from "@/lib/og-fonts";
+import { ogText, ogTextOrNull } from "@/lib/og-text";
 import { ImageResponse } from "next/og";
 import { notFound } from "next/navigation";
 import { thesisShareData } from "@/lib/share-data";
@@ -21,15 +22,15 @@ export default async function Image({ params }: { params: Promise<{ slug: string
       </div>
       <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#14141b", border: "1px solid #25252f", borderRadius: 20, padding: 32, gap: 22 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 24 }}>
-          <span>{thesis.creator.handle ? `@${thesis.creator.handle}` : thesis.creator.walletAddress}</span>
+          <span>{ogTextOrNull(thesis.creator.handle ? `@${thesis.creator.handle}` : thesis.creator.walletAddress)}</span>
           {verified ? <span style={{ color: "#f2f2f5" }}>Verified</span> : null}
-          {thesis.tag ? <span style={{ border: "1px solid #25252f", borderRadius: 10, padding: "6px 12px" }}>{thesis.tag.asset}</span> : null}
+          {thesis.tag ? <span style={{ border: "1px solid #25252f", borderRadius: 10, padding: "6px 12px" }}>{ogText(thesis.tag.asset)}</span> : null}
         </div>
-        <div style={{ display: "flex", fontSize: 42, lineHeight: 1.15, flex: 1, overflow: "hidden" }}>{thesis.headline}</div>
-        {thesis.structure ? <div style={{ display: "flex", fontSize: 24 }}>{`${thesis.structure.productType} · ${thesis.structure.strikesLabel} · ${thesis.structure.expiryLabel}`}</div> : null}
+        <div style={{ display: "flex", fontSize: 42, lineHeight: 1.15, flex: 1, overflow: "hidden" }}>{ogText(thesis.headline)}</div>
+        {thesis.structure ? <div style={{ display: "flex", fontSize: 24 }}>{ogText(`${thesis.structure.productType} · ${thesis.structure.strikesLabel} · ${thesis.structure.expiryLabel}`)}</div> : null}
         {pnl && pnl.raw !== "—" ? <div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 28 }}>
-          <span>{thesis.backing?.creatorPnlLabel}</span>
-          <span style={{ color: pnl.pnlClass === "bull" ? "#22c55e" : pnl.pnlClass === "bear" ? "#f4634f" : "#f2f2f5" }}>{pnl.signed}</span>
+          <span>{ogTextOrNull(thesis.backing?.creatorPnlLabel)}</span>
+          <span style={{ color: pnl.pnlClass === "bull" ? "#22c55e" : pnl.pnlClass === "bear" ? "#f4634f" : "#f2f2f5" }}>{ogText(pnl.signed)}</span>
         </div> : null}
       </div>
     </div>, { ...size, fonts: await ogFonts() },

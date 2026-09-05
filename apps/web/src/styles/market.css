@@ -242,3 +242,16 @@
 .tbl-wrap {
 	position: relative;
 }
+
+/* Flatten only layout wrappers: the same mounted ticket moves between the
+   desktop rail and the slot immediately after the market header. MarketRail
+   returns siblings, so its post panel remains with the other trailing panels. */
+@media (max-width:1180px) {
+	.ticket-first > .col-main,
+	.ticket-first > .col-right,
+	.ticket-first > .col-right > .sticky { display: contents; }
+	.ticket-first > .col-main > * { order: 3; min-width: 0; }
+	.ticket-first > .col-main > :first-child { order: 1; }
+	.ticket-first > .col-right > .sticky > * { order: 4; min-width: 0; }
+	.ticket-first > .col-right > .sticky > .ticket { order: 2; }
+}

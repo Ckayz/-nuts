@@ -16,6 +16,7 @@ export function PageFrame({
 	left,
 	right,
 	stackGap = "lg",
+	ticketFirst = false,
 	children,
 }: {
 	variant?: "feed" | "page";
@@ -23,11 +24,14 @@ export function PageFrame({
 	right?: ReactNode;
 	/** Centre column gap: `lg` is 18px, `sm` 14px. The feed uses `sm`. */
 	stackGap?: "lg" | "sm";
+	/** Market only: place its ticket after the header when the rails stack. */
+	ticketFirst?: boolean;
 	children: ReactNode;
 }) {
 	const columns = [
 		"cols",
 		variant,
+		ticketFirst ? "ticket-first" : "",
 		left === undefined ? "no-left" : "",
 		right === undefined ? "no-right" : "",
 	]
@@ -40,7 +44,7 @@ export function PageFrame({
 					<div className="sticky">{left}</div>
 				</div>
 			)}
-			<div className={stackGap === "lg" ? "stack lg" : "stack"}>{children}</div>
+			<div className={stackGap === "lg" ? "col-main stack lg" : "col-main stack"}>{children}</div>
 			{right === undefined ? null : (
 				<div className="col-right">
 					<div className="sticky stack">{right}</div>

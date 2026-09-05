@@ -120,6 +120,14 @@ function probe(body: string, feed: "readable" | "unusable" = "readable"): Record
 				headers: async () => new Map(),
 				cookies: async () => ({ get: () => undefined, set: () => {}, delete: () => {} }),
 			}, loader: "object" }));
+			// D-R2-2: the market rail is a signed-in card, and it reads the session
+			// through this specifier. The stub answers null unless a case sets
+			// globalThis.__session, so every case above behaves exactly as before
+			// (page-data.ts imports "./auth/session", a different specifier, and is
+			// not touched by this at all).
+			build.module("@/lib/auth/session", () => ({ exports: {
+				getSession: async () => globalThis.__session ?? null,
+			}, loader: "object" }));
 		}});
 		${body}
 	`;
@@ -306,4 +314,143 @@ live("an unreadable feed leaves every one of those surfaces at '—'", () => {
 		expect(cell?.pnl).toBe("—");
 		expect(cell?.basis).toBe("unavailable");
 	}
+}, TIMEOUT_MS);
+
+/**
+ * D-R2-2 (lane D pass 2). The market page's "Your <asset> positions" rail called
+ * `display.position(row)` with NO price book, so the same confirmed fill showed
+ * a derived P&L on `/p/<id>` and "not available yet" beside the ticket. The
+ * portfolio and profile wiring above did not cover it: that card does its own
+ * read inside the component.
+ *
+ * Same chain, same stubbed edge, and the assertion is again an EQUALITY against
+ * `derivePnlAtSpot` — never a literal — plus the rendered markup of the ACTUAL
+ * component, so a helper that computes the right number while the card ignores
+ * it cannot pass.
+ */
+const SEED_AND_RENDER_RAIL = `
+	const { randomUUID } = await import("node:crypto");
+	const { db } = await import("@nuts/db");
+	const { sql } = await import("drizzle-orm");
+
+	const userId = randomUUID(), positionId = randomUUID();
+	const address = "0x" + positionId.replace(/-/g, "").slice(0, 40);
+	const handle = "rail_" + positionId.slice(0, 8);
+	const snapshot = JSON.stringify(SNAPSHOT);
+	const fillEvent = JSON.stringify({
+		version: 1,
+		buyer: "0xB792296bE8202ba2fc5D3276fA184e5B479920E3",
+		seller: "0xEcda1D002FBC55F2Fd3386bB4B9B95F859f3C39E",
+		sellerWasMaker: true,
+		nonce: SNAPSHOT.order.nonce,
+		optionAddress: SNAPSHOT.order.option,
+		premiumAmount: "999998",
+		feeCollected: "124999",
+		referrer: "0x0000000000000000000000000000000000000000",
+		referralFeePaid: "0",
+	});
+
+	await db.execute(sql\`insert into users (id, wallet_address, handle, display_name)
+		values (\${userId}::uuid, \${address}, \${handle}, 'Rail Probe')\`);
+	await db.execute(sql\`insert into positions (
+			id, thesis_id, user_id, role, side, status, chain_id, wallet_address,
+			order_id, order_snapshot, fill_event, option_address, tx_hash,
+			budget, budget_decimals, contracts, contract_decimals,
+			premium, premium_decimals, fees, fee_decimals, collateral, collateral_decimals,
+			break_even_prices, break_even_price_decimals, break_even_prices_usd,
+			entry_premium_usd, maximum_loss_usd, created_at, confirmed_at)
+		values (\${positionId}::uuid, null, \${userId}::uuid, 'standalone', 'back', 'confirmed', 8453, \${address},
+			'rail-order', \${snapshot}::jsonb, \${fillEvent}::jsonb, \${SNAPSHOT.order.option},
+			\${"0x" + positionId.replace(/-/g, "").repeat(2).slice(0, 64)},
+			999998, 6, 389926, 6, 999998, 6, 124999, 6, 0, 6,
+			'{}', 8, '{}', 0.999998, 0.999998, now(), now())\`);
+
+	// The rail renders only for a signed-in visitor; this is the ONLY thing the
+	// child fakes about it.
+	globalThis.__session = { userId, walletAddress: address, expiresAt: new Date(Date.now() + 3600_000) };
+
+	try {
+		const { positionInstrument } = await import("@/lib/position/instrument");
+		const { derivePnlAtSpot, usd8FromSpotNumber } = await import("@/lib/position/pnl");
+		const { derivationFor, listRowPnl } = await import("@/lib/position/view");
+		const instrument = positionInstrument(SNAPSHOT);
+		const quantities = { contracts: "389926", contractDecimals: 6, premium: "999998",
+			premiumDecimals: 6, fees: "124999", feeDecimals: 6, collateral: "0", collateralDecimals: 6 };
+		const derivation = derivationFor(
+			{ position: { economics: {}, status: "confirmed" }, owner: {}, instrument, quantities, thesis: null },
+			usd8FromSpotNumber(1),
+		);
+		const expected = derivePnlAtSpot(derivation.inputs, usd8FromSpotNumber(${SPOT}));
+
+		// The countercheck the reviewer ran: the SAME row through the shared
+		// valuation helper, so the string the card must print is derived, not typed.
+		const { getPortfolio } = await import("@/lib/data/reads");
+		const { livePriceBook } = await import("@/lib/position/spot");
+		const { PNL_BASIS_SHORT, position } = await import("@/lib/display");
+		const rows = await getPortfolio(address);
+		const book = await livePriceBook(["ETH"], ["USDC"]);
+		const counter = position(rows[0], new Date(), listRowPnl(rows[0], book));
+
+		// The ACTUAL component, rendered.
+		const { renderToStaticMarkup } = await import("react-dom/server");
+		const { YourPositionsRail } = await import("@/components/market/your-positions-rail");
+		const html = renderToStaticMarkup(await YourPositionsRail({ asset: "ETH" }));
+
+		console.log("RESULT:" + JSON.stringify({
+			snapshotCalls: globalThis.__snapshotCalls,
+			expected,
+			rowCount: rows.length,
+			counterRaw: counter.livePnlUsd.raw,
+			counterBasis: counter.basis,
+			railHasSigned: html.includes(counter.livePnlUsd.signed),
+			railHasDerivedBasis: html.includes(PNL_BASIS_SHORT.derived),
+			railHasUnavailableBasis: html.includes(PNL_BASIS_SHORT.unavailable),
+			railHasCard: html.includes("Your ETH positions"),
+		}));
+	} finally {
+		await db.execute(sql\`delete from activity where user_id = \${userId}::uuid\`);
+		await db.execute(sql\`delete from positions where id = \${positionId}::uuid\`);
+		await db.execute(sql\`delete from users where id = \${userId}::uuid\`);
+	}
+	process.exit(0);
+`;
+
+live("the market page's own positions rail prices its rows from the same book", () => {
+	const result = probe(SEED_AND_RENDER_RAIL) as {
+		snapshotCalls: number;
+		expected: string | null;
+		rowCount: number;
+		counterRaw: string;
+		counterBasis: string;
+		railHasSigned: boolean;
+		railHasDerivedBasis: boolean;
+		railHasUnavailableBasis: boolean;
+		railHasCard: boolean;
+	};
+	// Guards, so nothing below can hold vacuously.
+	expect(result.snapshotCalls).toBeGreaterThan(0);
+	expect(result.rowCount).toBe(1);
+	expect(result.railHasCard).toBe(true);
+	expect(result.expected).not.toBeNull();
+	expect(result.expected).not.toBe("—");
+	// The shared helper and the risk model agree...
+	expect(result.counterRaw).toBe(result.expected!);
+	expect(result.counterBasis).toBe("derived");
+	// ...and the RENDERED card prints that figure, not "not available yet".
+	expect(result.railHasSigned).toBe(true);
+	expect(result.railHasDerivedBasis).toBe(true);
+	expect(result.railHasUnavailableBasis).toBe(false);
+}, TIMEOUT_MS);
+
+live("an unreadable feed leaves the market rail at 'not available yet'", () => {
+	const result = probe(SEED_AND_RENDER_RAIL, "unusable") as {
+		snapshotCalls: number;
+		railHasDerivedBasis: boolean;
+		railHasUnavailableBasis: boolean;
+		railHasCard: boolean;
+	};
+	expect(result.snapshotCalls).toBeGreaterThan(0);
+	expect(result.railHasCard).toBe(true);
+	expect(result.railHasDerivedBasis).toBe(false);
+	expect(result.railHasUnavailableBasis).toBe(true);
 }, TIMEOUT_MS);

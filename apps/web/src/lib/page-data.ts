@@ -21,7 +21,29 @@ import { connection } from "next/server";
 import type * as View from "./display-types";
 import * as display from "./display";
 import * as mock from "./view-data";
+import * as mockSource from "@/mock/data";
+import { attachLinkedPositions, enrichWithTradeLinks } from "./thesis/enrich";
 import { usingDatabase } from "./data/source";
+
+/**
+ * Mock-mode posts with their `/p/<uuid>` trade links applied.
+ *
+ * The two example links live in `mock/data.ts` as a table
+ * (`MOCK_TRADE_CARD_LINKS`) rather than inside the thesis literals, so this
+ * REBUILDS the affected posts instead of mutating the shared fixture: importing
+ * `@/mock/data` still has no side effects, and the fixture array itself is left
+ * exactly as another writer left it.
+ */
+function mockPostsWithTradeLinks(): Domain.Thesis[] {
+	const linked = new Map(mockSource.mockLinkedPositions.map((entry) => [entry.position.id, entry]));
+	const withLinks = mockSource.theses.map((post) => {
+		const link = mockSource.MOCK_TRADE_CARD_LINKS.find((entry) => entry.slug === post.slug);
+		return link === undefined
+			? post
+			: { ...post, thesis: { ...post.thesis, rationale: link.rationale } };
+	});
+	return attachLinkedPositions(withLinks, linked);
+}
 
 /**
  * A `failed` fill is not a position anyone holds, so it never appears in a
@@ -73,7 +95,7 @@ export async function discoverData(): Promise<DiscoverData> {
 		return {
 			signedIn: false, databaseMode: false, ending: [], settled: [],
 			leaderboard: mock.leaderboard,
-			theses: mock.theses,
+			theses: mockPostsWithTradeLinks().map(display.thesis),
 			trending: mock.trending,
 			yourPositions: mock.yourPositions,
 		};
@@ -81,7 +103,13 @@ export async function discoverData(): Promise<DiscoverData> {
 	await connection();
 	const { listFeed, getPortfolio, leaderboard, trending, endingSoon, settled } = await import("./data/reads");
 	const signedIn = await viewer();
-	const theses = await listFeed({ viewerUserId: signedIn?.userId ?? null });
+	const { getPositionsByIds } = await import("./thesis/positions");
+	// One extra query for the whole page: the ids every post's text links, then
+	// the positions behind them. A post that links nothing costs nothing.
+	const theses = await enrichWithTradeLinks(
+		await listFeed({ viewerUserId: signedIn?.userId ?? null }),
+		(ids) => getPositionsByIds(ids),
+	);
 	const positions = signedIn === null ? [] : await getPortfolio(signedIn.walletAddress);
 	return {
 		signedIn: signedIn !== null, databaseMode: true,
@@ -108,7 +136,12 @@ function renderableStatus(status: string): boolean {
 }
 
 export async function thesisDetailData(slug: string): Promise<View.ThesisDetail | undefined> {
-	if (!usingDatabase()) return mock.thesisDetailBySlug(slug);
+	if (!usingDatabase()) {
+		const source = mockSource.thesisDetails.find((entry) => entry.thesis.slug === slug);
+		if (source === undefined) return undefined;
+		const post = mockPostsWithTradeLinks().find((entry) => entry.slug === slug);
+		return display.detail(post === undefined ? source : { ...source, thesis: post });
+	}
 
 	await connection();
 	const { getThread } = await import("./data/reads");
@@ -117,8 +150,13 @@ export async function thesisDetailData(slug: string): Promise<View.ThesisDetail 
 	if (thread === null) return undefined;
 	if (!renderableStatus(thread.thesis.thesis.status)) return undefined;
 
+	const { getPositionsByIds } = await import("./thesis/positions");
+	const [enriched = thread.thesis] = await enrichWithTradeLinks([thread.thesis], (ids) =>
+		getPositionsByIds(ids),
+	);
+
 	return display.detail({
-		thesis: thread.thesis,
+		thesis: enriched,
 		shareUrl: `thesis.fun/t/${thread.thesis.slug}`,
 		shareHeadline: thread.thesis.thesis.headline,
 		// TODO-OWNER: settlement wording and the spot series both come from

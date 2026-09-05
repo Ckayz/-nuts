@@ -103,7 +103,7 @@ function fromLogicError(error: unknown): QuoteRefusal {
 	return refuse("QUOTE_FAILED", error instanceof Error ? error.message : "Quote unavailable");
 }
 
-interface RiskOutputs {
+export interface RiskOutputs {
 	readonly premiumUsd8: bigint | null;
 	readonly maxLossUsd8: bigint | null;
 	readonly maxPayoutUsd8: bigint | null;
@@ -118,8 +118,14 @@ const RISK_UNAVAILABLE: RiskOutputs = { premiumUsd8: null, maxLossUsd8: null, ma
  * A structure with no payoff model (rangers, flies, condors, physical calls)
  * returns nulls rather than an invented number, and so does a premium the
  * helpers reject as exceeding the bounded payoff.
+ *
+ * EXPORTED so the agent's `previewOptionBookTrade` runs this exact function
+ * (`lib/agent/tools.ts`). The agent and the market ticket quoting one structure
+ * at one budget must not be able to print different max payouts, and the only
+ * way to guarantee that is one implementation, pinned by an equality test
+ * (`lib/agent/preview-risk.test.ts`). Its behaviour is unchanged by the export.
  */
-function riskOutputs(input: {
+export function riskOutputs(input: {
 	riskKind: RiskKind | null;
 	positionSide: "long" | "short";
 	strikes: readonly bigint[];

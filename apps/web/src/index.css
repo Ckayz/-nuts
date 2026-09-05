@@ -480,3 +480,21 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 .search-option strong{font-size:13.5px;font-weight:600}
 .search-option small{color:var(--muted);font-size:12px}
 .search-status{padding:8px;color:var(--muted)}
+
+/* m4 (user-flow re-walk 2026-09-06). Landmarks.
+   Measured before: `/` and `/new` reported {"h1":[],"mains":1,"skip":0}; no
+   route had a skip link. A page whose only heading is a card title gives a
+   screen-reader user nothing to identify the route by, and a keyboard user had
+   to walk the whole top bar, nav and left rail on every page.
+
+   `.a11y-hidden` is the same rule `.compose .lbl-hidden` already uses, kept in
+   the DOM and out of the picture; Tailwind's `.sr-only` is not emitted here.
+   Nothing about the visual design changes. */
+.a11y-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+/* The skip link is invisible until it is focused, then it is the first thing on
+   the page. TODO-OWNER: "Skip to content" is provisional wording. */
+.skip-link{position:absolute;left:-9999px;top:0;z-index:100}
+.skip-link:focus-visible{left:12px;top:12px;background:var(--surface);color:var(--text);
+  border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-size:13px;
+  outline:2px solid var(--accent);outline-offset:2px}

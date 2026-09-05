@@ -8,8 +8,22 @@ import { usePathname } from "next/navigation";
  * Portfolio, with the accent underline on the current page
  * (docs/mockups/thesis-fun-mockup.html, `.nav`).
  *
- * Markets opens the first market the book lists, never a hardcoded asset —
- * carried over from the icon rail this replaces.
+ * M3 (user-flow re-walk 2026-09-06). Markets opens ONE market, never a
+ * hardcoded asset, which matches the mockup: its nav's "Markets" button is
+ * `data-go="market"` and that view is a single asset page, `/m/btc`
+ * (docs/mockups/thesis-fun-mockup.html line 367; the view itself is line 741).
+ * There is no markets index in the mockup and no `/markets` route in the app.
+ *
+ * WHICH market, measured rather than assumed: `firstMarketSlug` is
+ * `marketSummariesData().markets[0].slug`, and `lib/market/live.ts:172` sorts
+ * the book's assets by TICKER, ascending. So the rule today is "the
+ * alphabetically first asset the OptionBook has liquidity for" — AVAX on the
+ * live book of 2026-09-06, which is an accident of the sort, not a choice.
+ *
+ * TODO-OWNER: which market "Markets" should open — the alphabetically first
+ * (today), the deepest book, the most traded, the last one the visitor looked
+ * at, or a markets index page of its own. Changing it is a product decision and
+ * an index would be a new route, so nothing here picks one.
  *
  * TODO-OWNER: there is no `/leaderboard` route. The top-traders card on the
  * feed IS the leaderboard today, so the item is a real in-page anchor to it —

@@ -71,6 +71,11 @@ export default async function DiscoverPage() {
 				</>
 			}
 		>
+			{/* m4: the feed's only headings were card titles, so the route had no
+			    `h1` at all. The mockup draws no page heading here (`#feed` opens
+			    straight into the rails), so the name is the nav's own word for
+			    this route and it is taken out of the picture, not added to it. */}
+			<h1 className="a11y-hidden">Feed</h1>
 			<CalloutTabs {...{ ranked, following, top, signedIn, databaseMode }} />
 		</PageFrame>
 	);

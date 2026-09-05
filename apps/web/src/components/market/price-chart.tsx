@@ -23,6 +23,21 @@ import { useEffect, useRef, useState } from "react";
 import type { IChartApi, UTCTimestamp } from "lightweight-charts";
 
 import { CHART_SOURCE_NOTE, type Candle, strikeLevels } from "@/lib/chart/klines";
+import {
+	clusterMarkers,
+	placeThesisMarkers,
+	type MarkerCluster,
+	type MarkerThesis,
+} from "@/lib/chart/thesis-markers";
+import { Avatar } from "@/components/primitives";
+
+/** A cluster plus where it currently sits over the canvas, in CSS pixels. */
+interface Pin {
+	readonly key: string;
+	readonly x: number;
+	readonly y: number;
+	readonly cluster: MarkerCluster;
+}
 
 const CHART_HEIGHT = 260;
 
@@ -32,18 +47,26 @@ export function PriceChart({
 	asset,
 	strikesUsd = [],
 	strikesLabel = null,
+	theses = [],
 }: {
 	readonly asset: string;
 	/** The selected structure's strikes, as the view layer formats them. */
 	readonly strikesUsd?: readonly string[];
 	readonly strikesLabel?: string | null;
+	/** Posts about this market, drawn on the candles they were written in. */
+	readonly theses?: readonly MarkerThesis[];
 }) {
 	const host = useRef<HTMLDivElement>(null);
 	const [phase, setPhase] = useState<Phase>("loading");
+	/** Screen positions for the avatars, recomputed on every pan, zoom and resize. */
+	const [pins, setPins] = useState<readonly Pin[]>([]);
+	const [outsideWindow, setOutsideWindow] = useState(0);
+	const [openCluster, setOpenCluster] = useState<string | null>(null);
 
 	useEffect(() => {
 		let disposed = false;
 		let chart: IChartApi | null = null;
+		const cleanups: Array<() => void> = [];
 
 		(async () => {
 			let candles: Candle[] = [];
@@ -119,14 +142,53 @@ export function PriceChart({
 			}
 
 			chart.timeScale().fitContent();
+
+			/**
+			 * The thesis markers.
+			 *
+			 * lightweight-charts' own markers are shapes, not images, so the
+			 * avatars are ordinary DOM positioned over the canvas: the library
+			 * converts a (time, price) into pixels and React draws the rest. That
+			 * also means the hover card is real HTML — focusable, selectable, and
+			 * styled with the app's own tokens.
+			 */
+			const placement = placeThesisMarkers(theses, candles);
+			const clusters = clusterMarkers(placement.markers);
+			setOutsideWindow(placement.outsideWindow);
+
+			const reposition = () => {
+				if (disposed || chart === null) return;
+				const scale = chart.timeScale();
+				const next: Pin[] = [];
+				for (const cluster of clusters) {
+					const x = scale.timeToCoordinate(cluster.time as UTCTimestamp);
+					const y = series.priceToCoordinate(cluster.price);
+					// Null means the point is scrolled out of view; it is simply
+					// not drawn rather than clamped to an edge it never occupied.
+					if (x === null || y === null) continue;
+					next.push({ key: String(cluster.time), x, y, cluster });
+				}
+				setPins(next);
+			};
+			reposition();
+			chart.timeScale().subscribeVisibleTimeRangeChange(reposition);
+			// autoSize redraws on container resize; the pins must follow it.
+			const observer = new ResizeObserver(reposition);
+			if (host.current !== null) observer.observe(host.current);
+			cleanups.push(() => {
+				observer.disconnect();
+				chart?.timeScale().unsubscribeVisibleTimeRangeChange(reposition);
+			});
+
 			setPhase("ready");
 		})();
 
 		return () => {
 			disposed = true;
+			for (const cleanup of cleanups) cleanup();
 			chart?.remove();
 		};
-	}, [asset, strikesUsd]);
+	}, [asset, strikesUsd, theses]);
 
 	return (
 		<section className="card pad chart-card">
@@ -138,7 +200,61 @@ export function PriceChart({
 				{phase === "empty" ? (
 					<p className="note">Price history is unavailable right now.</p>
 				) : null}
+				{pins.map((pin) => {
+					const lead = pin.cluster.theses[0];
+					if (lead === undefined) return null;
+					const open = openCluster === pin.key;
+					const extra = pin.cluster.theses.length - 1;
+					return (
+						<div className="tmark" key={pin.key} style={{ left: pin.x, top: pin.y }}>
+							<button
+								type="button"
+								className={`tmark-dot ${lead.direction ?? "flat"}`}
+								aria-label={`${pin.cluster.theses.length} thesis on this candle by ${lead.handleLabel}`}
+								aria-expanded={open}
+								onMouseEnter={() => setOpenCluster(pin.key)}
+								onMouseLeave={() => setOpenCluster((current) => (current === pin.key ? null : current))}
+								onFocus={() => setOpenCluster(pin.key)}
+								onBlur={() => setOpenCluster((current) => (current === pin.key ? null : current))}
+							>
+								<Avatar seed={lead.avatarSeed} initials={lead.handleLabel.slice(1, 3).toUpperCase()} size={26} />
+								{extra > 0 ? <span className="tmark-more num">+{extra}</span> : null}
+							</button>
+							{open ? (
+								/* Flipped below when the marker sits in the top half, so the
+								   card cannot escape the chart and cover the stat tiles above. */
+								<div className={`tmark-card ${pin.y < CHART_HEIGHT / 2 ? "below" : ""}`} role="tooltip">
+									{pin.cluster.theses.slice(0, 3).map((thesis) => (
+										<article key={thesis.id}>
+											<header>
+												<b>{thesis.handleLabel}</b>
+												{thesis.direction === null ? null : (
+													<span className={`ptype ${thesis.direction}`}>
+														<i aria-hidden="true" />
+														{thesis.direction === "bull" ? "Bull" : "Bear"}
+													</span>
+												)}
+											</header>
+											<p>{thesis.headline}</p>
+											<footer className="mut num">♥ {thesis.likes}</footer>
+										</article>
+									))}
+									{pin.cluster.theses.length > 3 ? (
+										<p className="mut">and {pin.cluster.theses.length - 3} more on this candle</p>
+									) : null}
+								</div>
+							) : null}
+						</div>
+					);
+				})}
 			</div>
+			{/* Said out loud rather than silently under-reporting: the chart is one
+			    week, and a post older than that has no honest place on it. */}
+			{outsideWindow > 0 ? (
+				<p className="chart-note mut">
+					{outsideWindow} {outsideWindow === 1 ? "thesis is" : "theses are"} older than this window.
+				</p>
+			) : null}
 			{/* Says which price this is. The chart is Binance spot; settlement is a
 			    Chainlink TWAP, and the two are not the same number. */}
 			<p className="chart-note mut">{CHART_SOURCE_NOTE}</p>

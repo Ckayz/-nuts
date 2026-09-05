@@ -128,6 +128,12 @@ export interface Thesis {
     statusLabel: string | null;
     /** Relative time as rendered in the post byline, e.g. "· 18m". */
     postedLabel: string;
+    /**
+     * The moment it was posted, ISO 8601 — the machine-readable twin of
+     * `postedLabel`, which is relative prose ("18m") and cannot be plotted.
+     * The chart needs this to place a post on the candle it happened in.
+     */
+    createdAtIso: string;
     /** Null when the post names no market. */
     tag: Tag | null;
     /** Null when the post names no tradable structure. */

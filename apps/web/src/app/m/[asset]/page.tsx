@@ -256,6 +256,18 @@ export default async function MarketPage({
 					asset={market.asset}
 					strikesUsd={market.structures.find((row) => row.selected)?.strikesUsd ?? []}
 					strikesLabel={market.structures.find((row) => row.selected)?.strikesLabel ?? null}
+					// The posts about this market, drawn on the candles they were
+					// written in. Only what the page already read; no extra query.
+					theses={tagged.map((post) => ({
+						id: post.id,
+						slug: post.slug,
+						createdAt: post.createdAtIso,
+						headline: post.headline,
+						handleLabel: post.creator.handleLabel,
+						avatarSeed: post.creator.avatarSeed,
+						direction: post.direction,
+						likes: post.likes,
+					}))}
 				/>
 
 				{unavailable !== null ? <span className="mkt-warn">{unavailable}</span> : null}

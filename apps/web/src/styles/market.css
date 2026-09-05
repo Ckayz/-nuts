@@ -353,3 +353,33 @@
 .chart-box{position:relative;min-height:120px}
 .chart-box .note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;margin:0}
 .chart-note{margin:10px 0 0;font-size:12px;line-height:1.4}
+
+/* Thesis markers on the price chart — fomo's signature idea: a post drawn on
+   the candle it was written in, so a call that preceded a move is visible as
+   having preceded it. Positioned in JS from the chart's own coordinate
+   conversion; everything below is presentation only. */
+.tmark{position:absolute;transform:translate(-50%,-50%);z-index:3}
+.tmark-dot{display:grid;place-items:center;border-radius:var(--r-chip);
+  border:2px solid var(--line);background:var(--surface);padding:0;line-height:0;
+  transition:transform .12s var(--ease),border-color .12s var(--ease)}
+.tmark-dot:hover,.tmark-dot:focus-visible{transform:scale(1.12)}
+/* The ring carries the direction; it is a money statement, so it may take the
+   money colours. The avatar itself is never tinted. */
+.tmark-dot.bull{border-color:var(--gain)}
+.tmark-dot.bear{border-color:var(--loss)}
+.tmark-more{position:absolute;right:-6px;bottom:-4px;
+  background:var(--surface2);border-radius:var(--r-chip);
+  padding:0 4px;font-size:10px;line-height:14px;color:var(--muted)}
+
+.tmark-card{position:absolute;left:50%;bottom:calc(100% + 10px);transform:translateX(-50%);
+  width:min(280px,72vw);background:var(--surface2);border-radius:var(--r-panel);
+  padding:12px 14px;z-index:4;pointer-events:none;
+  box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.tmark-card article + article{margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft)}
+.tmark-card header{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.tmark-card header b{font-size:13px}
+.tmark-card p{margin:0;font-size:13px;line-height:1.45}
+.tmark-card footer{margin-top:6px;font-size:11.5px}
+/* A marker near the top of the chart opens its card downward instead, so the
+   card stays inside the chart rather than covering the stat tiles above it. */
+.tmark-card.below{bottom:auto;top:calc(100% + 10px)}

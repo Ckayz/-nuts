@@ -74,8 +74,8 @@ function context(): TradePanelContext {
 		structureLabel: "ETH put 2500 P",
 		expiryLabel: "05 Sep 26 15:00 UTC",
 		sides: {
-			bull: { taker: "buy", available: true, reason: null },
-			bear: { taker: "sell", available: true, reason: null },
+			bull: { taker: "buy", word: "Bull", directional: true, available: true, reason: null },
+			bear: { taker: "sell", word: "Bear", directional: true, available: true, reason: null },
 		},
 		quote: quoteView("bull", RAW_BUY, "BUY-A"),
 		presets: ["50"],

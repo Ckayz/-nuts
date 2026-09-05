@@ -19,7 +19,7 @@ function put(id: string, priceE8: bigint, strikeE8: bigint, availableAmount = 1_
 	return {
 		id, asset: "BTC", expiry: 1800000000n, expiryAt: "2027-01-15T08:00:00Z",
 		productType: "put", implementationName: "PUT", implementationAddress: "0x0",
-		isCall: false, strikes: [strikeE8], strikesUsd: [String(strikeE8 / ONE)],
+		isCall: false, riskKind: "put", strikes: [strikeE8], strikesUsd: [String(strikeE8 / ONE)],
 		collateralAddress: "0x0", collateralSymbol: "USDC", collateralDecimals: 6,
 		buy: { availableAmount, pricePerContract: priceE8 } as Market, sell: null,
 	};

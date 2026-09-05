@@ -22,6 +22,7 @@ import type {
 	QuoteRaw,
 	RecordResult,
 	RecordSuccess,
+	SideAvailability,
 	TicketQuoteView,
 	TradePanelContext,
 } from "@/lib/trade/types";
@@ -292,6 +293,32 @@ export function recordingSettled(result: RecordResult): result is RecordSuccess 
 	return result.ok;
 }
 
+/**
+ * I-1 (owner 2026-09-06, decision 1). What each side button says.
+ *
+ * The words are decided on the SERVER, per instrument, by `sideWord()` and
+ * handed over in `TradePanelContext.sides` — the ticket must not spell a second
+ * rule, which is how "Bull · buy" came to sit on a bought put whose own
+ * position page said "Bear" (userflow pass 3, MAJOR-1). "Bull" is now always
+ * "the asset goes up", so on a put the Bull button SELLS.
+ *
+ * `undefined` is the panel with NO live instrument behind it — the
+ * `DATA_SOURCE=mock` fixture panel, and the db-mode panel whose requested
+ * structure has left the book. A direction is a property of the option, so with
+ * no option there is no direction to print and the buttons carry the raw taker
+ * verbs. The mockup's own labels were "Bull · buy" / "Bear · sell"
+ * (docs/mockups/thesis-fun-mockup.html:870-871); owner decision 1 supersedes
+ * them, because on a put those words name the opposite trade.
+ *
+ * A structure with no direction (RANGER, fly, condor) arrives with
+ * `directional: false` and is labelled the same way — never a guessed
+ * direction. TODO-OWNER: "Buy" / "Sell" as those two words.
+ */
+export function buttonText(availability: SideAvailability | undefined, fallback: "bull" | "bear"): string {
+	if (availability === undefined) return fallback === "bull" ? "Buy" : "Sell";
+	return availability.directional ? `${availability.word} · ${availability.taker}` : availability.word;
+}
+
 export function TakeASide({
 	ticket,
 	structureLabel,
@@ -426,6 +453,11 @@ export function TakeASide({
 				const next = await quoteTicket({
 					structureId: trade.structureId,
 					side: nextSide,
+					// I-1. The taker side this button stands for, as the SERVER
+					// resolved it for this instrument. Sent so the quote is for the
+					// side the label promises even if the panel is holding a
+					// structure the server re-reads differently.
+					taker: trade.sides[nextSide].taker,
 					budgetInput: nextBudget,
 				});
 				// C5. Drop a response that a newer request has already superseded.
@@ -611,6 +643,8 @@ export function TakeASide({
 				const first = await prepareTrade({
 					structureId: trade.structureId,
 					side,
+					// I-1. See `requote` above: the button's own taker side.
+					taker: trade.sides[side].taker,
 					budgetInput,
 					thesisId: trade.thesis?.id ?? null,
 				});
@@ -698,6 +732,8 @@ export function TakeASide({
 					const second = await prepareTrade({
 						structureId: trade.structureId,
 						side,
+						// I-1. See `requote` above: the button's own taker side.
+						taker: trade.sides[side].taker,
 						budgetInput,
 						thesisId: trade.thesis?.id ?? null,
 					});
@@ -738,6 +774,8 @@ export function TakeASide({
 					const fresh = await prepareTrade({
 						structureId: trade.structureId,
 						side,
+						// I-1. See `requote` above: the button's own taker side.
+						taker: trade.sides[side].taker,
 						budgetInput,
 						thesisId: trade.thesis?.id ?? null,
 					});
@@ -877,7 +915,7 @@ export function TakeASide({
 					disabled={locked || (bull !== undefined && !bull.available)}
 					onClick={() => chooseSide("bull")}
 				>
-					Bull · buy
+					{buttonText(bull, "bull")}
 				</button>
 				<button
 					type="button"
@@ -888,18 +926,18 @@ export function TakeASide({
 					disabled={locked || (bear !== undefined && !bear.available)}
 					onClick={() => chooseSide("bear")}
 				>
-					Bear · sell
+					{buttonText(bear, "bear")}
 				</button>
 			</div>
 			<p className="fine">{sideNote}</p>
 			{bull !== undefined && !bull.available && bull.reason !== null ? (
 				<span className="msg">
-					<b>Bull</b> {bull.reason}
+					<b>{bull.word}</b> {bull.reason}
 				</span>
 			) : null}
 			{bear !== undefined && !bear.available && bear.reason !== null ? (
 				<span className="msg">
-					<b>Bear</b> {bear.reason}
+					<b>{bear.word}</b> {bear.reason}
 				</span>
 			) : null}
 

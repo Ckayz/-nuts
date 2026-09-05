@@ -1082,7 +1082,7 @@ export const markets: Market[] = [
             { "id": "btc-26sep-72000-88000-rg", "expiryAt": "2026-09-26T08:00:00Z", "productType": "ranger", "isCall": false, "strikesUsd": ["72000", "88000"], "premiumPerContractUsd": "318.50", "maxPayoutMultiple": "2.4", "liquidityLeftUsd": "6800" }
         ],
         "ticket": {
-            "sideNote": "Bull buys the 78k / 74k put spread and pays premium. Bear sells it and posts collateral. Both are live OptionBook fills sized to your budget.",
+            "sideNote": "Bear buys the 78k / 74k put spread and pays premium. Bull sells it and posts collateral. Both are live OptionBook fills sized to your budget.",
             "maximumLossUsd": "250",
             "collateralSymbol": "USDC",
             "presetsUsd": ["50", "100", "500", "1000"],
@@ -1136,7 +1136,7 @@ export const markets: Market[] = [
             { "id": "sol-13sep-95-90-ps", "expiryAt": "2026-09-13T08:00:00Z", "productType": "put spread", "isCall": false, "strikesUsd": ["95", "90"], "premiumPerContractUsd": "0.94", "maxPayoutMultiple": "5.3", "liquidityLeftUsd": "3100" }
         ],
         "ticket": {
-            "sideNote": "Bull buys the 100 put and pays premium. Bear sells it and posts collateral. Both are live OptionBook fills sized to your budget.",
+            "sideNote": "Bear buys the 100 put and pays premium. Bull sells it and posts collateral. Both are live OptionBook fills sized to your budget.",
             "maximumLossUsd": "250",
             "collateralSymbol": "USDC",
             "presetsUsd": ["50", "100", "500", "1000"],

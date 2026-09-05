@@ -25,6 +25,7 @@ import { getSession } from "@/lib/auth/session";
 import { createOrFetchUser } from "@/lib/auth/store";
 import { findStructure, readClient, type LiveStructure } from "@/lib/market/live";
 import { quoteStructure, type StructureQuote } from "@/lib/market/quote";
+import { sideWord } from "@/lib/market/direction";
 import { takerSideDisagreement, TAKER_SIDE_CONTRADICTION } from "@/lib/market/taker-side";
 import { parseTokenAmount } from "@/lib/market/units";
 import { isFeedUnavailable } from "@/lib/thetanuts/orders";
@@ -34,8 +35,8 @@ import { instrumentMismatch } from "./attachment";
 import { findThesis, findUnrecordedFill, unrecordedFillReason } from "./store";
 import { simulateFill } from "./chain";
 import { encodeTradeTicket, type TradeTicketPayload } from "./ticket";
-import { rawOf, takerFor } from "./view";
-import type { PrepareResult, TicketSide, TxRequest } from "./types";
+import { directionOfSide, rawOf, takerForSide } from "./view";
+import type { PrepareResult, TakerSide, TicketSide, TxRequest } from "./types";
 
 function fail(code: string, reason: string, needsSignIn = false): PrepareResult {
 	return needsSignIn ? { ok: false, code, reason, needsSignIn } : { ok: false, code, reason };
@@ -52,7 +53,31 @@ function asTx(input: { to: string; data: string }): TxRequest {
 
 export interface PrepareTradeInput {
 	readonly structureId: string;
+	/**
+	 * The MARKET DIRECTION the visitor picked (I-1, owner 2026-09-06 decision 1):
+	 * "bull" means they profit if the asset goes UP. Which side of the book that
+	 * is depends on the INSTRUMENT — on a put it is the taker SELL — and is
+	 * resolved below, after the structure has been re-read, never assumed from
+	 * the word.
+	 */
 	readonly side: TicketSide;
+	/**
+	 * I-1, optional and authoritative when present: the taker side the ticket
+	 * resolved from the same server-built `TradePanelContext.sides` it labelled
+	 * its buttons from. The market ticket always sends it.
+	 *
+	 * Absent means the caller is `lib/agent/execute.ts`, which passes a
+	 * hardcoded `side: "bull"` that has always meant "prepare a taker BUY" (it
+	 * refuses every order whose `side !== "buy"` first). Those requests keep the
+	 * legacy `takerFor` mapping, so the agent's behaviour is unchanged by this
+	 * fold; see `./view.ts` for the follow-up that removes the fallback.
+	 *
+	 * Trusting it adds no authority: the browser could already choose either
+	 * side through `side`, the server re-quotes whichever side it resolves, and
+	 * the economics the wallet is asked to sign are the ones this function
+	 * returns for THAT side.
+	 */
+	readonly taker?: TakerSide;
 	readonly budgetInput: string;
 	/**
 	 * The post being traded on, when the visitor arrived from one. Absent means a
@@ -74,8 +99,6 @@ export async function prepareTradeFor(
 	if (session === null) {
 		return fail("NO_SESSION", "Sign in with your wallet before signing a trade.", true);
 	}
-	const taker = takerFor(input.side);
-
 	// C#2. A fill this wallet has already broadcast and not recorded owns the
 	// ticket until it is settled. The browser holds the same fence in
 	// `lib/trade/held-fill.ts`; this one also covers a cleared store, a second
@@ -96,13 +119,24 @@ export async function prepareTradeFor(
 	if (isFeedUnavailable(found)) return fail(found.error.toUpperCase(), found.detail);
 	const { structure } = found;
 
+	// I-1. The side of the book is resolved HERE, against the instrument that was
+	// just re-read — the mapping from a direction word to a taker side is a
+	// property of the option, not of the word, so it cannot be computed before
+	// the structure is known.
+	const taker: TakerSide = input.taker ?? takerForSide(structure, input.side);
+	// The direction the RESULTING position will carry, which is the word every
+	// surface downstream prints. Derived from the taker side that is actually
+	// filled, so a request whose `side` and `taker` disagree can never mint a
+	// ticket that misnames itself.
+	const direction: TicketSide = directionOfSide(structure, taker);
+
 	const order: Market | null = structure[taker];
 	if (order === null) {
 		return fail(
 			"NO_ORDER_ON_SIDE",
 			taker === "sell"
-				? "No maker is buying this structure right now, so the Bear side cannot be filled."
-				: "No maker is selling this structure right now, so the Bull side cannot be filled.",
+				? `No maker is buying this structure right now, so the ${sideWord(structure, taker)} side cannot be filled.`
+				: `No maker is selling this structure right now, so the ${sideWord(structure, taker)} side cannot be filled.`,
 		);
 	}
 	if (structure.collateralDecimals === null || structure.collateralSymbol === null) {
@@ -210,7 +244,7 @@ export async function prepareTradeFor(
 		chainId: 8453,
 		structureId: structure.id,
 		instrumentLabel: `${structure.asset} ${structure.productType} ${strikesLabel(structure.strikesUsd, structure.isCall)}`,
-		side: input.side,
+		side: direction,
 		taker,
 		thesisId: resolved.thesisId,
 		role: resolved.role,

@@ -17,13 +17,34 @@ import { parseTokenAmount } from "@/lib/market/units";
 import { isFeedUnavailable } from "@/lib/thetanuts/orders";
 import { prepareTrade as prepare, type PrepareTradeInput } from "./prepare";
 import { recordTrade as record, type RecordTradeInput } from "./record";
-import { quoteView, takerFor } from "./view";
-import type { PrepareResult, RecordResult, TicketQuoteView, TicketSide } from "./types";
+import { directionOfSide, quoteView, takerForSide } from "./view";
+import type { PrepareResult, RecordResult, TakerSide, TicketQuoteView, TicketSide } from "./types";
 
 export interface QuoteTicketInput {
 	readonly structureId: string;
+	/**
+	 * The MARKET DIRECTION the visitor picked. Which taker side that selects is
+	 * resolved here against the instrument, never assumed from the word (I-1).
+	 */
 	readonly side: TicketSide;
+	/**
+	 * I-1, optional and authoritative when present: the taker side the ticket
+	 * already resolved from `TradePanelContext.sides`. The ticket always sends
+	 * it, so the button and the quote can never disagree while the browser holds
+	 * a structure the server has since re-read. Absent means the caller is the
+	 * agent path, which is mapped by the legacy `takerFor` — see `./view.ts`.
+	 */
+	readonly taker?: TakerSide;
 	readonly budgetInput: string;
+}
+
+/** Which side of the book a request names, and the direction word that side earns. */
+function resolve(structure: Parameters<typeof takerForSide>[0], input: QuoteTicketInput): {
+	taker: TakerSide;
+	side: TicketSide;
+} {
+	const taker = input.taker ?? takerForSide(structure, input.side);
+	return { taker, side: directionOfSide(structure, taker) };
 }
 
 /** Re-quotes one side of one structure. Read-only; no session required. */
@@ -34,7 +55,7 @@ export async function quoteTicket(input: QuoteTicketInput): Promise<TicketQuoteV
 		return refusal(input, "FEED_UNAVAILABLE", found.detail);
 	}
 	const { structure } = found;
-	const taker = takerFor(input.side);
+	const { taker, side } = resolve(structure, input);
 	const order = structure[taker];
 	if (order === null) {
 		return refusal(
@@ -61,7 +82,7 @@ export async function quoteTicket(input: QuoteTicketInput): Promise<TicketQuoteV
 		budget,
 		referrer: env.THESIS_REFERRER,
 	});
-	return quoteView({ structure, side: input.side, quote, budgetInput: input.budgetInput });
+	return quoteView({ structure, side, quote, budgetInput: input.budgetInput });
 }
 
 /** A refusal still needs a structure to render its label; this one is looked up again. */
@@ -70,7 +91,7 @@ async function refusal(input: QuoteTicketInput, code: string, reason: string): P
 	if (found === null || isFeedUnavailable(found)) return null;
 	return quoteView({
 		structure: found.structure,
-		side: input.side,
+		side: resolve(found.structure, input).side,
 		quote: { ok: false, code, reason },
 		budgetInput: input.budgetInput,
 	});

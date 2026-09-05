@@ -180,6 +180,46 @@ export async function thesisDetailData(slug: string): Promise<View.ThesisDetail 
 	});
 }
 
+/**
+ * `/p/[id]`: one position's own page (owner 2026-09-05, "trade is just trade").
+ *
+ * ADDED for the position round; nothing above was restructured. Like every other
+ * read here it is mode-aware, and like `/t/[slug]` its database branch starts
+ * with `await connection()` because a position's status and P&L change after the
+ * build.
+ *
+ * No status filter: `FILLED_POSITION_STATUSES` keeps a `pending` or `failed`
+ * transaction out of feeds, but the transaction's own page must still show it
+ * (PRD 13). What the page must never do is call one of those a P&L — that rule
+ * lives in `lib/position/pnl.ts`.
+ */
+export async function positionPageData(id: string): Promise<View.PositionPage | undefined> {
+	const { positionPage } = await import("./position/view");
+	if (!usingDatabase()) {
+		const { mockPositionDetail } = await import("./position/mock");
+		const detail = mockPositionDetail(id);
+		if (detail === undefined) return undefined;
+		// The fixtures carry no order snapshot, so there is no instrument to price
+		// and no live call is made: a mock page never reaches the network.
+		return positionPage({ detail, spotUsd8: null, collateralUsdPrice8: null, asOf: new Date() });
+	}
+	await connection();
+	const { readPositionDetail } = await import("./position/read");
+	const detail = await readPositionDetail(id);
+	if (detail === null) return undefined;
+	const { livePrices } = await import("./position/spot");
+	const prices = await livePrices(
+		detail.instrument?.asset ?? null,
+		detail.instrument?.collateralSymbol ?? null,
+	);
+	return positionPage({
+		detail,
+		spotUsd8: prices.spotUsd8,
+		collateralUsdPrice8: prices.collateralUsdPrice8,
+		asOf: new Date(),
+	});
+}
+
 export async function creatorPageData(handle: string): Promise<CreatorPageData | undefined> {
 	if (!usingDatabase()) {
 		const creator = mock.creatorByHandle(handle);

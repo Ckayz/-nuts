@@ -22,10 +22,10 @@ function group(value: string, digits = 0): string {
 }
 export function amount(value: string | null): View.DisplayAmount {
     if (value === null)
-        return { raw: "—", usd: "—", usd2: "—", signed: "—", pnlClass: "" };
+        return { raw: "—", usd: "—", usd2: "—", signed: "—", signed2: "—", pnlClass: "" };
     const { sign } = decimal(value);
     const minus = sign < 0 ? "−" : "";
-    return { raw: value, usd: `${minus}$${group(value)}`, usd2: `${minus}$${group(value, 2)}`, signed: `${sign > 0 ? "+" : minus}$${group(value)}`, pnlClass: sign > 0 ? "bull" : sign < 0 ? "bear" : "" };
+    return { raw: value, usd: `${minus}$${group(value)}`, usd2: `${minus}$${group(value, 2)}`, signed: `${sign > 0 ? "+" : minus}$${group(value)}`, signed2: `${sign > 0 ? "+" : minus}$${group(value, 2)}`, pnlClass: sign > 0 ? "bull" : sign < 0 ? "bear" : "" };
 }
 function optionalAmount(value: string | null) { return value === null ? undefined : amount(value); }
 /** Preserve the exact input when a nonzero quantity would round to zero. */
@@ -37,7 +37,10 @@ export function quantity(value: string | null) {
     return `${sign < 0 ? "-" : ""}${rounded}`;
 }
 function fragment(value: string, leading = 6, trailing = 4) { return value.length > leading + trailing + 1 ? `${value.slice(0, leading)}…${value.slice(-trailing)}` : value; }
-function tx(hash: string | null, mockFragment: string | null): View.TxRef | undefined {
+/** Exported for the position page (lib/position), which renders one position's
+ *  own transaction link. One implementation, so the truncation and the BaseScan
+ *  URL cannot drift between a post and a position. */
+export function tx(hash: string | null, mockFragment: string | null): View.TxRef | undefined {
     if (!hash && !mockFragment)
         return undefined;
     return { label: `${hash ? fragment(hash) : mockFragment} ↗`, href: hash ? `https://basescan.org/tx/${hash}` : "#" };

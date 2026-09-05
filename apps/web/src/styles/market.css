@@ -351,6 +351,12 @@
 .chart-h h3{font-size:15px}
 .chart-h .num{margin-left:auto;font-size:12.5px}
 .chart-box{position:relative;min-height:120px}
+/* The library's canvas gets its own element inside the box: `role="img"` names
+   it for a screen reader and hides its subtree, so the thesis markers — real
+   focusable buttons — stay siblings of it rather than children. It fills the
+   box, which carries the height, so the marker coordinates the library reports
+   are still measured from the same origin the markers are positioned against. */
+.chart-canvas{position:absolute;inset:0}
 .chart-box .note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;margin:0}
 .chart-note{margin:10px 0 0;font-size:12px;line-height:1.4}
 

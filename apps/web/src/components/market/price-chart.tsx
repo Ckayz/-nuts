@@ -22,7 +22,14 @@ import { useEffect, useRef, useState } from "react";
 // only the dynamic import below ever pulls the runtime in.
 import type { IChartApi, UTCTimestamp } from "lightweight-charts";
 
-import { CHART_SOURCE_NOTE, type Candle, strikeLevels } from "@/lib/chart/klines";
+import {
+	CHART_SOURCE_NOTE,
+	CHART_TIMEOUT_MS,
+	CHART_WINDOW_LABEL,
+	type Candle,
+	strikeLevels,
+	whenAborted,
+} from "@/lib/chart/klines";
 import {
 	clusterMarkers,
 	placeThesisMarkers,
@@ -40,6 +47,12 @@ interface Pin {
 }
 
 const CHART_HEIGHT = 260;
+
+/**
+ * How many posts a clustered marker's card lists before it says "and N more".
+ * TODO-OWNER: the number.
+ */
+const CARD_THESES = 3;
 
 type Phase = "loading" | "ready" | "empty";
 
@@ -70,10 +83,20 @@ export function PriceChart({
 
 		(async () => {
 			let candles: Candle[] = [];
+			// Bounded on the same deadline the proxy uses. Without it a route
+			// that never answers leaves `phase` on "loading" forever: an empty
+			// box, no message, and no way for the reader to know it failed. The
+			// signal is passed to the transport AND raced against, so the bound
+			// holds whatever the transport does; a body that never arrives is
+			// the same stall, so the JSON read is raced too.
+			const signal = AbortSignal.timeout(CHART_TIMEOUT_MS);
 			try {
-				const response = await fetch(`/api/klines/${encodeURIComponent(asset)}`);
+				const response = await Promise.race([
+					fetch(`/api/klines/${encodeURIComponent(asset)}`, { signal }),
+					whenAborted(signal),
+				]);
 				if (response.ok) {
-					const body: unknown = await response.json();
+					const body: unknown = await Promise.race([response.json(), whenAborted(signal)]);
 					const list = (body as { candles?: unknown }).candles;
 					if (Array.isArray(list)) candles = list as Candle[];
 				}
@@ -145,7 +168,10 @@ export function PriceChart({
 				},
 				rightPriceScale: { borderColor: token("--line", "#282438") },
 				timeScale: { borderColor: token("--line", "#282438"), timeVisible: true },
-				crosshair: { horzLine: { labelBackgroundColor: token("--surface2", "#201d2d") }, vertLine: { labelBackgroundColor: token("--surface2", "#201d2d") } },
+				// H-1 carried finding: the fallback said `#201d2d`, but the app's
+				// `--surface2` is `#1a1922` (`src/index.css:19`). Invisible while the
+				// variable resolves, wrong the moment it does not.
+				crosshair: { horzLine: { labelBackgroundColor: token("--surface2", "#1a1922") }, vertLine: { labelBackgroundColor: token("--surface2", "#1a1922") } },
 				handleScale: false,
 				handleScroll: false,
 			});
@@ -223,13 +249,51 @@ export function PriceChart({
 		};
 	}, [asset, strikesUsd, theses]);
 
+	/**
+	 * The screen-reader alternative for the canvas.
+	 *
+	 * A canvas has no readable content: without this the chart is an unlabelled
+	 * blank to anyone not looking at it. It says the three things the picture
+	 * says — which asset, over what window, and which levels are drawn on it —
+	 * and then where the prices came from, because that caveat belongs to every
+	 * reader and not only the sighted one. TODO-OWNER: the wording.
+	 */
+	const chartLabel = [
+		`${asset} price, ${CHART_WINDOW_LABEL}.`,
+		strikesLabel === null ? null : `Strikes drawn: ${strikesLabel}.`,
+		CHART_SOURCE_NOTE,
+	]
+		.filter((part): part is string => part !== null)
+		.join(" ");
+
 	return (
 		<section className="card pad chart-card">
 			<div className="chart-h">
 				<h3>{asset} price</h3>
 				{strikesLabel === null ? null : <span className="mut num">{strikesLabel}</span>}
 			</div>
-			<div className="chart-box" ref={host} style={{ height: CHART_HEIGHT }}>
+			<div className="chart-box" style={{ height: CHART_HEIGHT }}>
+				{/*
+				  The library's canvas gets its OWN element, and the markers stay
+				  siblings of it, for two reasons.
+
+				  a11y: `role="img"` is what gives the canvas a name, and it also
+				  hides everything inside it from assistive technology — so the
+				  thesis markers, which are real focusable buttons, must not be
+				  in there. The role is only set once there is actually a chart:
+				  a label on an empty box would describe a picture that is not
+				  drawn.
+
+				  Correctness: React and lightweight-charts were both writing
+				  children into this one node. React reconciling a node a third
+				  party mutates is a known hazard; now each owns its own.
+				*/}
+				<div
+					className="chart-canvas"
+					ref={host}
+					role={phase === "ready" ? "img" : undefined}
+					aria-label={phase === "ready" ? chartLabel : undefined}
+				/>
 				{phase === "empty" ? (
 					<p className="note">Price history is unavailable right now.</p>
 				) : null}
@@ -257,7 +321,7 @@ export function PriceChart({
 								/* Flipped below when the marker sits in the top half, so the
 								   card cannot escape the chart and cover the stat tiles above. */
 								<div className={`tmark-card ${pin.y < CHART_HEIGHT / 2 ? "below" : ""}`} role="tooltip">
-									{pin.cluster.theses.slice(0, 3).map((thesis) => (
+									{pin.cluster.theses.slice(0, CARD_THESES).map((thesis) => (
 										<article key={thesis.id}>
 											<header>
 												<b>{thesis.handleLabel}</b>
@@ -272,8 +336,8 @@ export function PriceChart({
 											<footer className="mut num">♥ {thesis.likes}</footer>
 										</article>
 									))}
-									{pin.cluster.theses.length > 3 ? (
-										<p className="mut">and {pin.cluster.theses.length - 3} more on this candle</p>
+									{pin.cluster.theses.length > CARD_THESES ? (
+										<p className="mut">and {pin.cluster.theses.length - CARD_THESES} more on this candle</p>
 									) : null}
 								</div>
 							) : null}

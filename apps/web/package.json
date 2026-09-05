@@ -12,7 +12,6 @@
     "@ai-sdk/react": "^4.0.95",
     "@nuts/db": "workspace:*",
     "@nuts/env": "workspace:*",
-    "@nuts/db": "workspace:*",
     "@nuts/thetanuts": "workspace:*",
     "@nuts/ui": "workspace:*",
     "@openrouter/ai-sdk-provider": "^3.0.0",

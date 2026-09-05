@@ -479,6 +479,24 @@ describe("C-3: no role and no channel is an unbounded input", () => {
 		});
 	});
 
+	test("an over-long HISTORY message is not blamed on the person's own message", async () => {
+		// Just over the assistant ceiling and well under the aggregate bound, so
+		// the per-message fence is the one that answers.
+		const answer = await post({
+			messages: [
+				text("What is a put?"),
+				{ role: "assistant", parts: [{ type: "text", text: "x".repeat(MAX_ASSISTANT_MESSAGE_CHARS + 1) }] },
+			],
+		}).response;
+		const json = (await answer.json()) as { error: string };
+		expect({
+			status: answer.status,
+			blamesTheirMessage: json.error.startsWith("That message is too long"),
+			namesTheUserLimit: json.error.includes(MAX_MESSAGE_CHARS.toLocaleString("en-US")),
+			saysEarlierReply: json.error.includes("An earlier reply"),
+		}).toEqual({ status: 400, blamesTheirMessage: false, namesTheUserLimit: false, saysEarlierReply: true });
+	});
+
 	test("an assistant message at the derived ceiling is accepted; one character more is not", () => {
 		const at = (n: number) =>
 			agentChatBodySchema.safeParse({

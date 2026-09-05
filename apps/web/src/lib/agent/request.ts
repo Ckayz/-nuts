@@ -318,6 +318,14 @@ export const MAX_REQUEST_CHARS = 120_000;
 
 /** The issue message the route matches to answer with a useful sentence. */
 export const MESSAGE_TOO_LONG = "agent:message-too-long";
+/**
+ * C-3. The same fence on a message the PERSON did not type.
+ *
+ * A separate code because the sentence must be: "keep it under 2,000
+ * characters" is a lie about a replayed assistant message, whose limit is a
+ * different number and whose author is not the reader.
+ */
+export const HISTORY_TOO_LONG = "agent:history-too-long";
 /** C-3. Its aggregate sibling: the whole conversation, not one message. */
 export const REQUEST_TOO_LONG = "agent:request-too-long";
 
@@ -395,9 +403,10 @@ const messageSchema = z
 	// Measured RAW (`rawMessageText`, no trim): trimming first is what let
 	// 1,000,000 spaces + a question through.
 	.superRefine((message, ctx) => {
-		const limit = message.role === "user" ? MAX_MESSAGE_CHARS : MAX_ASSISTANT_MESSAGE_CHARS;
+		const user = message.role === "user";
+		const limit = user ? MAX_MESSAGE_CHARS : MAX_ASSISTANT_MESSAGE_CHARS;
 		if (rawMessageText(message.parts as Array<{ type?: unknown; text?: unknown }>).length <= limit) return;
-		ctx.addIssue({ code: "custom", message: MESSAGE_TOO_LONG, path: ["parts"] });
+		ctx.addIssue({ code: "custom", message: user ? MESSAGE_TOO_LONG : HISTORY_TOO_LONG, path: ["parts"] });
 	});
 
 /** Exported so the shape can be pinned by a test rather than by a request. */

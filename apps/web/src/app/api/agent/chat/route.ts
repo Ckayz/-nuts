@@ -24,6 +24,7 @@ import { chargeTurn, subjectFor } from "@/lib/agent/usage";
 // export its verbs and its route config, so a schema exported here would fail
 // the build, and it has to be importable by a test.
 import {
+	HISTORY_TOO_LONG,
 	MAX_MESSAGE_CHARS,
 	MESSAGE_TOO_LONG,
 	REQUEST_TOO_LONG,
@@ -117,7 +118,12 @@ export async function POST(request: Request) {
 			? "This conversation has grown too long to send. Start a new chat and ask again."
 			: codes.has(MESSAGE_TOO_LONG)
 				? `That message is too long. Please keep it under ${MAX_MESSAGE_CHARS.toLocaleString("en-US")} characters and send it again.`
-				: "Expected a messages array.";
+				: codes.has(HISTORY_TOO_LONG)
+					? // Not the person's message: an earlier reply in the history is
+						// longer than any answer this app can produce. Nothing they can
+						// shorten, so they are told what to do instead.
+						"An earlier reply in this conversation is too long to send back. Start a new chat and ask again."
+					: "Expected a messages array.";
 		return agentError(sentence, 400);
 	}
 

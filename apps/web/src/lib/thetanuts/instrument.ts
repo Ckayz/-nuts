@@ -15,6 +15,8 @@ export function instrumentKey(order: TradeableOrder): string {
 	const o = order.entry.order;
 	return [
 		order.asset ?? "?",
+		order.side,
+		o.collateral.toLowerCase(),
 		o.isCall ? "C" : "P",
 		o.strikes.join("/"),
 		o.expiry,

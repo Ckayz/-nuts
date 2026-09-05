@@ -155,6 +155,13 @@ export interface Thesis {
     /** Whether the connected wallet has liked this post. */
     likedByViewer: boolean;
     commentCount: number;
+    /**
+     * The positions this post's text links to, resolved and in link order.
+     * ADDED for the trade-card unfurl. Optional so every existing producer of a
+     * `Thesis` (lib/data/map.ts, the mock fixtures) stays valid unchanged;
+     * absent and empty both mean "this post links no position".
+     */
+    linkedPositions?: LinkedPosition[];
 }
 export interface Position {
     id: string;
@@ -179,6 +186,18 @@ export interface Position {
     verification: ThesisAiContext["verification"];
     createdAt: string;
     mockTransactionFragment: string | null;
+}
+/**
+ * A position a post's text links to with a `/p/<uuid>` URL, together with the
+ * wallet that holds it. Owner 2026-09-05: "trade is just trade. post(thesis) is
+ * it's own thing. doesn't have to be tied." — so this is an unfurled LINK, not
+ * a backing relationship: `Thesis.backing` still means the creator's own fill on
+ * this post, and the two are independent.
+ */
+export interface LinkedPosition {
+    position: Position;
+    /** The wallet that holds the position; not necessarily the post's author. */
+    owner: Creator;
 }
 export interface Participant extends Position {
     creator: Creator;
@@ -230,8 +249,6 @@ export interface ThesisDetail {
     shareHeadline: string;
     /** Null when no settlement wording is available for this thesis. */
     settlementLabel: string | null;
-    /** Null when no spot series is available; the database holds no price feed. */
-    spotChangePct: string | null;
     participants: Participant[];
     comments: Comment[];
     activity: ActivityItem[];

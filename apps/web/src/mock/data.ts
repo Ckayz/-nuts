@@ -17,13 +17,13 @@
 // TODO-OWNER: endingSoon flags reproduce chips, not an approved time window.
 // TODO-OWNER: fixture directions follow headlines; only BTC direction is explicitly owner-specified.
 // TODO-OWNER: preset amounts reproduce the mockup, not approved product defaults.
-// Ranking, trending, remaining thesis details and connected-user identity stay TODO-OWNER.
+// Ranking, trending, connected-user identity stay TODO-OWNER.
 // Round 6: a thesis is a post (CLAUDE.md, owner 2026-09-05). Three states are
 // fixtured: text only (nfpSetup: no market, no structure, no backing), tagged
 // (ethCallsCheap: market + structure, no backing) and backed (the rest). The
 // unbacked posts' headline, rationale and counts are example data in the shape
 // the mockup's discover feed shows; likedByViewer is illustrative.
-import type { Comment, Creator, Thesis, Position, ThesisDetail, TrendingItem, Market } from "@/types";
+import type { Comment, Creator, Thesis, LinkedPosition, Position, ThesisDetail, TrendingItem, Market } from "@/types";
 export const merkleMike: Creator = {
     "handle": "merkle_mike",
     "displayName": "merkle_mike",
@@ -745,7 +745,6 @@ export const btcNfpDetail: ThesisDetail = {
     "settlementLabel": "settles on Thetanuts TWAP",
     "activityCount": 40,
     "participantCount": 40,
-    "spotChangePct": "1.65",
     "participants": [
         {
             "id": "mock-creator-position-btc-nfp-4a2c",
@@ -983,23 +982,48 @@ export const btcNfpDetail: ThesisDetail = {
  * empty participant / comment / activity lists rather than invented rows. A post
  * thread page must exist for every post, backed or not.
  */
-function bareDetail(thesis: Thesis, settlementLabel: string, spotChangePct: string | null, comments: Comment[] = []): ThesisDetail {
+function bareDetail(thesis: Thesis, settlementLabel: string | null, comments: Comment[] = []): ThesisDetail {
     return { thesis, shareUrl: `thesis.fun/t/${thesis.slug}`, shareHeadline: `${thesis.thesis.headline.slice(0, 28)}…`,
-        settlementLabel, spotChangePct, participants: [], comments, activity: [], activityCount: 0, participantCount: 0 };
+        settlementLabel, participants: [], comments, activity: [], activityCount: 0, participantCount: 0 };
 }
+// EXAMPLE DATA: complete the rail-only posts using their existing headline and
+// creator. No structure, fill or economics is inferred from a rail summary.
+const railOnlyTheses: Thesis[] = trending.filter(item => !theses.some(thesis => thesis.slug === item.slug)).map(item => {
+    const creator = allCreators.find(creator => creator.handle === item.creatorHandle);
+    if (!creator) throw new Error(`Missing example creator: ${item.creatorHandle}`);
+    return { ...nfpSetup, id: item.slug, slug: item.slug, creatorUserId: creator.id, creator,
+        thesis: { ...nfpSetup.thesis, id: item.slug, headline: item.headline, rationale: null, direction: null },
+        likes: 0, commentCount: 0 };
+});
+// EXAMPLE following cohort, not a connected wallet's follow state.
+export const following = theses.filter(thesis => allCreators.slice(0, 2).some(creator => creator.id === thesis.creatorUserId));
+// TODO-OWNER: offline Top is the brief's example likes ordering.
+export const top = [...theses].sort((a, b) => b.likes - a.likes);
+// TODO-OWNER: example Ending uses the existing rail's remaining days.
+export const ending = [...trending].sort((a, b) => a.remainingDays - b.remainingDays);
+export const settled: TrendingItem[] = theses.filter(thesis => thesis.thesis.status === "settled").flatMap(thesis => {
+    const pnl = thesis.backing?.economics.finalPnlUsd;
+    if (pnl == null) return [];
+    return [{
+    slug: thesis.slug, underlyingAsset: thesis.market?.underlyingAsset ?? "", headline: thesis.thesis.headline,
+    creatorHandle: thesis.creator.handle, remainingDays: 0,
+    estimatedPnlUsd: pnl, bullPct: thesis.backing?.bull.pct ?? 0,
+}];
+});
 export const thesisDetails: ThesisDetail[] = [
     btcNfpDetail,
-    bareDetail(nfpSetup, "no structure named", null, [
+    ...railOnlyTheses.map(thesis => bareDetail(thesis, null)),
+    bareDetail(nfpSetup, "no structure named", [
         { "creator": merkleMike, "createdAt": "2026-09-04T17:56:00Z", "body": "Same read. I put the 78k / 74k spread behind mine, it is on the BTC market." },
         { "creator": oxsable, "createdAt": "2026-09-04T17:58:00Z", "body": "Talk is cheap. Tag a structure." }
     ]),
-    bareDetail(solLoses100, "settles on Thetanuts TWAP", "3.18"),
-    bareDetail(ethCallsCheap, "settles on Thetanuts TWAP", "2.46", [
+    bareDetail(solLoses100, "settles on Thetanuts TWAP"),
+    bareDetail(ethCallsCheap, "settles on Thetanuts TWAP", [
         { "creator": gammaEth, "createdAt": "2026-09-04T22:31:00Z", "body": "The 2,600 / 2,800 is the cleanest one on the board right now." },
         { "creator": deltaVega, "createdAt": "2026-09-04T22:44:00Z", "body": "Vol is asleep because nobody wants to hold through the upgrade. Fair." }
     ]),
-    bareDetail(ethFusaka, "settles on Thetanuts TWAP", "2.46"),
-    bareDetail(ethPrints2500, "settled on Thetanuts TWAP", null),
+    bareDetail(ethFusaka, "settles on Thetanuts TWAP"),
+    bareDetail(ethPrints2500, "settled on Thetanuts TWAP"),
 ];
 export const newCallouts = { count: 9, avatars: [tailbet, jlin, nutsauce] };
 export const wallet = { mockAddressFragment: "0x7c4a…e10b", network: "Base" };
@@ -1251,3 +1275,110 @@ export const allPositions: Position[] = [
 export function positionById(id: string): Position | undefined {
     return allPositions.find((position) => position.id === id);
 }
+
+/* ------------------------------------------------------------------------- *
+ * Trade-card unfurl fixtures (APPENDED; nothing above this line is edited).
+ *
+ * Owner 2026-09-05: a trade and a post are separate things, and a `/p/<uuid>`
+ * link in a post renders the trade as a clickable card. These fixtures give
+ * mock mode two such posts without touching the six existing thesis literals —
+ * `lib/page-data.ts` composes them, so `rails-r1` can still edit the array
+ * above and the two changes merge cleanly.
+ *
+ * The ids are real UUIDs because `lib/thesis/links.ts` accepts nothing else;
+ * every other mock id in this file is a readable fixture string. Economics
+ * reproduce the mockup's position card and the portfolio rows above; nothing
+ * new is invented and absent values stay null.
+ * ------------------------------------------------------------------------- */
+
+/** Position ids the two example links below point at. */
+export const MOCK_TRADE_CARD_POSITION_IDS = {
+    btcPutSpread: "9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01",
+    ethCall: "9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f02",
+} as const;
+
+export const mockLinkedPositions: LinkedPosition[] = [
+    {
+        "position": {
+            "id": MOCK_TRADE_CARD_POSITION_IDS.btcPutSpread,
+            "thesisId": "btc-nfp-4a2c",
+            "userId": "mock-user-merkle_mike",
+            "role": "creator",
+            "side": "back",
+            "status": "indexed",
+            "chainId": 8453,
+            "walletAddress": "",
+            "thesisSlug": "btc-nfp-4a2c",
+            "thesisHeadline": "BTC bleeds after NFP",
+            "underlyingAsset": "BTC",
+            "contracts": "0.0126",
+            "entrySpotPriceUsd": null,
+            "economics": {
+                "entryPremiumUsd": null,
+                "entryFeesUsd": null,
+                "maximumLossUsd": "1000",
+                "maximumPayoutUsd": "4612",
+                "breakEvenPricesUsd": ["77287"],
+                "estimatedPnlUsd": "612",
+                "finalPnlUsd": null,
+                "settlementPriceUsd": null
+            },
+            "verification": { "transactionHash": null, "optionAddress": null, "confirmedOnchain": false },
+            "createdAt": "2026-09-04T17:42:00Z",
+            "mockTransactionFragment": null
+        },
+        "owner": merkleMike
+    },
+    {
+        "position": {
+            "id": MOCK_TRADE_CARD_POSITION_IDS.ethCall,
+            "thesisId": "eth-reclaims-2600-into-fusaka",
+            "userId": "mock-user-wh",
+            "role": "participant",
+            "side": "counter",
+            "status": "indexed",
+            "chainId": 8453,
+            "walletAddress": "",
+            "thesisSlug": "eth-reclaims-2600-into-fusaka",
+            "thesisHeadline": "ETH reclaims 2,600 into Fusaka",
+            "underlyingAsset": "ETH",
+            "contracts": null,
+            "entrySpotPriceUsd": null,
+            "economics": {
+                "entryPremiumUsd": null,
+                "entryFeesUsd": null,
+                "maximumLossUsd": "80",
+                "maximumPayoutUsd": null,
+                "breakEvenPricesUsd": [],
+                "estimatedPnlUsd": "-12",
+                "finalPnlUsd": null,
+                "settlementPriceUsd": null
+            },
+            "verification": { "transactionHash": null, "optionAddress": null, "confirmedOnchain": false },
+            "createdAt": "2026-09-04T20:00:00Z",
+            "mockTransactionFragment": null
+        },
+        "owner": currentUser
+    }
+];
+
+/**
+ * The rationale each post reads with its trade link appended. Applied by
+ * `lib/page-data.ts`, which rebuilds the post rather than mutating the literal
+ * above: importing this module must have no side effects.
+ *
+ * TODO-OWNER: the sentence around the link is example copy, like every other
+ * rationale in this file. The mockup specifies none.
+ */
+export const MOCK_TRADE_CARD_LINKS: { slug: string; rationale: string; positionId: string }[] = [
+    {
+        "slug": "btc-nfp-4a2c",
+        "rationale": `${btcNfp.thesis.rationale} Here is the fill: /p/${MOCK_TRADE_CARD_POSITION_IDS.btcPutSpread}`,
+        "positionId": MOCK_TRADE_CARD_POSITION_IDS.btcPutSpread
+    },
+    {
+        "slug": "sol-loses-100-before-the-weekend",
+        "rationale": `${solLoses100.thesis.rationale ?? ""} Took the other side here /p/${MOCK_TRADE_CARD_POSITION_IDS.ethCall} — different book, same idea.`.trim(),
+        "positionId": MOCK_TRADE_CARD_POSITION_IDS.ethCall
+    }
+];

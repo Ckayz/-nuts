@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PositionCard } from "@/components/feed/position-card";
 import { CommentIcon, ShareIcon, SparkIcon } from "@/components/icons";
 import { LikeButton } from "@/components/feed/like-button";
+import { PostText, TradeCards } from "@/components/feed/trade-card";
 import { Avatar, StatusChip, TagRow } from "@/components/primitives";
 import type { Thesis } from "@/lib/display-types";
 
@@ -11,6 +12,10 @@ import type { Thesis } from "@/lib/display-types";
  *   text only  — headline, rationale, like / comment / share;
  *   tagged     — plus the market chip and, when named, the structure chip;
  *   backed     — plus the verified badge and the creator's live position card.
+ *
+ * Independently of all three, a `/p/<uuid>` link in the rationale unfurls into
+ * a compact trade card: a post and a trade are separate things and a link is
+ * what connects them (owner 2026-09-05).
  */
 export function CalloutPost({ thesis, signedIn = false, databaseMode = false }: { thesis: Thesis; signedIn?: boolean; databaseMode?: boolean }) {
 	return (
@@ -33,7 +38,11 @@ export function CalloutPost({ thesis, signedIn = false, databaseMode = false }: 
 				<p className="h" id={`post-${thesis.slug}`}>
 					<Link href={`/t/${thesis.slug}`}>{thesis.headline}</Link>
 				</p>
-				{thesis.note ? <p className="t">{thesis.note}</p> : null}
+				{thesis.note ? <PostText text={thesis.note} tokens={thesis.noteTokens} /> : null}
+				{/* A `/p/<uuid>` link in the text unfurls here, X-style. The link
+				    above stays clickable; a link whose position did not resolve
+				    simply has no card (owner: no error state). */}
+				<TradeCards cards={thesis.tradeCards} />
 				<TagRow tag={thesis.tag} backed={thesis.backing !== null} />
 				{thesis.backing ? (
 					<PositionCard

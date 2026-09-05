@@ -20,7 +20,7 @@ const ok = <T extends object>(value: T | FeedUnavailable): T => {
 };
 const client = createReadClient({ rpcUrl: "http://127.0.0.1:1", referrer: env.THESIS_REFERRER });
 const A = (digit: string) => `0x${digit.repeat(40)}`;
-function fixture(isLong = true, collateral = "0x4e65fe4dba92790696d040ac24aa414708f5c0ab"): OrderWithSignature {
+function fixture(isLong = false, collateral = "0x4e65fe4dba92790696d040ac24aa414708f5c0ab"): OrderWithSignature {
  const expiry = BigInt(Math.floor(Date.now() / 1000) + 10000);
  return {
   order: { maker: A("1"), taker: A("0"), option: "", isBuyer: !isLong, numContracts: 0n,
@@ -34,11 +34,11 @@ function fixture(isLong = true, collateral = "0x4e65fe4dba92790696d040ac24aa4147
 const view = (row: OrderWithSignature) => toTradeable(deriveMarkets([row])[0]!);
 
 test("labels both sides and prevents side/collateral instrument collisions", () => {
- const buy = view(fixture()); const sell = view(fixture(false));
+ const buy = view(fixture()); const sell = view(fixture(true));
  expect(buy.side).toBe("buy"); expect(sell.side).toBe("sell");
  expect(sell.implementation.info?.name).toBe("PHYSICAL_PUT");
  expect(instrumentKey(buy)).not.toBe(instrumentKey(sell));
- expect(instrumentKey(buy)).not.toBe(instrumentKey(view(fixture(true, A("7")))));
+ expect(instrumentKey(buy)).not.toBe(instrumentKey(view(fixture(false, A("7")))));
 });
 test("buy sizing equals package quote and forwards referrer", () => {
  const row = fixture(); const spy = spyOn(client.optionBook, "previewFillOrder");
@@ -54,7 +54,7 @@ test("buy sizing equals package quote and forwards referrer", () => {
  spy.mockRestore();
 });
 test("decoded sell put: 22000000 collateral, 21268 premium, 2658 estimated fee", () => {
- const row = fixture(false); const spy = spyOn(client.optionBook, "previewFillOrder");
+ const row = fixture(true); const spy = spyOn(client.optionBook, "previewFillOrder");
  const expected = quoteSellFill({ client, order: row, collateralBudget: 22000000n, referrer: env.THESIS_REFERRER });
  expect([expected.collateralRequired, expected.premiumGross, expected.feeEstimate]).toEqual([22000000n, 21268n, 2658n]);
  const result = sizeFill(view(row), "22", client);
@@ -71,7 +71,7 @@ test("decoded sell put: 22000000 collateral, 21268 premium, 2658 estimated fee",
  spy.mockRestore();
 });
 test("gated sell pair is non-executable without opting out", () => {
- const result = sizeFill(view(fixture(false, client.chainConfig.tokens.USDC.address)), "1", client);
+ const result = sizeFill(view(fixture(true, client.chainConfig.tokens.USDC.address)), "1", client);
  expect(result).toMatchObject({ found: true, executable: false, verification: "unverified" });
  if (!result.executable) expect(result.reason).toContain("STRUCTURE_COLLATERAL_UNVERIFIED");
 });
@@ -79,7 +79,7 @@ test("SDK config supplies token decimals and excess precision is rejected", () =
  expect(sizeFill(view(fixture()), "0.0000001", client).executable).toBe(false);
 });
 test("snapshot uses SDK methods, keeps all collateral and sides, caches and deduplicates", async () => {
- const orders = spyOn(rawOrderApi, "request").mockResolvedValue({ orders: [rawFixture(fixture()), rawFixture(fixture(false)), rawFixture(fixture(true, A("7")))] });
+ const orders = spyOn(rawOrderApi, "request").mockResolvedValue({ orders: [rawFixture(fixture()), rawFixture(fixture(true)), rawFixture(fixture(false, A("7")))] });
  const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 2000, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
  try {
   const [a, b] = (await Promise.all([getOrderSnapshot(), getOrderSnapshot()])).map(ok);
@@ -103,7 +103,7 @@ function rawFixture(row: OrderWithSignature) {
 }
 
 test("other PHYSICAL_PUT implementation is rejected by the package gate", () => {
- const row = fixture(false);
+ const row = fixture(true);
  row.rawApiData!.implementation = "0xac5eca7129909de8c12e1a41102414b5a5f340aa";
  const result = sizeFill(view(row), "1", client);
  console.log("OTHER_IMPLEMENTATION", JSON.stringify(result));
@@ -112,7 +112,7 @@ test("other PHYSICAL_PUT implementation is rejected by the package gate", () => 
 });
 
 test("decoded buy has human contracts and explicitly denominated money", () => {
- const row = fixture(true, client.chainConfig.tokens.USDC.address);
+ const row = fixture(false, client.chainConfig.tokens.USDC.address);
  row.order.price = 256458427n;
  row.order.strikes = [234000000000n];
  row.order.strikePrice = 234000000000n;
@@ -131,7 +131,7 @@ test("buy contract units are proven only for 6-decimal collateral; 8 and 18 are 
  expect(buyContractSizeDecimals(6)).toBe(6);
  expect([buyContractSizeDecimals(8), buyContractSizeDecimals(18), buyContractSizeDecimals(null)]).toEqual([null, null, null]);
  for (const token of Object.values(client.chainConfig.tokens).filter(t => [8, 18].includes(t.decimals))) {
-  const order = view(fixture(true, token.address));
+  const order = view(fixture(false, token.address));
   // The order view must not publish a per-contract price it cannot justify.
   expect(order.pricePerContractUsd).toBeNull();
   expect(order.contractSizeDecimals).toBeNull();
@@ -146,7 +146,7 @@ test("buy contract units are proven only for 6-decimal collateral; 8 and 18 are 
   }
  }
  for (const token of Object.values(client.chainConfig.tokens).filter(t => t.decimals === 6)) {
-  const order = view(fixture(true, token.address));
+  const order = view(fixture(false, token.address));
   const result = sizeFill(order, "1", client);
   expect(result.executable).toBe(true);
   if (!result.executable) throw Error(result.reason);
@@ -219,7 +219,7 @@ const ABASWETH = "0xD4a0e0b9149BCee3C920d2E00b5dE09138fd8bb7";
 /** The reviewer's CALL_UNITS fixture: single-strike call on 18-decimal aBasWETH, where the
  * SDK's capacity cap sizes contracts in 10**6 while the collateral is 10**18. */
 function callRow18() {
- const row = fixture(true, ABASWETH);
+ const row = fixture(false, ABASWETH);
  row.rawApiData!.isCall = true;
  row.order.optionType = 0;
  row.order.price = 1000000000000000000n;
@@ -228,13 +228,16 @@ function callRow18() {
  return row;
 }
 
-test("string isLong is dropped before the SDK coerces it into a BUY", async () => {
- // SDK dist/index.js:3387 does isLong: Boolean(rawOrder["isLong"]), so "false" would become true.
+test("string isLong is dropped before the SDK coerces it into a SELL", async () => {
+ // SDK dist/index.js:3387 does isLong: Boolean(rawOrder["isLong"]), so the string "false"
+ // would become true. isLong is the MAKER's long flag (packages/thetanuts/src/side.ts), so
+ // true means the TAKER SELLS: a genuine taker-BUY row would be presented as a sell, and the
+ // user would be asked to lock collateral instead of paying a premium.
  // A genuine BUY row rides along so the book stays readable: a book whose EVERY row is
  // dropped is a feed failure and is covered by its own test below.
  const stringified = rawFixture(fixture(false));
  const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: [
-  rawFixture(fixture(true)),
+  rawFixture(fixture(false)),
   { ...stringified, order: { ...stringified.order, isLong: "false" } },
  ] } });
  const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
@@ -243,7 +246,8 @@ test("string isLong is dropped before the SDK coerces it into a BUY", async () =
   console.log("STRING_FALSE", JSON.stringify({ retained: result.orders.length, dropped: result.droppedEntries, sides: result.orders.map(o => o.side) }));
   expect(result.orders).toHaveLength(1);
   expect(result.droppedEntries).toBe(1);
-  // The survivor is the real buy row; the coerced sell row never reached the book.
+  // The survivor is the real buy row; the row that would have been coerced into a SELL
+  // never reached the book.
   expect(result.orders.map(o => o.side)).toEqual(["buy"]);
   // And at the agent surface: the dropped row can never be previewed as an executable BUY.
   const { searchOptionBookOrders, previewOptionBookTrade } = await import("../agent/tools");
@@ -258,7 +262,7 @@ test("string isLong is dropped before the SDK coerces it into a BUY", async () =
 });
 
 test("real boolean sides survive validation and keep their taker side", async () => {
- const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: [rawFixture(fixture(true)), rawFixture(fixture(false))] } });
+ const request = spyOn(rawOrderApi, "request").mockResolvedValue({ data: { orders: [rawFixture(fixture(false)), rawFixture(fixture(true))] } });
  const data = spyOn(readClient.api, "getMarketData").mockResolvedValue({ prices: { ETH: 0, BTC: 0, SOL: 0, XRP: 0, BNB: 0, AVAX: 0 }, metadata: { lastUpdated: 0, currentTime: 0 } });
  try {
   const result = ok(await getOrderSnapshot(true));
@@ -377,7 +381,7 @@ test("the search tool exposes droppedEntries so a partial book is visible", asyn
 test("the sell view withholds a per-contract price for the family the package refuses", () => {
  // Single-strike calls are the one family whose two SDK decimals views can disagree;
  // quoteSellFill throws STRUCTURE_UNSUPPORTED for them, so no unit is supplied.
- const call = fixture(false);
+ const call = fixture(true);
  call.rawApiData!.isCall = true;
  call.order.optionType = 0;
  const callView = view(call);
@@ -385,7 +389,7 @@ test("the sell view withholds a per-contract price for the family the package re
  expect(callView.contractSizeDecimals).toBeNull();
  expect(callView.pricePerContractUsd).toBeNull();
  // A sell PUT on the same collateral keeps its price: the package supplies that unit.
- const put = view(fixture(false));
+ const put = view(fixture(true));
  expect(put.contractSizeDecimals).toBe(6);
  expect(put.pricePerContractUsd).toBe(decimalString(put.sdkOrder.order.price, 100_000_000n));
 });
@@ -520,6 +524,8 @@ test("MAJOR2a: a payload carrying no orders array is feed_unusable in every tool
 });
 
 test("MAJOR2b: losing every row is feed_unusable in every tool, however the rows fail", async () => {
+ // A real taker-BUY row (isLong false) published with the string "false", which the SDK
+ // would coerce to true, i.e. into a taker SELL. Every row here fails validation.
  const stringified = rawFixture(fixture(false));
  const cases: Array<[string, unknown[]]> = [
   ["S4_schema", [null, null, { order: {} }]],
@@ -626,7 +632,7 @@ test("MAJOR3: kind is filtered before the page cap, so totalMatched counts the w
 test("MINOR1: a taker-SELL view withholds the unit and price on non-6-decimal collateral", () => {
  // aBasWETH is 18-decimal; sellContractSizeDecimals is UNVERIFIED beyond 6 decimals
  // (packages/thetanuts/src/quote.ts), and the package's own quote refuses the pair.
- const sell = view(fixture(false, ABASWETH));
+ const sell = view(fixture(true, ABASWETH));
  expect(sell.side).toBe("sell");
  expect(sell.contractSizeDecimals).toBeNull();
  expect(sell.pricePerContractUsd).toBeNull();
@@ -634,11 +640,11 @@ test("MINOR1: a taker-SELL view withholds the unit and price on non-6-decimal co
  console.log("D2_SELL_18DEC", JSON.stringify({ csd: sell.contractSizeDecimals, price: sell.pricePerContractUsd, executable: quoted.executable }));
  expect(quoted.executable).toBe(false);
  // 8-decimal collateral is withheld for the same reason.
- const eight = view(fixture(false, client.chainConfig.tokens.cbBTC.address));
+ const eight = view(fixture(true, client.chainConfig.tokens.cbBTC.address));
  expect(eight.contractSizeDecimals).toBeNull();
  expect(eight.pricePerContractUsd).toBeNull();
  // The proven 6-decimal unit is still published.
- const six = view(fixture(false));
+ const six = view(fixture(true));
  expect(six.contractSizeDecimals).toBe(6);
  expect(six.pricePerContractUsd).toBe(decimalString(six.sdkOrder.order.price, 100_000_000n));
 });

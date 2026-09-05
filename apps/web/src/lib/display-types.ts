@@ -1,4 +1,6 @@
 /** Presentation-only values, produced by lib/display.ts. Never pass to the shared AI contract. */
+import type { TextToken } from "./thesis/links";
+export type { TextToken };
 export interface DisplayAmount {
     raw: string;
     usd: string;
@@ -82,6 +84,46 @@ export interface Backing {
     bear: SideStats;
     settled: boolean;
 }
+/** One stat tile under a trade card's P&L, e.g. "Risked" / "$1,000". */
+export interface TradeCardStat {
+    label: string;
+    value: string;
+}
+/**
+ * The compact position card a post's `/p/<uuid>` link unfurls into.
+ *
+ * Layout follows the share card the owner sent (`.demo/fomo-share-card.png`):
+ * owner + status chip, the instrument, one big signed P&L with a percent, then
+ * three stat tiles. No price line and no chart — Thetanuts exposes no price
+ * history and the owner removed the charts.
+ */
+export interface TradeCard {
+    positionId: string;
+    /** Canonical `/p/<id>` path; the whole card is a link to it. */
+    href: string;
+    owner: Creator;
+    /** Lifecycle chip copy, e.g. "OPEN" or "SETTLED". */
+    statusLabel: string;
+    /** Whether the position has settled; drives the muted card treatment. */
+    settled: boolean;
+    /** Instrument line, e.g. "BTC put spread" or just "BTC". */
+    instrumentLabel: string;
+    side: Side;
+    /** Side chip copy, "Bull" or "Bear". */
+    sideLabel: string;
+    /** The big number: signed P&L, "—" when the database holds none. */
+    pnlUsd: DisplayAmount;
+    /** "Live P&L" while open, "Result" once settled. */
+    pnlLabel: string;
+    /**
+     * The percent beside the big number, split so the component never parses a
+     * label: `value` is the coloured number, `basis` the neutral wording that
+     * says what it is a percent OF. Null when the ratio is not computable.
+     */
+    pnlPct: { value: string; basis: string } | null;
+    /** Exactly three tiles, each "—" when its value is unavailable. */
+    stats: TradeCardStat[];
+}
 /** Where a post's market/structure chips link to, and what they read. */
 export interface Tag {
     /** Market page slug, e.g. "btc"; the href is built as `/m/${slug}` so
@@ -117,6 +159,14 @@ export interface Thesis {
     likes: number;
     likedByViewer: boolean;
     commentCount: number;
+    /**
+     * `note` split into text and `/p/<uuid>` link tokens. ADDED for the trade
+     * card; optional so a `Thesis` built before this round stays valid. Absent
+     * means "render `note` as plain text".
+     */
+    noteTokens?: TextToken[];
+    /** One card per linked position that resolved, in link order. ADDED. */
+    tradeCards?: TradeCard[];
 }
 export interface Participant {
     creator: Creator;
@@ -185,9 +235,6 @@ export interface ThesisDetail {
     /** Null when no settlement wording is available; the database holds none. */
     settlementLabel: string | null;
     launchedLabel: string;
-    spotUsd: DisplayAmount;
-    /** Spot change as rendered, e.g. "+1.65%"; null with no market or spot series. */
-    spotChangeLabel: string | null;
     maxPayoutUsd: DisplayAmount;
     breakEvenUsd: DisplayAmount;
     participants: Participant[];

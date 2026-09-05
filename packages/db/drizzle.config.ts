@@ -12,10 +12,10 @@ const url = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL || "";
 
 if (url) {
   // URLSearchParams decodes percent-encoded names before the case-insensitive check.
-  const overrides = new Set(["host", "hostaddr", "port", "dbname", "database"]);
+  const overrides = new Set(["host", "hostaddr", "port", "dbname", "database", "options"]);
   for (const name of new URL(url).searchParams.keys()) {
     if (overrides.has(name.toLowerCase())) {
-      throw new Error("Drizzle-kit destination query overrides (host, hostaddr, port, dbname, database) are forbidden");
+      throw new Error("Drizzle-kit destination query overrides (host, hostaddr, port, dbname, database, options) are forbidden");
     }
   }
   // Constructing a Client parses exactly as Pool does; it does not connect.

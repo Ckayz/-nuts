@@ -4,13 +4,13 @@ import { notFound } from "next/navigation";
 import { ActivityList } from "@/components/creator/activity-list";
 import { CreatorStats } from "@/components/creator/creator-stats";
 import { LikeButton } from "@/components/feed/like-button";
+import { PostText, TradeCards } from "@/components/feed/trade-card";
 import { CommentIcon, ShareIcon, SparkIcon } from "@/components/icons";
 import { Avatar, Pill, SplitBar, StatusChip, TagRow } from "@/components/primitives";
 import { CommentsList } from "@/components/thesis/comments-list";
 import { ParticipantsTable } from "@/components/thesis/participants-table";
 import { PayoffChart } from "@/components/thesis/payoff-chart";
 import { SharePanel } from "@/components/thesis/share-panel";
-import { SpotChart } from "@/components/thesis/spot-chart";
 import { ThesisTabs } from "@/components/thesis/thesis-tabs";
 import { signedUsd, usd } from "@/lib/format";
 import { thesisDetailData, socialPageState } from "@/lib/page-data";
@@ -35,11 +35,13 @@ export const dynamic = "force-dynamic";
 
 /** Share metadata reads through the same mode-aware path as the page. */
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+	const { vercelOrigin } = await import("@nuts/env/server");
 	const detail = await thesisDetailData((await params).slug);
 	if (!detail) notFound();
 	const title = detail.thesis.headline;
 	const description = detail.thesis.note ?? detail.thesis.headline;
 	return {
+		...(vercelOrigin ? { metadataBase: new URL(vercelOrigin) } : {}),
 		title,
 		description,
 		openGraph: { title, description, type: "article" },
@@ -101,7 +103,10 @@ export default async function ThesisPage({
 							) : null}
 						</div>
 						<h1 className="h">{t.headline}</h1>
-						{t.note ? <p className="t">{t.note}</p> : null}
+						{t.note ? <PostText text={t.note} tokens={t.noteTokens} /> : null}
+						{/* A `/p/<uuid>` link in the post text unfurls into a trade
+						    card here, exactly as it does in the feed. */}
+						<TradeCards cards={t.tradeCards} />
 						<div className="meta">
 							<Avatar initials={t.creator.initials} size="s" />
 							<b>{t.creator.displayName}</b>
@@ -179,58 +184,8 @@ export default async function ThesisPage({
 					/>
 				) : null}
 
-				{backing && t.asset && detail.spotChangeLabel ? (
+				{backing && t.asset ? (
 					<div className="charts">
-						<div className="chartbox">
-							<div className="hh">
-								<span className="lbl">
-									{t.asset} spot · 7d · entries pinned
-								</span>
-								<span className="v">
-									{usd(detail.spotUsd)}{" "}
-									<span className="bull" style={{ fontSize: "12px" }}>
-										{detail.spotChangeLabel}
-									</span>
-								</span>
-							</div>
-							<SpotChart label="BTC spot price, 7 days, with participant entries marked" />
-							<div className="legend">
-								<span>
-									<i style={{ background: "var(--tn-k)" }} />
-									spot
-								</span>
-								<span>
-									<i style={{ background: "var(--tn-bear)" }} />
-									78,000 long put
-								</span>
-								<span>
-									<i style={{ background: "var(--tn-dim)" }} />
-									74,000 short put
-								</span>
-								<span>
-									<i
-										style={{
-											background: "var(--tn-bull)",
-											width: "8px",
-											height: "8px",
-											borderRadius: "50%",
-										}}
-									/>
-									bull entry
-								</span>
-								<span>
-									<i
-										style={{
-											background: "var(--tn-bear)",
-											width: "8px",
-											height: "8px",
-											borderRadius: "50%",
-										}}
-									/>
-									bear entry
-								</span>
-							</div>
-						</div>
 						<div className="chartbox">
 							<div className="hh">
 								<span className="lbl">Payoff at expiry · per $1,000</span>

@@ -94,8 +94,10 @@ export const rawOrderApi = readClient.api as unknown as {
 
 /** Every field the adapter and the package depend on, validated BEFORE the SDK sees the
  * row. The SDK's `normalizeOdetteOrder` coerces (`isLong: Boolean(rawOrder["isLong"])`,
- * SDK dist/index.js:3387), so a string `"false"` would otherwise become `true` and a
- * taker-SELL order would be previewed as an executable BUY. Nothing here is coerced:
+ * SDK dist/index.js:3387), so a string `"false"` would otherwise become `true`. `isLong` is
+ * the MAKER's long flag (`packages/thetanuts/src/side.ts`, measured from decoded fills), so
+ * `true` means the taker SELLS: a genuine taker-BUY order would be presented as a sell and
+ * the user asked to lock collateral instead of paying a premium. Nothing here is coerced:
  * a row that does not match is dropped and counted.
  * Unnamed fields are left alone so a feed that gains fields still parses. */
 const integerLike = z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]);
@@ -289,7 +291,8 @@ export function sizeFill(order: TradeableOrder, budgetAmount: string, client: Se
   const quote = side === "buy" ? quoteFill({ ...params, budget }) : quoteSellFill({ ...params, collateralBudget: budget });
   const premium = "premium" in quote ? quote.premium : quote.premiumGross;
   const collateral = "collateralRequired" in quote ? quote.collateralRequired : null;
-  // Same observed premium-percentage estimate as sell quote; notional branch UNVERIFIED.
+  // Same 12.5%-of-premium estimate as the sell quote. It is an UPPER BOUND on the fee: the
+  // notional branch fires on Base (packages/thetanuts/src/quote.ts `feeEstimate`).
   const fee = "feeEstimate" in quote ? quote.feeEstimate : premium * 1250n / 10000n;
   const collateralDecimals = "collateralDecimals" in quote ? quote.collateralDecimals : token.decimals;
   // SELL: the package's quote supplies the contract-size unit. BUY: `quoteFill` supplies

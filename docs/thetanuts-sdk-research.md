@@ -1,5 +1,48 @@
 Reviewed .research/thetanuts inputs; SHA-256 index.js 9641d4cf9dbee2590d9c9c831e6cf4a90bf37f3535b9266983b32075687707c4, index.d.ts 99135b1f5bb104d15247ab763c47752c9e658a39f7d5012d4865bcfb3d0e3914, docs e194017f31a1eb9c5a9c1a273fd0c5e307c7c2f2e126dddfd34b81f5c491ac65
 
+---
+
+## CORRECTION 2026-09-05 (core round 9): `isLong` is the MAKER's long flag; this report's side mapping is INVERTED
+
+This report is left as written; the following statements in it are **wrong** and must not be
+used. They were derived from the SDK's own comments, never from chain bytes.
+
+| Line (this file, after this block was inserted) | Wrong text | Correct |
+| ---: | --- | --- |
+| 152 | `isBuyer: boolean; // maker-is-buyer` | SDK-derived as `!isLong`; it is the inverse of the maker's real side. Never use it. |
+| 173 | `isLong: boolean; // true means maker sells` | `isLong: true` means the maker **BUYS** (so the taker sells) |
+| 189 | "Normalization sets `isBuyer = !isLong`" | Accurate about the SDK, but the resulting `isBuyer` is wrong about the world |
+| 224 | `makerSide: raw.isLong ? "seller" : "buyer"` | `makerSide: raw.isLong ? "buyer" : "seller"` |
+| 320 | `if (!freshOrder.rawApiData!.isLong) throw "Taker-sell collateral requirement is UNVERIFIED"` | Inverted: that guard threw on taker-BUY rows and let taker-SELL rows through |
+
+**The measured rule** (decoded on Base mainnet 2026-09-05 with viem, read-only, from
+OptionBook `0x1bDff855d6811728acaDC00989e79143a2bdfDed` calldata, its `OrderFilled` event and
+its ERC-20 transfers):
+
+- `order.isLong === false` → `OrderFilled.sellerWasMaker === true` → the maker is the seller →
+  the **TAKER BUYS** (pays premium). Fill
+  `0x9c4bb145a85740323a14f99cfbbf69c7da18bef1a8fa8f087d2330d095828f8c` (block 50884962): the
+  taker `0xB792296bE8202ba2fc5D3276fA184e5B479920E3` paid 874999 + 124999 USDC and posted no
+  collateral; the maker posted 912426840.
+- `order.isLong === true` → `sellerWasMaker === false` → the maker is the buyer → the
+  **TAKER SELLS** (posts collateral, receives premium − fee). Fill
+  `0xdf3323fefb54cd040a0e86cca3733e4c469a77e33c85a0351e9e987dcfda76f3` (block 50891956): the
+  taker `0x37E04839dB16A445b2646Abf85C49b0e055d368e` paid 22000000 aBasUSDC to the OptionBook
+  and received 18610.
+
+Scan of blocks 50823786–50897786: 105 direct `fillOrder` transactions decoded, 104 `isLong:
+false` and 1 `isLong: true`, zero contradictions of `isLong === !sellerWasMaker`. Event-only
+sweep of blocks 50700595–50900594: 234 `OrderFilled` events, exactly one with
+`sellerWasMaker: false` — so the sell direction rests on that one decoded fill.
+
+The SDK comment at `dist/index.js:3361` ("isLong=true means maker sells, so taker buys") and
+its `isBuyer: !rawOrder["isLong"]` (`:3360`) are wrong about the chain, and
+`client.utils.isLong` (`:11521`) merely reads that wrong `isBuyer`. `packages/thetanuts`
+carries the corrected rule in `src/side.ts` with the same evidence, and rounds 1–8 of that
+package (plus `.research/thetanuts/finding-isLong-side.md`) had it inverted.
+
+---
+
 This is a static analysis of `@thetanuts-finance/thetanuts-client` 0.3.0. The declarations are treated as the public API and the bundled CJS as the behavioral truth; the package identifies those files as its `require` and type exports and identifies the version as 0.3.0 (`sdk/package.json:2-17`). Where the prose docs disagree with those two, this report calls it out. The docs themselves warn that examples are unaudited (`docs-llms-full.txt:107-123`). No network or live-chain assertions were made.
 
 ## 1. Client construction, providers, signers, and endpoints

@@ -2,6 +2,9 @@ import { buildPriceFeedSymbolMap, getChainConfigById, getOptionImplementationInf
 import { BASE_CHAIN_ID } from "./client";
 
 export interface CollateralInfo { readonly address: string; readonly symbol: string | null; readonly decimals: number | null }
+// `Market.makerSide` is the MAKER's side, the opposite of `takerSide(order)`: raw
+// `isLong: true` means the maker is the buyer and the taker sells. Measured from chain
+// bytes — see the transaction evidence in `side.ts`; the SDK's own `isBuyer` is inverted.
 export interface Market {
   readonly asset: string; readonly priceFeed: string; readonly strikes: readonly bigint[]; readonly expiry: bigint;
   readonly side: "call" | "put"; readonly makerSide: "seller" | "buyer"; readonly collateralToken: CollateralInfo;
@@ -28,7 +31,7 @@ export function deriveMarkets(orders: readonly OrderWithSignature[], now?: numbe
     const raw = order.rawApiData;
     if (!raw || order.availableAmount <= 0n || order.order.expiry <= timestamp || BigInt(raw.orderExpiryTimestamp) <= timestamp) return [];
     const token = tokens.find((item) => item.address.toLowerCase() === raw.collateral.toLowerCase());
-    return [{ asset: feeds[raw.priceFeed.toLowerCase()] ?? `UNKNOWN_FEED:${raw.priceFeed}`, priceFeed: raw.priceFeed, strikes: raw.strikes.map(BigInt), expiry: order.order.expiry, side: raw.isCall ? "call" : "put", makerSide: raw.isLong ? "seller" : "buyer", collateralToken: { address: raw.collateral, symbol: token?.symbol ?? null, decimals: token?.decimals ?? null }, implementation: { address: raw.implementation, info: getOptionImplementationInfo(BASE_CHAIN_ID, raw.implementation) }, availableAmount: order.availableAmount, pricePerContract: order.order.price, order }];
+    return [{ asset: feeds[raw.priceFeed.toLowerCase()] ?? `UNKNOWN_FEED:${raw.priceFeed}`, priceFeed: raw.priceFeed, strikes: raw.strikes.map(BigInt), expiry: order.order.expiry, side: raw.isCall ? "call" : "put", makerSide: raw.isLong ? "buyer" : "seller", collateralToken: { address: raw.collateral, symbol: token?.symbol ?? null, decimals: token?.decimals ?? null }, implementation: { address: raw.implementation, info: getOptionImplementationInfo(BASE_CHAIN_ID, raw.implementation) }, availableAmount: order.availableAmount, pricePerContract: order.order.price, order }];
   });
 }
 

@@ -31,6 +31,7 @@
  * SCHEMA FOLLOW-UP: `Position.entrySpotPriceUsd` is always null; `positions` has
  * no entry-spot column.
  */
+import { buildPriceFeedSymbolMap } from "@thetanuts-finance/thetanuts-client";
 import type { Comment as CommentRow, Position as PositionRow, Thesis as ThesisRow, User as UserRow } from "@nuts/db/schema/index";
 import type * as Domain from "@/types";
 import { decimalFromBaseUnits, decimalFromNullableBaseUnits, sumDecimals, usdDecimalOrNull } from "./decimal";
@@ -316,7 +317,23 @@ export function mapThesis(input: MapThesisInput): Domain.Thesis {
 
 export interface MapPositionInput {
 	position: PositionRow;
-	thesis: Pick<ThesisRow, "id" | "slug" | "headline" | "underlyingAsset" | "taggedAsset">;
+	/**
+	 * Null for a standalone position: migration 0007 made `positions.thesis_id`
+	 * nullable, so a fill can belong to no post (owner 2026-09-05, "trade is just
+	 * trade"). The asset then comes from the position's own order snapshot.
+	 */
+	thesis: Pick<ThesisRow, "id" | "slug" | "headline" | "underlyingAsset" | "taggedAsset"> | null;
+}
+
+/**
+ * The underlying ticker of a standalone position, from the price feed its order
+ * names. `buildPriceFeedSymbolMap` is the same source the market page uses; an
+ * unmapped feed yields an empty ticker rather than a guess.
+ */
+function assetFromOrderSnapshot(snapshot: PositionRow["orderSnapshot"]): string {
+	const feed = snapshot.rawApiData?.["priceFeed"];
+	if (typeof feed !== "string") return "";
+	return buildPriceFeedSymbolMap(8453)[feed.toLowerCase()] ?? "";
 }
 
 export function mapPosition(input: MapPositionInput): Domain.Position {
@@ -333,13 +350,14 @@ export function mapPosition(input: MapPositionInput): Domain.Position {
 		status: position.status,
 		chainId: 8453,
 		walletAddress: position.walletAddress.toLowerCase(),
-		thesisSlug: thesis.slug,
-		thesisHeadline: thesis.headline,
-		// A position exists only on a structured thesis
-		// (`theses_backing_requires_structure` plus the positions relationship
-		// trigger), so `underlying_asset` is set; `tagged_asset` equals it by
-		// CHECK and is the fallback rather than an invented ticker.
-		underlyingAsset: thesis.underlyingAsset ?? thesis.taggedAsset ?? "",
+		thesisSlug: thesis === null ? null : thesis.slug,
+		thesisHeadline: thesis === null ? null : thesis.headline,
+		// A position on a post carries the post's asset; a standalone position
+		// carries the asset of the order it filled, resolved from the SDK's price
+		// feed map. Nothing is invented when neither resolves.
+		underlyingAsset: thesis === null
+			? assetFromOrderSnapshot(position.orderSnapshot)
+			: thesis.underlyingAsset ?? thesis.taggedAsset ?? "",
 		contracts: decimalFromNullableBaseUnits(position.contracts, position.contractDecimals),
 		// `positions` has no entry-spot column; nothing is estimated here.
 		entrySpotPriceUsd: null,

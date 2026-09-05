@@ -21,7 +21,29 @@ import { connection } from "next/server";
 import type * as View from "./display-types";
 import * as display from "./display";
 import * as mock from "./view-data";
+import * as mockSource from "@/mock/data";
+import { attachLinkedPositions, enrichWithTradeLinks } from "./thesis/enrich";
 import { usingDatabase } from "./data/source";
+
+/**
+ * Mock-mode posts with their `/p/<uuid>` trade links applied.
+ *
+ * The two example links live in `mock/data.ts` as a table
+ * (`MOCK_TRADE_CARD_LINKS`) rather than inside the thesis literals, so this
+ * REBUILDS the affected posts instead of mutating the shared fixture: importing
+ * `@/mock/data` still has no side effects, and the fixture array itself is left
+ * exactly as another writer left it.
+ */
+function mockPostsWithTradeLinks(): Domain.Thesis[] {
+	const linked = new Map(mockSource.mockLinkedPositions.map((entry) => [entry.position.id, entry]));
+	const withLinks = mockSource.theses.map((post) => {
+		const link = mockSource.MOCK_TRADE_CARD_LINKS.find((entry) => entry.slug === post.slug);
+		return link === undefined
+			? post
+			: { ...post, thesis: { ...post.thesis, rationale: link.rationale } };
+	});
+	return attachLinkedPositions(withLinks, linked);
+}
 
 /**
  * A `failed` fill is not a position anyone holds, so it never appears in a
@@ -39,11 +61,15 @@ export interface DiscoverData {
 	settled: View.TrendingItem[];
 	leaderboard: View.Creator[];
 	theses: View.Thesis[];
+	following: View.Thesis[];
+	top: View.Thesis[];
 	trending: View.TrendingItem[];
 	yourPositions: View.Position[];
 }
 
 export interface CreatorPageData {
+	isOwner: boolean;
+	editableProfile?: import("./profile/validation").ProfileFields & { walletAddress: string };
 	signedIn: boolean;
 	databaseMode: boolean;
 	following: boolean;
@@ -71,17 +97,25 @@ async function viewer(): Promise<{ userId: string; walletAddress: string } | nul
 export async function discoverData(): Promise<DiscoverData> {
 	if (!usingDatabase()) {
 		return {
-			signedIn: false, databaseMode: false, ending: [], settled: [],
+			signedIn: false, databaseMode: false, ending: mock.ending, settled: mock.settled,
+			following: mock.following, top: mock.top,
 			leaderboard: mock.leaderboard,
-			theses: mock.theses,
+			theses: mockPostsWithTradeLinks().map(display.thesis),
 			trending: mock.trending,
 			yourPositions: mock.yourPositions,
 		};
 	}
 	await connection();
 	const { listFeed, getPortfolio, leaderboard, trending, endingSoon, settled } = await import("./data/reads");
+	const { following, top } = await import("./social/feeds");
 	const signedIn = await viewer();
-	const theses = await listFeed({ viewerUserId: signedIn?.userId ?? null });
+	const { listPositionsByIds } = await import("./data/reads");
+	// One extra query for the whole page: the ids every post's text links, then
+	// the positions behind them. A post that links nothing costs nothing.
+	const theses = await enrichWithTradeLinks(
+		await listFeed({ viewerUserId: signedIn?.userId ?? null }),
+		(ids) => listPositionsByIds(ids),
+	);
 	const positions = signedIn === null ? [] : await getPortfolio(signedIn.walletAddress);
 	return {
 		signedIn: signedIn !== null, databaseMode: true,
@@ -90,6 +124,8 @@ export async function discoverData(): Promise<DiscoverData> {
 		ending: (await endingSoon()).map(railItem),
 		settled: (await settled()).map(railItem),
 		theses: theses.map(display.thesis),
+		following: (await following({ viewerUserId: signedIn?.userId ?? null })).map(display.thesis),
+		top: (await top({ viewerUserId: signedIn?.userId ?? null })).map(display.thesis),
 		// `getPortfolio` already applies the single fill-status rule, so nothing
 		// is filtered by status a second time here.
 		yourPositions: positions.map(display.position).filter(isOpen),
@@ -108,7 +144,12 @@ function renderableStatus(status: string): boolean {
 }
 
 export async function thesisDetailData(slug: string): Promise<View.ThesisDetail | undefined> {
-	if (!usingDatabase()) return mock.thesisDetailBySlug(slug);
+	if (!usingDatabase()) {
+		const source = mockSource.thesisDetails.find((entry) => entry.thesis.slug === slug);
+		if (source === undefined) return undefined;
+		const post = mockPostsWithTradeLinks().find((entry) => entry.slug === slug);
+		return display.detail(post === undefined ? source : { ...source, thesis: post });
+	}
 
 	await connection();
 	const { getThread } = await import("./data/reads");
@@ -117,17 +158,20 @@ export async function thesisDetailData(slug: string): Promise<View.ThesisDetail 
 	if (thread === null) return undefined;
 	if (!renderableStatus(thread.thesis.thesis.status)) return undefined;
 
+	const { listPositionsByIds } = await import("./data/reads");
+	const [enriched = thread.thesis] = await enrichWithTradeLinks([thread.thesis], (ids) =>
+		listPositionsByIds(ids),
+	);
+
 	return display.detail({
-		thesis: thread.thesis,
+		thesis: enriched,
 		shareUrl: `thesis.fun/t/${thread.thesis.slug}`,
 		shareHeadline: thread.thesis.thesis.headline,
-		// TODO-OWNER: settlement wording and the spot series both come from
-		// outside the database — settlement copy is the owner's, and spot is a
-		// Thetanuts read. Null keeps those parts of the page hidden instead of
+		// TODO-OWNER: settlement wording is the owner's.
+		// Null keeps that part of the page hidden instead of
 		// stating something unverified. The ticket is not here at all: since round
 		// 6 a post carries no ticket and trading happens on the market page.
 		settlementLabel: null,
-		spotChangePct: null,
 		participants: thread.participants,
 		comments: thread.comments,
 		activity: thread.activity,
@@ -181,7 +225,7 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		const creator = mock.creatorByHandle(handle);
 		if (!creator) return undefined;
 		return {
-			signedIn: false, databaseMode: false, following: false, self: false,
+			signedIn: false, databaseMode: false, following: false, self: false, isOwner: false,
 			creator,
 			callouts: mock.thesesByCreator(handle),
 			positions: mock.participantsByCreator(handle),
@@ -193,7 +237,10 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 	const signedIn = await viewer();
 	const profile = await getCreator(handle, { viewerUserId: signedIn?.userId ?? null });
 	if (profile === null) return undefined;
+	const isOwner = signedIn?.userId === profile.creator.id;
+	const editableProfile = isOwner ? await readEditableProfile(signedIn!.userId) : undefined;
 	return {
+		isOwner, editableProfile,
 		signedIn: signedIn !== null, databaseMode: true, self: signedIn?.userId === profile.creator.id,
 		following: (await getFollowState(signedIn?.userId ?? null, profile.creator.id)).following,
 		creator: display.creator(profile.creator),
@@ -253,4 +300,12 @@ export async function socialPageState(creatorId?: string) {
 	const profile = session ? await getCreator(session.walletAddress) : null;
 	return { databaseMode: true, signedIn: session !== null, self: session?.userId === creatorId,
 		following: creatorId ? (await getFollowState(session?.userId ?? null, creatorId )).following : false, mockCreator: profile ? display.creator(profile.creator) : undefined };
+}
+
+async function readEditableProfile(userId: string) {
+	const { db } = await import("@nuts/db");
+	const { users } = await import("@nuts/db/schema/index");
+	const { eq } = await import("drizzle-orm");
+	const [profile] = await db.select({ handle: users.handle, displayName: users.displayName, bio: users.bio, walletAddress: users.walletAddress }).from(users).where(eq(users.id, userId)).limit(1);
+	return profile;
 }

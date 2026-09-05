@@ -50,6 +50,13 @@
       "when": 1788587870652,
       "tag": "0006_follow_activity",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788590467695,
+      "tag": "0007_standalone_positions",
+      "breakpoints": true
     }
   ]
 }

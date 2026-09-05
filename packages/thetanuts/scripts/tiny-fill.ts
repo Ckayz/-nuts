@@ -107,7 +107,10 @@ export async function main(argv = process.argv.slice(2)) {
       const quote = options.side === "buy" ? quoteFill({ ...common, budget }) : quoteSellFill({ ...common, collateralBudget: budget, allowUnverifiedStructureCollateral: options.allowUnverified });
       const transactions = options.side === "buy" ? await buildFillTransactions({ ...common, budget }) : await buildSellFillTransactions({ ...common, collateralBudget: budget, allowUnverifiedStructureCollateral: options.allowUnverified });
       const premium = "premium" in quote ? quote.premium : quote.premiumGross;
-      // Research finding-fill-debits.md: premium-percentage branch; notional branch remains UNVERIFIED.
+      // Premium-percentage branch = an UPPER BOUND on the fee, not the fee: the notional
+      // branch of min(0.06% notional, 12.5% premium) fires on Base (fill 0x3e7417c5…cff04
+      // collected 737 on a 9009 premium). The receipt comparison below therefore reports a
+      // fee mismatch on such a fill — after it is mined. See ../README.md.
       const expected = { premium, fee: "feeEstimate" in quote ? quote.feeEstimate : premium * 1250n / 10000n, collateral: "collateralRequired" in quote ? quote.collateralRequired : 0n };
       const debit = options.side === "buy" ? premium : expected.collateral;
       if (debit <= 0n || debit > budget) throw new Error("Expected wallet debit is zero or exceeds --budget");

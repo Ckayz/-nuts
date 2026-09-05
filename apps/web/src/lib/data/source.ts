@@ -1,3 +1,5 @@
+import { env } from "@nuts/env/server";
+
 /**
  * Which read path the pages use. A development switch, not product behaviour.
  *
@@ -9,8 +11,24 @@
  */
 export type DataSource = "mock" | "db";
 
+/**
+ * `next build` runs with NODE_ENV=production while it prerenders the mock
+ * pages, and marks that with NEXT_PHASE=phase-production-build (Next's own
+ * constant, `next/dist/build/index.js`). The refusal below is a RUNTIME fence
+ * for a deployed server, so the build phase is exempt; a production server
+ * that serves fixtures still throws at first use.
+ */
+function inProductionBuildPhase(): boolean {
+	return process.env.NEXT_PHASE === "phase-production-build";
+}
+
 export function dataSource(): DataSource {
-	return process.env.DATA_SOURCE === "db" ? "db" : "mock";
+	const source = env.DATA_SOURCE;
+	if (env.NODE_ENV === "production" && source !== "db" && !inProductionBuildPhase()) {
+		// TODO-OWNER: whether mock production previews should ever be allowed.
+		throw new Error("Production requires DATA_SOURCE=db; fixture data cannot be served in production.");
+	}
+	return source === "db" ? "db" : "mock";
 }
 
 export function usingDatabase(): boolean {

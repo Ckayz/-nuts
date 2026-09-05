@@ -27,6 +27,7 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "check-types": "turbo run check-types",
+    "verify": "bun run scripts/verify.ts",
     "dev:web": "turbo run dev -F web --",
     "db:push": "turbo run db:push -F @nuts/db --",
     "db:studio": "turbo run db:studio -F @nuts/db --",

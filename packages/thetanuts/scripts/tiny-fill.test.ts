@@ -6,7 +6,9 @@ const wallet = `0x${"1".repeat(40)}` as Address, maker = `0x${"2".repeat(40)}` a
 const pair = VERIFIED_SELL_PAIRS[0]!;
 function market(side: "buy" | "sell", price: bigint, nonce = 1n): Market {
   // Selection consumes only these fields; quote/encoding fixtures live in test/core.test.ts.
-  return { side: "put", pricePerContract: price, collateralToken: { address: pair.collateral, symbol: "aBasUSDC", decimals: 6 }, implementation: { address: pair.implementation, info: null }, order: { order: { maker, nonce }, rawApiData: { isLong: side === "buy" } } } as Market;
+  // `isLong` is the MAKER's long flag: the taker SELLS when it is true (decoded fill
+  // 0xdf3323…76f3) and BUYS when it is false (0x9c4bb1…f8c). See src/side.ts.
+  return { side: "put", pricePerContract: price, collateralToken: { address: pair.collateral, symbol: "aBasUSDC", decimals: 6 }, implementation: { address: pair.implementation, info: null }, order: { order: { maker, nonce }, rawApiData: { isLong: side === "sell" } } } as Market;
 }
 test("buy selects lowest USDC-family premium with exact side and nonce", () => {
   const low = market("buy", 212682750n), high = market("buy", 256458427n, 2n);

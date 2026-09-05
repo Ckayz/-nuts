@@ -40,9 +40,17 @@ export interface QuoteSellFillParams {
 export interface SellFillQuote extends Omit<FillQuote, "premium"> {
   readonly collateralRequired: bigint;
   readonly premiumGross: bigint;
-  /** Premium-percentage branch only: matches all supplied decoded fills; notional branch UNVERIFIED. */
+  /** Premium-percentage branch ONLY (12.5% of gross premium), and it is an UPPER BOUND, not
+   * the fee. The documented fee is `min(0.06% notional, 12.5% premium)` and the notional
+   * branch DOES fire on Base: sell fill
+   * 0x3e7417c5c676109e737f540debe95d0aec9477c9797c19f37e626d0c611cff04 (block 50645909,
+   * decoded 2026-09-05) collected 737 on a 9009 premium — 8.2%, not 12.5% (which would be
+   * 1126). The notional formula itself stays UNVERIFIED: 737 is not 0.06% of strike x
+   * contracts (690) either, so what "notional" means is still unmeasured. Never present
+   * this number as the fee that will be charged. */
   readonly feeEstimate: bigint;
-  /** Estimate, since the notional fee branch is UNVERIFIED. */
+  /** LOWER BOUND on the credit, not the credit: `premiumGross - feeEstimate` with the
+   * upper-bound fee above. The actual fill may credit more. */
   readonly premiumNet: bigint;
   /** Decimals of the collateral token itself, from the SDK chain config `tokens` map.
    * Feed this to `premiumUsd8From` — every premium/collateral field above is in these units. */
@@ -58,6 +66,8 @@ export interface SellFillQuote extends Omit<FillQuote, "premium"> {
  * tx 0xdf3323fefb54cd040a0e86cca3733e4c469a77e33c85a0351e9e987dcfda76f3 (block 50891956),
  * implementation 0x6aD53DD058bea004829cCf58a282C21a7Df02DcA (SDK dist/index.js:165) with
  * collateral aBasUSDC 0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB — taker paid 22,000,000.
+ * That order's calldata carries `isLong: true` (the maker was the BUYER), which is exactly
+ * why `takerSide` calls it a sell — see the decoded evidence in `side.ts`.
  *
  * Pinned by ADDRESS, never by implementation name: FIVE Base addresses resolve to the name
  * "PHYSICAL_PUT" in the SDK's `optionImplementations` map (dist/index.js:120, 133, 135, 149, 165 —

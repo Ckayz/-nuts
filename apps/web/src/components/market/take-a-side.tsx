@@ -11,7 +11,14 @@ import { expiryLabel as instantLabel } from "@/lib/display";
 import type { Side, Ticket } from "@/lib/display-types";
 import { prepareTrade, quoteTicket, recordTrade } from "@/lib/trade/actions";
 import { FillDialog } from "@/components/market/fill-dialog";
-import type { FillCard, QuoteRaw, TicketQuoteView, TradePanelContext } from "@/lib/trade/types";
+import type {
+	FillCard,
+	QuoteRaw,
+	RecordResult,
+	RecordSuccess,
+	TicketQuoteView,
+	TradePanelContext,
+} from "@/lib/trade/types";
 
 /**
  * The Bull/Bear ticket. Owner 2026-09-05: trading lives on the market page, so
@@ -155,6 +162,55 @@ const PHASE_LABEL: Partial<Record<TicketPhase, string>> = {
 	confirmed: "Filled",
 };
 
+/**
+ * C6-r2 (lane C confirming pass, finding 2). The fill that HAS been sent.
+ *
+ * `txHash` is the wallet's own answer to `eth_sendTransaction`; `token` is the
+ * signed ticket the calldata was built from — `recordTrade` needs exactly that
+ * pair and nothing else, so both are kept together and neither is ever
+ * re-derived from a fresh preparation.
+ */
+export interface SentFill {
+	readonly token: string;
+	readonly txHash: string;
+}
+
+export type TicketClick =
+	| { readonly kind: "prepare" }
+	| { readonly kind: "record"; readonly token: string; readonly txHash: string };
+
+/**
+ * C6-r2. What a click on the primary button is allowed to do.
+ *
+ * Once the wallet has returned a transaction hash the money is gone: the ONLY
+ * thing another click may do is finish recording THAT hash with THAT ticket.
+ * The previous version cleared the hash at the top of every click and always
+ * prepared a fresh fill, so a recording that threw (a dropped response, a
+ * server error) put an actionable "Trade" button back in front of the user and
+ * the next click sent a SECOND fill — measured `{"sends":2,"records":2}`.
+ *
+ * Pure, like `sendGuard` and `structureChanged` above, because the bug this
+ * replaces lived in a branch no test could reach.
+ */
+export function ticketClick(sent: SentFill | null): TicketClick {
+	if (sent === null) return { kind: "prepare" };
+	return { kind: "record", token: sent.token, txHash: sent.txHash };
+}
+
+/**
+ * C6-r2. Whether a `recordTrade` answer releases the sent fill.
+ *
+ * Only a DURABLE row does: `ok` means the server wrote the position (confirmed,
+ * or `failed` because the fill reverted), so nothing is left to record and the
+ * ticket may be used again. Every refusal keeps the hash held — the money left
+ * the wallet either way, and offering "Trade" after a refusal is exactly how a
+ * second fill gets sent. A refusal that cannot be retried away is escaped by
+ * reloading the page, which is a deliberate act rather than one more click.
+ */
+export function recordingSettled(result: RecordResult): result is RecordSuccess {
+	return result.ok;
+}
+
 export function TakeASide({
 	ticket,
 	structureLabel,
@@ -178,6 +234,20 @@ export function TakeASide({
 	const [phase, setPhase] = useState<TicketPhase>("idle");
 	const [message, setMessage] = useState<string | null>(null);
 	const [txHash, setTxHash] = useState<string | null>(null);
+	/**
+	 * C6-r2. The sent fill, held until `recordTrade` returns a durable row. While
+	 * it is set the primary button records; it never prepares another fill.
+	 */
+	const [sent, setSent] = useState<SentFill | null>(null);
+	/**
+	 * The same value, readable from inside an async body that closed over an
+	 * older render. Every write goes through `holdSent`, so the two cannot drift.
+	 */
+	const sentRef = useRef<SentFill | null>(null);
+	const holdSent = useCallback((fill: SentFill | null) => {
+		sentRef.current = fill;
+		setSent(fill);
+	}, []);
 	// The post-fill share card (owner's fomo reference, 2026-09-05).
 	const [card, setCard] = useState<FillCard | null>(null);
 	const [pending, startTransition] = useTransition();
@@ -272,8 +342,57 @@ export function TakeASide({
 		requote(side, budgetInput);
 	}, [budgetInput, requote, side, trade]);
 
+	/**
+	 * C6-r2. Hands one sent fill to the server and interprets the answer. The
+	 * SAME function runs on the first attempt and on every retry, so a retry can
+	 * never present different arguments than the send did.
+	 */
+	const finishRecording = useCallback(
+		async (fill: SentFill) => {
+			setPhase("recording");
+			const recorded = await recordTrade({ token: fill.token, txHash: fill.txHash });
+			if (!recordingSettled(recorded)) {
+				// The fill is on chain and still unrecorded: keep holding it.
+				setPhase("failed");
+				setMessage(
+					// TODO-OWNER: retry copy. It has to say the money moved and that the
+					// button now records rather than trades, or the user clicks Trade.
+					`${recorded.ok ? "" : recorded.reason} Your fill was sent and is not recorded yet. Press the button again to record it; it will not send a second trade.`.trim(),
+				);
+				return;
+			}
+			holdSent(null);
+			if (recorded.status === "failed") {
+				setPhase("failed");
+				setMessage("The fill reverted on Base. Nothing was published and nothing was counted.");
+				return;
+			}
+			setPhase("confirmed");
+			setMessage("Your fill is on chain and public.");
+			setCard(recorded.card);
+		},
+		[],
+	);
+
 	const sign = useCallback(() => {
 		if (trade === undefined) return;
+		// C6-r2. Before anything is cleared or prepared: a fill that has already
+		// been sent owns every further click until it is recorded.
+		const action = ticketClick(sentRef.current);
+		if (action.kind === "record") {
+			setMessage(null);
+			startTransition(async () => {
+				try {
+					await finishRecording({ token: action.token, txHash: action.txHash });
+				} catch (error) {
+					setPhase("failed");
+					setMessage(
+						`${error instanceof Error ? (error.message.split("\n")[0] ?? "") : ""} Your fill was sent and is not recorded yet. Press the button again to record it; it will not send a second trade.`.trim(),
+					);
+				}
+			});
+			return;
+		}
 		setMessage(null);
 		setTxHash(null);
 		setCard(null);
@@ -393,25 +512,26 @@ export function TakeASide({
 					account,
 				});
 				setTxHash(hash);
-				setPhase("recording");
-				const recorded = await recordTrade({ token: ready.token, txHash: hash });
-				if (!recorded.ok) {
-					setPhase("failed");
-					setMessage(recorded.reason);
-					return;
-				}
-				if (recorded.status === "failed") {
-					setPhase("failed");
-					setMessage("The fill reverted on Base. Nothing was published and nothing was counted.");
-					return;
-				}
-				setPhase("confirmed");
-				setMessage("Your fill is on chain and public.");
-				setCard(recorded.card);
+				// C6-r2. Held BEFORE the recording is attempted: everything after
+				// this line can fail, and none of those failures may put a second
+				// fill in front of the user.
+				const fill: SentFill = { token: ready.token, txHash: hash };
+				holdSent(fill);
+				await finishRecording(fill);
 			} catch (error) {
+				const first = error instanceof Error ? (error.message.split("\n")[0] ?? null) : null;
+				// C6-r2. A throw AFTER the wallet returned a hash is a recording
+				// failure, not a cancellation: the fill is on chain.
+				if (sentRef.current !== null) {
+					setPhase("failed");
+					setMessage(
+						`${first ?? ""} Your fill was sent and is not recorded yet. Press the button again to record it; it will not send a second trade.`.trim(),
+					);
+					return;
+				}
 				// A rejected signature is a cancellation, not a failure (PRD 13).
 				setPhase("idle");
-				setMessage(error instanceof Error ? error.message.split("\n")[0] ?? null : null);
+				setMessage(first);
 			}
 		});
 	}, [
@@ -436,7 +556,14 @@ export function TakeASide({
 	// F20: a stale panel must not be signed for — the figures below belong to the
 	// previous amount. The requote happens on blur, so leaving the field clears
 	// this by itself.
-	const blocked = trade !== undefined && (view === null || !view.executable || staleQuote);
+	// C6-r2. None of that applies while a sent fill is waiting to be recorded:
+	// the button is no longer a Trade button, and an unquotable or stale panel
+	// must not lock the user out of recording money that already moved.
+	const blocked = sent === null && trade !== undefined && (view === null || !view.executable || staleQuote);
+	// TODO-OWNER: retry label. "Record the fill" is the wording the agent's own
+	// execution card already uses for this exact state.
+	const buttonLabel =
+		trade === undefined ? "Trade" : sent !== null && !busy ? "Record the fill" : (PHASE_LABEL[phase] ?? "Trade");
 
 	return (
 		<section className="card pad ticket">
@@ -573,9 +700,9 @@ export function TakeASide({
 				disabled={trade !== undefined && (busy || blocked || switching)}
 				onClick={trade === undefined ? undefined : sign}
 			>
-				{(trade === undefined ? undefined : PHASE_LABEL[phase]) ?? "Trade"}
+				{buttonLabel}
 			</button>
-			<span className="sign">Sign with wallet</span>
+			<span className="sign">{sent !== null ? "Already sent — recording only" : "Sign with wallet"}</span>
 			<p className="fine" style={{ marginTop: "12px" }}>
 				Approve USDC once, then one fill on Base. Your fill is public the moment it confirms.
 			</p>

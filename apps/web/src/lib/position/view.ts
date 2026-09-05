@@ -20,7 +20,14 @@ import { amount, dateLabel, expiryLabel, marketSlug, percentLabel, pnlCard, quan
 import { decimalFromBaseUnits } from "@/lib/data/decimal";
 import { STRIKE_DECIMALS, type PositionInstrument } from "./instrument";
 import type { PositionPageDetail } from "./types";
-import { USD_DECIMALS, type DerivationInputs, type DerivedRisk, derivedRisk, resolvePnl } from "./pnl";
+import {
+	USD_DECIMALS,
+	type DerivationInputs,
+	type DerivedRisk,
+	derivedRisk,
+	lifecycleStatus,
+	resolvePnl,
+} from "./pnl";
 
 export interface PositionViewInput {
 	readonly detail: PositionPageDetail;
@@ -209,7 +216,11 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 	const card = pnlCard({
 		id: position.id,
 		owner: detail.owner,
-		status: position.status,
+		// C7-r2: an option whose expiry has passed is "Settlement pending", not
+		// "Open · syncing", in the compact card as well as on this page. The
+		// stored status never reaches `indexed`->`expired` on its own because no
+		// reconciliation exists yet.
+		status: lifecycleStatus(position.status, instrument?.expiryAt ?? null, asOf.toISOString()),
 		createdAt: position.createdAt,
 		instrumentLabel: parts.title,
 		asset,

@@ -151,6 +151,22 @@ async function dropPosition(positionId: string | undefined): Promise<void> {
 	await db.delete(positions).where(eq(positions.id, positionId));
 }
 
+/**
+ * C1-r2. WHY the indirect route cannot be trusted, as arithmetic rather than
+ * as prose: `count x price / 1e8` is a floor, so a window of counts maps to
+ * one emitted premium. This is the reviewer's ROUNDING_PROOF counterexample.
+ */
+test("reproducing the emitted premium does not identify the contract count", () => {
+	const price = 50_000_000n;
+	const premium = (count: bigint) => (count * price) / 100_000_000n;
+	expect(premium(2_000_000n)).toBe(1_000_000n);
+	expect(premium(2_000_001n)).toBe(1_000_000n);
+	expect(premium(2_000_000n)).toBe(premium(2_000_001n));
+	// The window is `1e8 / price` wide, so a cheaper option hides MORE counts.
+	const window = [...Array(20).keys()].filter((k) => premium(2_000_000n + BigInt(k)) === 1_000_000n);
+	expect(window.length).toBeGreaterThan(1);
+});
+
 describeLive("recordTrade cross-checks every number against the chain", () => {
 	test("a contract count that does not reproduce the emitted premium is not confirmed", async () => {
 		const expectation = PRODUCTION_FILLS.find((f) => f.takerSide === "buy");
@@ -191,39 +207,35 @@ describeLive("recordTrade cross-checks every number against the chain", () => {
 		expect(confirmed?.contracts).not.toBe((expectation.numContracts + 1n).toString());
 		await dropPosition(result.positionId);
 
-		// And when the calldata CANNOT be read as a direct fill (a smart wallet's
-		// batch), the ticket's count is used — and a count that does not
-		// reproduce the emitted premium is refused rather than stored.
+		// C1-r2 (lane C confirming pass, finding 11). When the calldata CANNOT be
+		// read as a direct fill (a smart wallet's batch), the quantity is not
+		// provable from the chain and the recording REFUSES — with the ticket's
+		// count wrong AND with it right, because the route itself proves nothing.
 		const indirect: ChainReader = {
 			waitForTransactionReceipt: async () => ({ status: "success", logs: fill.logs }),
 			getTransaction: async () => ({ to: "0x00000000000000000000000000000000000000ff", input: "0x" }),
 		};
-		const refused = await recordTradeFor(
-			{ userId: user.id, walletAddress: fill.taker },
-			{ token: encodeTradeTicket(ticket), txHash: fill.hash },
-			indirect,
-		);
-		expect(refused).toMatchObject({ ok: false, code: "FILL_DOES_NOT_MATCH" });
-		const [row] = await db
-			.select()
-			.from(positions)
-			.where(and(eq(positions.chainId, 8453), eq(positions.txHash, fill.hash)));
-		expect(row?.status).toBe("failed");
-		expect(row?.failureReason).toBe("filled_order_differs_from_prepared");
-		await dropPosition(row?.id);
-
-		// The same indirect route with the RIGHT count is accepted, so the
-		// refusal above is the count and not the route.
-		const good = { ...ticket, expectedContracts: expectation.numContracts.toString() };
-		const accepted = await recordTradeFor(
-			{ userId: user.id, walletAddress: fill.taker },
-			{ token: encodeTradeTicket(good), txHash: fill.hash },
-			indirect,
-		);
-		expect(accepted.ok).toBe(true);
-		if (!accepted.ok) throw new Error("unreachable");
-		await dropPosition(accepted.positionId);
+		for (const contracts of [expectation.numContracts + 1n, expectation.numContracts]) {
+			const attempt = { ...ticket, expectedContracts: contracts.toString() };
+			const refused = await recordTradeFor(
+				{ userId: user.id, walletAddress: fill.taker },
+				{ token: encodeTradeTicket(attempt), txHash: fill.hash },
+				indirect,
+			);
+			expect(refused).toMatchObject({ ok: false, code: "FILL_QUANTITY_UNPROVEN" });
+			const [row] = await db
+				.select()
+				.from(positions)
+				.where(and(eq(positions.chainId, 8453), eq(positions.txHash, fill.hash)));
+			expect(row?.status).toBe("failed");
+			expect(row?.failureReason).toBe("fill_quantity_unproven");
+			// Nothing economic was written from the browser's numbers.
+			expect(row?.confirmedAt).toBeNull();
+			expect(row?.optionAddress).toBeNull();
+			await dropPosition(row?.id);
+		}
 	}, 60_000);
+
 
 	test("a collateral that does not match the debit measured on chain is not confirmed", async () => {
 		const expectation = PRODUCTION_FILLS.find((f) => f.takerSide === "sell");

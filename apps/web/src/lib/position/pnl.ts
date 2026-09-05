@@ -82,6 +82,28 @@ export interface PnlInputs {
 	readonly asOf: string;
 }
 
+/**
+ * C7-r2 (lane C confirming pass, finding 10). The status the CARD may show.
+ *
+ * There is no expiry or settlement reconciliation yet (`markIndexed` is
+ * referenced in `trade/record.ts` but does not exist), so a row stays
+ * `confirmed`/`indexed` for ever after its option expires. `resolvePnl` already
+ * refuses to value such a position, but the card kept printing that stored
+ * status — "Open · syncing" beside "not available yet", which reads as a live
+ * position whose number is merely late.
+ *
+ * The vocabulary is not new: `POSITION_STATUS_DISPLAY.expired` already says
+ * "Settlement pending", and the detailed page already explains it. This only
+ * routes a past-expiry row to the word the app already has for it.
+ *
+ * `pending` and `failed` are never rewritten — a fill that never confirmed is
+ * not a settlement — and `settled` is already terminal.
+ */
+export function lifecycleStatus(status: PositionStatus, expiryAt: string | null, asOf: string): PositionStatus {
+	if (status !== "confirmed" && status !== "indexed") return status;
+	return isPastExpiry(expiryAt, asOf) ? "expired" : status;
+}
+
 /** C7. True once the option's expiry has passed. Unreadable dates count as NOT expired: a false "settlement pending" would be its own wrong claim. */
 export function isPastExpiry(expiryAt: string | null, asOf: string): boolean {
 	if (expiryAt === null) return false;

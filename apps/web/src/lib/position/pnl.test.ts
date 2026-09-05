@@ -27,12 +27,14 @@ import {
 	derivePnlAtSpot,
 	derivedRisk,
 	isPastExpiry,
+	lifecycleStatus,
 	resolvePnl,
 	usd8FromDecimal,
 	usd8FromSpotNumber,
 	type DerivationInputs,
 } from "./pnl";
 import { derivationFor, percentLabel, positionPage } from "./view";
+import { POSITION_STATUS_DISPLAY } from "@/lib/display";
 import type { PositionPageDetail } from "./types";
 import type * as Domain from "@/types";
 
@@ -717,6 +719,36 @@ describe("positionPage", () => {
 		expect(card.basis).toBe("settled");
 	});
 
+	/**
+	 * C7-r2. The reviewer's EXPIRED_CARD probe: an option past its expiry whose
+	 * row is still `confirmed` printed "Open · syncing" next to "not available
+	 * yet". The compact card and the share card read the SAME `statusLabel`, so
+	 * one assertion covers both surfaces.
+	 */
+	test("an option past its expiry says Settlement pending, not Open · syncing", () => {
+		const past = new Date("2026-09-12T00:00:00.000Z");
+		for (const status of ["confirmed", "indexed"] as const) {
+			const card = positionPage({
+				detail: detail({ position: domainPosition({ status }) }),
+				spotUsd8: SPOT_74K,
+				collateralUsdPrice8: "100000000",
+				asOf: past,
+			}).card;
+			expect(card.statusLabel).toBe("Settlement pending");
+			expect(card.statusLabel).not.toBe("Open · syncing");
+			// C7 already refused to value it; the two now agree.
+			expect(card.pnl.signed2).toBe("—");
+		}
+		// Before the expiry the same rows are unchanged.
+		const live = positionPage({
+			detail: detail({ position: domainPosition({ status: "confirmed" }) }),
+			spotUsd8: SPOT_74K,
+			collateralUsdPrice8: "100000000",
+			asOf,
+		}).card;
+		expect(live.statusLabel).toBe("Open · syncing");
+	});
+
 	test("a live option offers the structure link; an expired one does not", () => {
 		const live = positionPage({
 			detail: detail(),
@@ -762,5 +794,48 @@ describe("positionPage", () => {
 		}).card;
 		expect(unconfirmed.tx?.href).toContain("https://basescan.org/tx/0x");
 		expect(unconfirmed.verified).toBe(false);
+	});
+});
+
+/**
+ * C7-r2 (lane C confirming pass, finding 10). The reviewer measured
+ * `EXPIRED_CARD: statusLabel="Open · syncing", pnlLabel="Live P&L", pnl="—"`
+ * on a position whose option had already expired: the money was suppressed by
+ * C7 but the lifecycle word was not.
+ */
+describe("lifecycleStatus", () => {
+	const expiry = "2026-09-05T08:00:00.000Z";
+	const before = "2026-09-05T07:59:59.000Z";
+	const after = "2026-09-05T08:00:01.000Z";
+
+	test("a confirmed or indexed row past its expiry becomes settlement-pending", () => {
+		expect(lifecycleStatus("confirmed", expiry, after)).toBe("expired");
+		expect(lifecycleStatus("indexed", expiry, after)).toBe("expired");
+	});
+
+	test("the same rows before expiry keep their own status", () => {
+		expect(lifecycleStatus("confirmed", expiry, before)).toBe("confirmed");
+		expect(lifecycleStatus("indexed", expiry, before)).toBe("indexed");
+	});
+
+	test("expiry is inclusive, matching isPastExpiry", () => {
+		expect(lifecycleStatus("indexed", expiry, expiry)).toBe("expired");
+	});
+
+	test("a fill that never confirmed is not a settlement, and terminal states are untouched", () => {
+		for (const status of ["pending", "failed", "settled", "expired"] as const) {
+			expect(lifecycleStatus(status, expiry, after)).toBe(status);
+		}
+	});
+
+	test("an unreadable or absent expiry leaves the status alone", () => {
+		expect(lifecycleStatus("indexed", null, after)).toBe("indexed");
+		expect(lifecycleStatus("indexed", "not-a-date", after)).toBe("indexed");
+		expect(lifecycleStatus("indexed", expiry, "not-a-date")).toBe("indexed");
+	});
+
+	test("the word it routes to is the one the app already has", () => {
+		expect(POSITION_STATUS_DISPLAY.expired.label).toBe("Settlement pending");
+		expect(POSITION_STATUS_DISPLAY.confirmed.label).toBe("Open · syncing");
 	});
 });

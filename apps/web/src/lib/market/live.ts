@@ -295,7 +295,23 @@ export interface MarketPageView {
 	readonly summaries: MarketSummary[];
 	readonly structure: LiveStructure;
 	readonly fetchedAt: Date;
+	/**
+	 * C12-r2 (lane C confirming pass, finding 12). True when a structure WAS
+	 * asked for — `?structure=…`, or the instrument a post names — and the book
+	 * no longer carries it. `structure` then holds the page's default so the
+	 * table still renders, but no ticket may be built from it: PRD 8.4 forbids
+	 * silently substituting another asset, expiry or direction.
+	 */
+	readonly requestedStructureMissing: boolean;
 }
+
+/**
+ * C12-r2. The one sentence shown when the instrument someone asked for is gone.
+ * TODO-OWNER: the wording, and whether the page should offer the nearest live
+ * structure instead of nothing.
+ */
+export const STRUCTURE_UNAVAILABLE =
+	"That structure is no longer on the book, so it cannot be traded. Pick another one from the list below.";
 
 /** The market page's own summary row: the change column stays unknown, because
  *  the SDK publishes a spot price and no 24h change (measured 2026-09-05). */
@@ -340,6 +356,11 @@ export async function getMarketPage(
 		options.structureId === undefined
 			? undefined
 			: asset.structures.find((candidate) => candidate.id === options.structureId);
+	// C12-r2. `requested ?? defaultStructure(...)` used to swallow the miss: a
+	// link to a structure that had expired or been pulled opened ANOTHER
+	// instrument under the same URL, and — with `?thesis=` — attached the fill to
+	// the post as if it were the one the post named.
+	const requestedStructureMissing = options.structureId !== undefined && requested === undefined;
 	const structure = requested ?? defaultStructure(asset, options);
 	const expiries = new Set(asset.structures.map((candidate) => candidate.expiryAt));
 
@@ -361,6 +382,7 @@ export async function getMarketPage(
 		summaries: book.assets.map(summaryOf),
 		structure,
 		fetchedAt: book.fetchedAt,
+		requestedStructureMissing,
 	};
 }
 

@@ -80,7 +80,9 @@ async function load(asset: string, params: Record<string, string | undefined>): 
 		// looks like Thetanuts has no liquidity for this asset.
 		return { error: data.detail };
 	}
-	return { ...data, unavailable: null };
+	// C12-r2: `data.unavailable` is the "that structure is gone" sentence, and
+	// `data.trade` is null with it, so no ticket is offered for a substitute.
+	return data;
 }
 
 export default async function MarketPage({
@@ -127,7 +129,17 @@ export default async function MarketPage({
 			// TODO-OWNER: a bottom-sheet ticket remains a later option.
 			right={
 				<>
-				{trade === null ? (
+				{unavailable !== null ? (
+					// C12-r2: the instrument that was asked for is gone. No ticket at
+					// all — a ticket for the page's default structure would be the
+					// silent substitution PRD 8.4 forbids.
+					<section className="card pad mkt-panel">
+						<h3 style={{ fontSize: "15px" }}>Not tradeable</h3>
+						<p className="fine">
+							{unavailable} <TodoOwner />
+						</p>
+					</section>
+				) : trade === null ? (
 					<>
 						<TakeASide
 							ticket={market.ticket}

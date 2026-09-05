@@ -183,9 +183,35 @@ function isLoopbackIPv6(groups: number[]): boolean {
 }
 
 /**
+ * A4-1 (one-shot review pass 4). `postgresql:` is not one of the URL standard's
+ * special schemes, so `new URL(...).hostname` hands back the authority host with
+ * its percent-escapes INTACT, while `pg` decodes them. Measured 2026-09-06 with
+ * the installed `pg@8.23.0`:
+ *
+ *   new URL("postgresql://u:p@%6cocalhost:5432/x").hostname  === "%6cocalhost"
+ *   new pg.Client({connectionString: …}).connectionParameters.host === "localhost"
+ *
+ * and the same for `127.0.0.%31` (pg: `127.0.0.1`) and `%5B%3A%3A1%5D`
+ * (pg: `[::1]`). All three exited 0 and planned a production sync before this
+ * fold. One decode — never a loop — is what matches the driver: a
+ * double-encoded `%256cocalhost` stays `%6cocalhost` for both.
+ *
+ * A malformed escape (`%zz`, a lone `%`) makes `decodeURIComponent` throw; the
+ * value is then judged exactly as it was written, which is what `pg` does too.
+ */
+function safeDecode(value: string): string {
+	try {
+		return decodeURIComponent(value);
+	} catch {
+		return value;
+	}
+}
+
+/**
  * True when this hostname resolves on the machine that ran the script and
  * nowhere else. `new URL(...).hostname` keeps IPv6 literals bracketed and
- * lower-cases everything, so the bracketed forms are what this sees.
+ * lower-cases everything, so the bracketed forms are what this sees — after
+ * `safeDecode`, since the parser leaves percent-escapes in place (see above).
  */
 function isLoopbackHostname(host: string): boolean {
 	if (LOOPBACK_HOSTNAMES.has(host)) return true;
@@ -206,7 +232,9 @@ function isLoopbackHostname(host: string): boolean {
 /** True when the value would point a deployed environment at the machine that ran this script. */
 function isLocalValue(value: string): boolean {
 	try {
-		if (isLoopbackHostname(new URL(value).hostname.toLowerCase())) return true;
+		// Decode BEFORE lower-casing: `%5B` and `%5b` both decode to `[`, and the
+		// judge below needs the delimiters the driver will see.
+		if (isLoopbackHostname(safeDecode(new URL(value).hostname).toLowerCase())) return true;
 	} catch {
 		// Not a URL: only the substring pattern below can speak.
 	}
@@ -232,8 +260,16 @@ function isLocalValue(value: string): boolean {
  * parameters. Values that are not URLs (API keys, model ids) cannot carry a
  * query at all and are unaffected.
  *
- * `URLSearchParams` keys are already percent-decoded, so `?%68ost=` is caught,
- * and the comparison is lower-cased like the shared fence's — `?HOST=` is
+ * `URLSearchParams` keys are already percent-decoded, so `?%68ost=` is caught
+ * — measured 2026-09-06: `[...new URL("postgresql://u:p@h/x?h%6fst=::1")
+ * .searchParams.keys()]` is `["host"]`, and the `%68ost=` fixture below has been
+ * refusing since A3-1. `safeDecode` is applied anyway so the name is judged the
+ * way the hostname now is (A4-1); it can only ever ADD a refusal (a name written
+ * `%2568ost`, which `pg` reads as the harmless `%68ost`), and this fence is
+ * fail-closed by design — no deployable value of any key in `validatedEnvKeys()`
+ * carries a percent-escaped `host`-shaped parameter name.
+ *
+ * The comparison is lower-cased like the shared fence's — `?HOST=` is
  * refused even though the installed `pg` happens to ignore that spelling today.
  * Measured the same day: a query written after a `#` (`…/x#?host=::1`) is a
  * fragment to BOTH parsers — `pg` keeps the authority host — so the two agree on
@@ -247,7 +283,7 @@ function destinationOverrideParameter(value: string): string | null {
 		return null; // Not a URL: it carries no query parameters to obey.
 	}
 	for (const name of url.searchParams.keys()) {
-		if ((DESTINATION_OVERRIDE_PARAMETERS as readonly string[]).includes(name.toLowerCase())) {
+		if ((DESTINATION_OVERRIDE_PARAMETERS as readonly string[]).includes(safeDecode(name).toLowerCase())) {
 			return name;
 		}
 	}

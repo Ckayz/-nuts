@@ -151,7 +151,13 @@ For the mock-mode look use `bun run dev:web` (development mode has no such guard
 
 ## Production migration
 
-The review must be GREEN before production migration. Production held `0000`–`0008` — 9 rows in `drizzle.__drizzle_migrations`, 14 tables — measured 2026-09-06 01:31 through the session pooler, read-only. The checked-in journal has the same `0000`–`0008`, so a migration run today should be a no-op. Confirm the baseline in the Supabase SQL editor before proceeding rather than trusting that measurement:
+The review must be GREEN before production migration.
+
+**Baseline, measured 2026-09-06 06:57 through the session pooler: production holds `0000`–`0009` — 10 rows in `drizzle.__drizzle_migrations`, index `theses_tagged_asset_created_at_idx` present.** That matches the checked-in journal, which has ten entries (`packages/db/src/migrations/meta/_journal.json`), so a migration run today is a no-op. (It held `0000`–`0008` — 9 rows, 14 tables — at 01:31 the same day; `0009_market_thesis_index`, one additive `CREATE INDEX "theses_tagged_asset_created_at_idx" ON "theses" USING btree ("tagged_asset","created_at")`, was applied at 06:57 with `DRIZZLE_ALLOW_REMOTE=1 … bunx drizzle-kit migrate`. That line is history.)
+
+**Standing rule, because the code auto-deploys (see Vercel below): apply every NEW migration to production with `drizzle-kit migrate` right after its code merges to `main`.** A merge deploys itself; the schema does not follow on its own, so a merge whose migration has not been applied puts code in front of a database that cannot serve it.
+
+Confirm the baseline in the Supabase SQL editor before proceeding rather than trusting the measurement above:
 
 ```sql
 SELECT count(*) AS migration_count FROM drizzle.__drizzle_migrations;
@@ -191,7 +197,7 @@ repair:
    pre-run baseline.
 3. Fix the cause locally, prove it on a fresh throwaway
    (`create database x` + `bunx drizzle-kit migrate` from an EMPTY database, so
-   the whole chain `0000`-`0008` is exercised, not just the tail), then re-run
+   the whole chain `0000`-`0009` is exercised, not just the tail), then re-run
    the production command. Re-running after a rollback is safe: the batch is
    applied from the same starting point.
 4. NEVER `drizzle-kit push` to "repair" the difference, and never hand-edit
@@ -213,11 +219,13 @@ WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
 ORDER BY table_name;
 ```
 
-Expected migration count: **9** (`0000`–`0008`; measured 2026-09-05 on a fresh throwaway and on a `0000`-only baseline, where `0001`–`0008` commit in one transaction). Expected application tables: `activity`, `agent_conversations`, `agent_messages`, `agent_proposals`, `agent_receipts`, `agent_rfq_keys`, `agent_usage`, `auth_challenges`, `comments`, `follows`, `likes`, `positions`, `theses`, `users`. Investigate an unexpected baseline or result before deployment.
+Expected migration count: **10** (`0000`–`0009`. `0000`–`0008` measured 2026-09-05 on a fresh throwaway and on a `0000`-only baseline, where `0001`–`0008` commit in one transaction; production itself measured at 10 on 2026-09-06 06:57.) A count below 10 means a migration this repository carries has not been applied — investigate before deploying. Expected application tables: `activity`, `agent_conversations`, `agent_messages`, `agent_proposals`, `agent_receipts`, `agent_rfq_keys`, `agent_usage`, `auth_challenges`, `comments`, `follows`, `likes`, `positions`, `theses`, `users`. Investigate an unexpected baseline or result before deployment.
 
 Standing rule: **NEVER run `drizzle-kit push` against the shared or production database.** Use migrations; push can drop another developer's tables.
 
 ## Vercel
+
+**Vercel is connected to the GitHub repository and builds every push to `main` as the production deployment (measured 2026-09-06 via `gh api repos/<owner>/-nuts/deployments`: every entry is a `vercel[bot]` Production deployment for a `main` commit). Treat a merge to `main` as a deploy: verify first, then smoke `/` and `/api/agent/health`.** Nothing unverified goes to `main`. The `bun run deploy` / `deploy:prod` commands below are the SECONDARY path — for a preview URL, or for a deploy without a push.
 
 `vercel.json` deploys `apps/web` as the `web` service and installs from the repository root with `bun install`.
 

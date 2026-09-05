@@ -123,6 +123,17 @@ for (const [label, url] of [
 	["integer unspecified", "postgresql://u:p@0:5432/postgres"],
 	["hex ipv4-mapped ipv6", "postgresql://u:p@[::ffff:7f00:1]:5432/postgres"],
 	["ipv4-compatible ipv6", "postgresql://u:p@[::7f00:1]:5432/postgres"],
+	/**
+	 * A4-1 (one-shot review pass 4). `postgresql:` is not a special scheme, so
+	 * `new URL(...).hostname` keeps percent-escapes while `pg` decodes them.
+	 * Measured 2026-09-06 against the real script and `pg@8.23.0`: each value
+	 * below exited 0 and planned a production sync, and the driver reported its
+	 * effective host as `localhost`, `127.0.0.1` and `[::1]` respectively.
+	 */
+	["percent-encoded localhost", "postgresql://u:p@%6cocalhost:5432/postgres"],
+	["percent-encoded ipv4 digit", "postgresql://u:p@127.0.0.%31:5432/postgres"],
+	["percent-encoded bracketed ipv6", "postgresql://u:p@%5B%3A%3A1%5D:5432/postgres"],
+	["percent-encoded bracketed ipv6, lowercase escapes", "postgresql://u:p@%5b%3a%3a1%5d:5432/postgres"],
 ] as const) {
 	test(`refuses a ${label} value for production`, () => {
 		const file = envFile(`loopback-${label.replace(/[^a-z0-9]+/gi, "-")}.env`, `DATABASE_URL=${url}\nSESSION_SECRET=${SECRETS.sessionSecret}\n`);
@@ -152,6 +163,14 @@ for (const [label, url] of [
 	["integer non-loopback ipv4", "postgresql://u:p@3232235777:5432/postgres"],
 	["global ipv6", "postgresql://u:p@[2001:db8::1]:5432/postgres"],
 	["ordinary hostname", "postgresql://u:p@db.example.invalid:5432/postgres"],
+	/**
+	 * A4-1, the other direction: the new decode runs ONCE, exactly like the
+	 * driver. Measured 2026-09-06 — `pg@8.23.0` reads
+	 * `postgresql://u:p@%25%36%63ocalhost/x` as host `%6cocalhost`, not
+	 * `localhost`, so a decode loop here would refuse a value the driver would
+	 * never send to the loopback.
+	 */
+	["double-percent-encoded localhost", "postgresql://u:p@%25%36%63ocalhost:5432/postgres"],
 ] as const) {
 	test(`accepts a ${label} value for production`, () => {
 		const file = envFile(`remote-${label.replace(/[^a-z0-9]+/gi, "-")}.env`, `DATABASE_URL=${url}\nSESSION_SECRET=${SECRETS.sessionSecret}\n`);
@@ -175,6 +194,13 @@ for (const [label, query] of [
 	["reviewer fixture, encoded ipv6", "host=%3A%3A1"],
 	["integer loopback host", "host=2130706433"],
 	["percent-encoded parameter name", "%68ost=%3A%3A1"],
+	/**
+	 * A4-1. `URLSearchParams` already decodes keys once (measured 2026-09-06:
+	 * `?h%6fst=` reads back as `host`), so this case passed before the fold too —
+	 * it is pinned here so a future edit that reads the RAW query string keeps
+	 * catching it.
+	 */
+	["percent-encoded parameter name, mid-word", "h%6fst=%3A%3A1"],
 	["uppercase parameter name", "HOST=%3A%3A1"],
 	["hostaddr", "hostaddr=%3A%3A1"],
 	["port", "port=54322"],

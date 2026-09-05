@@ -26,7 +26,7 @@ export function quoteFill({ client, order, budget, referrer, now }: QuoteFillPar
 
 export interface SellQuoteClient {
   readonly utils: Pick<ThetanutsClient["utils"], "calculateCollateral">;
-  readonly chainConfig: Pick<ThetanutsClient["chainConfig"], "tokens">;
+  readonly chainConfig: Pick<ThetanutsClient["chainConfig"], "tokens" | "collateralTokens">;
   readonly optionBook: Pick<ThetanutsClient["optionBook"], "previewFillOrder" | "calculateMaxContracts">;
 }
 export interface QuoteSellFillParams {
@@ -44,11 +44,68 @@ export interface SellFillQuote extends Omit<FillQuote, "premium"> {
   readonly feeEstimate: bigint;
   /** Estimate, since the notional fee branch is UNVERIFIED. */
   readonly premiumNet: bigint;
+  /** Decimals of the collateral token itself, from the SDK chain config `tokens` map.
+   * Feed this to `premiumUsd8From` — every premium/collateral field above is in these units. */
+  readonly collateralDecimals: number;
+  /** Decimals of the SDK's contract-size unit for `numContracts` (see `sellContractSizeDecimals`).
+   * Feed this to the risk helpers as `contractSizeDecimals`. Separate from `collateralDecimals`
+   * on purpose: they are two different quantities that happen to coincide on every
+   * structure this API accepts, and the SDK breaks whenever they are made to disagree. */
+  readonly contractSizeDecimals: number;
 }
 
-/** Only PHYSICAL_PUT + Base aBasUSDC has supplied decoded taker-SELL evidence.
- * Other pairs require opt-in; contract units and rounding outside supplied fills
- * remain UNVERIFIED. The SDK collateral helper is separate from its capacity cap.
+/** The ONE (implementation, collateral) pair on Base with a decoded taker-SELL fill:
+ * tx 0xdf3323fefb54cd040a0e86cca3733e4c469a77e33c85a0351e9e987dcfda76f3 (block 50891956),
+ * implementation 0x6aD53DD058bea004829cCf58a282C21a7Df02DcA (SDK dist/index.js:165) with
+ * collateral aBasUSDC 0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB — taker paid 22,000,000.
+ *
+ * Pinned by ADDRESS, never by implementation name: FIVE Base addresses resolve to the name
+ * "PHYSICAL_PUT" in the SDK's `optionImplementations` map (dist/index.js:120, 133, 135, 149, 165 —
+ * 0xac5eca…, 0x9da790…, 0xc305f5…, 0x2d283d…, 0x6ad53d…) and only 0x6ad53d… has decoded evidence;
+ * the other four are historical/deprecated deployments. Everything not listed here — including
+ * those four — requires `allowUnverifiedStructureCollateral: true`.
+ * Entries are lowercase; comparisons lowercase both sides.
+ */
+export const VERIFIED_SELL_PAIRS: readonly { readonly implementation: string; readonly collateral: string }[] = [
+  { implementation: "0x6ad53dd058bea004829ccf58a282c21a7df02dca", collateral: "0x4e65fe4dba92790696d040ac24aa414708f5c0ab" },
+];
+
+/** The decimals of the SDK's contract-size unit for `numContracts`, MEASURED from the SDK.
+ *
+ * `optionBook.calculateMaxContracts` (dist/index.js:1645) has two shapes:
+ *  - single-strike CALL whose `getCollateralDecimals` view is >= 18 (dist/index.js:1660-1664):
+ *    `availableAmount / 10 ** (d - 6)` — contract-size unit 10**6, regardless of the token;
+ *  - every other branch, i.e. puts, single-strike calls below 18, spreads, flies, condors and
+ *    rangers (dist/index.js:1656-1659, 1665-1666, 1668-1692): `availableAmount * 1e8 / strikeOrWidth` — which, since
+ *    `availableAmount` is the maker's collateral in token base units (dist/index.js:3400), makes
+ *    the contract-size unit 10**(collateral token decimals).
+ *
+ * So the two decimals arguments of `utils.calculateCollateral` are NOT interchangeable and are
+ * NOT free to choose: the helper divides by `10n ** BigInt(sizeDecimals - collateralDecimals)`
+ * (dist/index.js:11140). Measured on Base, with strike 2200 and the maker's own collateral as
+ * `availableAmount`, `calculateCollateral(calculateMaxContracts(order))` reproduces
+ * `availableAmount` exactly — and only — at `sizeDecimals === collateralDecimals === token decimals`:
+ *
+ *   aBasUSDC (6):  cap 10000                -> 22000000                  === availableAmount
+ *   cbBTC    (8):  cap 1000000              -> 2200000000                === availableAmount
+ *   WETH     (18): cap 10000000000000000    -> 22000000000000000000      === availableAmount
+ *
+ * The alternatives are not merely different, they are broken: `sizeDecimals: 6` with an 8- or
+ * 18-decimal collateral throws `RangeError: Negative exponent is not allowed` inside the SDK,
+ * and `sizeDecimals: 18` with a 6- or 8-decimal collateral returns 0.
+ *
+ * Hence this function returns the collateral token's decimals, and `quoteSellFill` refuses the one
+ * family where the SDK's own two views disagree (single-strike calls, below).
+ * UNVERIFIED beyond 6 decimals: every decoded fill supplied so far uses 6-decimal collateral, so
+ * the 8- and 18-decimal rows above are SDK-internal consistency, not on-chain confirmation.
+ */
+export function sellContractSizeDecimals(collateralDecimals: number): number { return collateralDecimals; }
+
+/** Only the ONE (implementation, collateral) ADDRESS pair in `VERIFIED_SELL_PAIRS` has supplied
+ * decoded taker-SELL evidence; every other pair requires `allowUnverifiedStructureCollateral`.
+ * Contract units and rounding outside the supplied fills remain UNVERIFIED.
+ * The SDK collateral helper is separate from its capacity cap, and its two decimals arguments
+ * are pinned by measurement — see `sellContractSizeDecimals`.
  */
 export function quoteSellFill({ client, order, collateralBudget, referrer, now, allowUnverifiedStructureCollateral }: QuoteSellFillParams): SellFillQuote {
   if (takerSide(order) !== "sell") throw new ThetanutsLogicError("INVALID_SIDE", "Sell quotes require a taker-sell order");
@@ -61,11 +118,26 @@ export function quoteSellFill({ client, order, collateralBudget, referrer, now, 
   if (!info) throw new ThetanutsLogicError("STRUCTURE_UNSUPPORTED", `Unknown implementation: ${pair}`);
   const strikes = raw.strikes.map(BigInt);
   if (strikes.length !== info.numStrikes || strikes.some(strike => strike <= 0n)) throw new ThetanutsLogicError("INVALID_ORDER", "Implementation strike count or strike value is invalid");
-  const verified = info.name === "PHYSICAL_PUT" && !raw.isCall &&
-    raw.collateral.toLowerCase() === "0x4e65fe4dba92790696d040ac24aa414708f5c0ab";
+  const implementation = raw.implementation.toLowerCase();
+  const collateral = raw.collateral.toLowerCase();
+  const verified = !raw.isCall && VERIFIED_SELL_PAIRS.some(entry => entry.implementation === implementation && entry.collateral === collateral);
   if (!verified && !allowUnverifiedStructureCollateral) return unverified(`Unverified sell collateral pair: ${pair}`);
-  const decimals = Object.values(client.chainConfig.tokens).find(token => token.address.toLowerCase() === raw.collateral.toLowerCase())?.decimals;
-  if (decimals === undefined) throw new ThetanutsLogicError("STRUCTURE_UNSUPPORTED", `Missing SDK collateral decimals: ${pair}`);
+  const collateralDecimals = Object.values(client.chainConfig.tokens).find(token => token.address.toLowerCase() === collateral)?.decimals;
+  if (collateralDecimals === undefined) throw new ThetanutsLogicError("STRUCTURE_UNSUPPORTED", `Missing SDK collateral decimals: ${pair}`);
+  // Single-strike calls are the one family whose SDK capacity cap consults a SECOND, different
+  // decimals source: getCollateralDecimals (dist/index.js:2510) reads the deprecated
+  // `collateralTokens` map — USDC/WETH/cbBTC only on Base — and falls back to 18 for everything
+  // else, including aBasUSDC, aBascbBTC, cbDOGE and cbXRP. When that view is >= 18 the cap
+  // switches to a 10**6 contract-size unit (dist/index.js:1663) which `calculateCollateral`
+  // cannot then be called with (negative exponent), and when the two views merely disagree the
+  // cap is computed on decimals the token does not have. Measured, both cases are live:
+  // aBasUSDC/cbXRP tokens.decimals=6 vs getCollateralDecimals=18 -> single-strike call cap 0.
+  // Fail closed rather than emit a number from two disagreeing conventions.
+  if (raw.isCall && strikes.length === 1) {
+    const sdkView = Object.values(client.chainConfig.collateralTokens).find(token => token.address.toLowerCase() === collateral)?.decimals ?? 18;
+    if (sdkView !== collateralDecimals || sdkView >= 18) throw new ThetanutsLogicError("STRUCTURE_UNSUPPORTED", `SDK capacity and collateral decimals disagree (${sdkView} vs ${collateralDecimals}): ${pair}`);
+  }
+  const contractSizeDecimals = sellContractSizeDecimals(collateralDecimals);
   // SDK 0.3.0 CollateralParams accepts PayoutType, not implementation names.
   // Do not map inverse/physical calls to linear calls: their collateral differs.
   const types: Readonly<Record<string, PayoutType>> = {
@@ -79,7 +151,7 @@ export function quoteSellFill({ client, order, collateralBudget, referrer, now, 
   if (!type) throw new ThetanutsLogicError("STRUCTURE_UNSUPPORTED", `No SDK bigint collateral mapping: ${pair}`);
   const collateralFor = (numContracts: bigint): bigint => {
     try {
-      return client.utils.calculateCollateral({ type, strikes, numContracts, priceDecimals: 8, sizeDecimals: decimals, collateralDecimals: decimals });
+      return client.utils.calculateCollateral({ type, strikes, numContracts, priceDecimals: 8, sizeDecimals: contractSizeDecimals, collateralDecimals });
     } catch (cause) {
       throw new ThetanutsLogicError("STRUCTURE_UNSUPPORTED", `SDK rejected collateral for ${pair}: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
@@ -97,5 +169,5 @@ export function quoteSellFill({ client, order, collateralBudget, referrer, now, 
   if (premiumGross === 0n) throw new ThetanutsLogicError("ZERO_PREMIUM", "Nonzero contracts produce zero premium");
   const feeEstimate = premiumGross * 1250n / 10000n;
   const preview = client.optionBook.previewFillOrder(order, undefined, referrer);
-  return { numContracts, maxContracts, collateralRequired, premiumGross, feeEstimate, premiumNet: premiumGross - feeEstimate, capped: requested > maxContracts, pricePerContract: order.order.price, collateralToken: raw.collateral, referrer: preview.referrer, expiry: order.order.expiry, isCall: raw.isCall, strikes };
+  return { numContracts, maxContracts, collateralRequired, premiumGross, feeEstimate, premiumNet: premiumGross - feeEstimate, collateralDecimals, contractSizeDecimals, capped: requested > maxContracts, pricePerContract: order.order.price, collateralToken: raw.collateral, referrer: preview.referrer, expiry: order.order.expiry, isCall: raw.isCall, strikes };
 }

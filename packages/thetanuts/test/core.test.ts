@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { OPTION_BOOK_ABI, buildPriceFeedSymbolMap, getChainConfigById, getOptionImplementationInfo, type OrderWithSignature } from "@thetanuts-finance/thetanuts-client";
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, type Address, type Hex, type Log } from "viem";
-import { quoteSellFill, buildSellFillTransactions, takerSide, buildFillTransactions, createReadClient, deriveMarkets, expectOrderFilled, fetchLiveOrders, listAssets, listExpiries, listStructures, parseOrderFilled, premiumUsd8From, quoteFill, payoffAtExpiry, payoffCurve, maxLoss, maxPayout, breakEven, ThetanutsLogicError } from "../src";
+import { quoteSellFill, sellContractSizeDecimals, VERIFIED_SELL_PAIRS, buildSellFillTransactions, takerSide, buildFillTransactions, createReadClient, deriveMarkets, expectOrderFilled, fetchLiveOrders, listAssets, listExpiries, listStructures, parseOrderFilled, premiumUsd8From, quoteFill, payoffAtExpiry, payoffCurve, maxLoss, maxPayout, breakEven, ThetanutsLogicError } from "../src";
 
 const A = (digit: string) => `0x${digit.repeat(40)}`;
 const now = 2_000_000_000;
@@ -339,6 +339,118 @@ describe("sell collateral quote and encoding", () => {
     ] as const) {
       const guardClient = code === "ZERO_COLLATERAL" ? { utils: client.utils, chainConfig: client.chainConfig, optionBook: { previewFillOrder: client.optionBook.previewFillOrder.bind(client.optionBook), calculateMaxContracts: () => 1n } } : client;
       expect(() => quoteSellFill({ client: guardClient, order: testOrder, collateralBudget, now })).toThrowError(expect.objectContaining({ code }));
+    }
+  });
+});
+
+describe("round 8 address-pinned exemption and separated decimals", () => {
+  const client = createReadClient({ rpcUrl: "http://127.0.0.1:1" });
+  const config = getChainConfigById(8453);
+  const strikesFor = (numStrikes: number) => ["220000000000", "230000000000", "240000000000", "250000000000"].slice(0, numStrikes);
+  // The five collateral tokens named in the round-8 brief, resolved from the SDK chain config.
+  const collateralAddresses = ["USDC", "aBasUSDC", "aBasWETH", "cbBTC", "WETH"].map((symbol) => {
+    const token = Object.values(config.tokens).find((item) => item.symbol === symbol);
+    if (!token) throw new Error(`Base chain config has no ${symbol}`);
+    return token.address;
+  });
+  const implementationAddresses = Object.keys(config.optionImplementations);
+
+  test("exactly one (implementation, collateral) address pair is exempt, and it is the decoded one", () => {
+    expect(implementationAddresses.length).toBeGreaterThan(1);
+    expect(collateralAddresses).toHaveLength(5);
+    const passed: string[] = [];
+    for (const implementation of implementationAddresses) {
+      const info = getOptionImplementationInfo(8453, implementation)!;
+      for (const collateral of collateralAddresses) {
+        const testOrder = order({ implementation, collateral, isLong: false, isCall: false, strikes: strikesFor(info.numStrikes), price: 212682750n, available: 22000000n });
+        try {
+          quoteSellFill({ client, order: testOrder, collateralBudget: 22000000n, now });
+          passed.push(`${implementation} + ${collateral}`);
+        } catch (error) {
+          if ((error as { code?: string }).code !== "STRUCTURE_COLLATERAL_UNVERIFIED") passed.push(`${implementation} + ${collateral}`);
+        }
+      }
+    }
+    console.log(`round 8: ${implementationAddresses.length} implementations x ${collateralAddresses.length} collaterals = ${implementationAddresses.length * collateralAddresses.length} combinations; ungated: ${passed.length}`);
+    expect(passed).toEqual(["0x6ad53dd058bea004829ccf58a282c21a7df02dca + 0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB"]);
+    expect(VERIFIED_SELL_PAIRS).toEqual([{ implementation: "0x6ad53dd058bea004829ccf58a282c21a7df02dca", collateral: "0x4e65fe4dba92790696d040ac24aa414708f5c0ab" }]);
+  });
+
+  test("the four historical PHYSICAL_PUT implementations stay gated on quote and on calldata", async () => {
+    const historical = implementationAddresses.filter((address) => getOptionImplementationInfo(8453, address)?.name === "PHYSICAL_PUT" && address !== "0x6ad53dd058bea004829ccf58a282c21a7df02dca");
+    expect(historical.sort()).toEqual(["0x2d283d7ade2896d98331496ee761f15ed1d6a699", "0x9da79023af00d1f2054bb1eed0d49004fe41c5b5", "0xac5eca7129909de8c12e1a41102414b5a5f340aa", "0xc305f561ef1de00f06b227f7593763c65c479f1b"]);
+    const offline = { utils: client.utils, chainConfig: client.chainConfig, optionBook: client.optionBook, erc20: {
+      getAllowance: async () => { throw new Error("must not access allowance"); },
+      encodeApprove: client.erc20.encodeApprove.bind(client.erc20),
+    } };
+    for (const implementation of historical) {
+      const testOrder = order({ implementation, collateral: "0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB", isLong: false, isCall: false, strikes: ["220000000000"], price: 212682750n, available: 22000000n });
+      const params = { client, order: testOrder, collateralBudget: 22000000n, now };
+      expect(() => quoteSellFill(params)).toThrowError(expect.objectContaining({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" }));
+      await expect(buildSellFillTransactions({ ...params, client: offline, account: A("5") as Address })).rejects.toMatchObject({ code: "STRUCTURE_COLLATERAL_UNVERIFIED" });
+      // Opt-in still works, and still produces the decoded-fill numbers for a 6-decimal collateral.
+      expect(quoteSellFill({ ...params, allowUnverifiedStructureCollateral: true })).toMatchObject({ numContracts: 10000n, collateralRequired: 22000000n });
+    }
+  });
+
+  test("contract-size and collateral decimals are separate and both come from the token", () => {
+    // MEASURED against the SDK: calculateCollateral at the SDK's own capacity cap reproduces the
+    // maker's posted availableAmount exactly, and only, at sizeDecimals === collateralDecimals ===
+    // the collateral token's decimals. 6-decimal row is the decoded fill 0xdf3323…76f3.
+    for (const [symbol, decimals, available, contracts, collateral, premium, fee] of [
+      ["aBasUSDC", 6, 22000000n, 10000n, 22000000n, 21268n, 2658n],
+      ["cbBTC", 8, 2200000000n, 1000000n, 2200000000n, 2126827n, 265853n],
+      ["WETH", 18, 22000000000000000000n, 10000000000000000n, 22000000000000000000n, 21268275000000000n, 2658534375000000n],
+    ] as const) {
+      const token = Object.values(config.tokens).find((item) => item.symbol === symbol)!;
+      expect(token.decimals).toBe(decimals);
+      const testOrder = order({ implementation: implementationFor("PUT"), collateral: token.address, isLong: false, isCall: false, strikes: ["220000000000"], price: 212682750n, available });
+      const q = quoteSellFill({ client, order: testOrder, collateralBudget: available, now, allowUnverifiedStructureCollateral: true });
+      expect(q.collateralDecimals).toBe(decimals);
+      expect(q.contractSizeDecimals).toBe(decimals);
+      expect(sellContractSizeDecimals(decimals)).toBe(decimals);
+      expect(q.numContracts).toBe(contracts);
+      expect(q.numContracts).toBe(client.optionBook.calculateMaxContracts(testOrder));
+      expect(q.collateralRequired).toBe(collateral);
+      expect(q.collateralRequired).toBe(testOrder.availableAmount);
+      expect(q.premiumGross).toBe(premium);
+      expect(q.feeEstimate).toBe(fee);
+      // A fixed contract-size unit is not merely different, it is unusable: the SDK divides by
+      // 10n ** BigInt(sizeDecimals - collateralDecimals) (dist/index.js:11140).
+      const call = (sizeDecimals: number) => client.utils.calculateCollateral({ type: "put", strikes: [220000000000n], numContracts: contracts, priceDecimals: 8, sizeDecimals, collateralDecimals: decimals });
+      expect(call(decimals)).toBe(collateral);
+      if (decimals > 6) expect(() => call(6)).toThrow("Negative exponent is not allowed");
+      if (decimals < 18) expect(call(18)).toBe(0n);
+      console.log(`round 8 decimals: ${symbol} dec=${decimals} cap=${contracts} collateral=${q.collateralRequired} === availableAmount=${testOrder.availableAmount}`);
+    }
+  });
+
+  test("a collateral token the SDK chain config does not know fails closed even with opt-in", () => {
+    for (const allowUnverifiedStructureCollateral of [false, true]) {
+      const testOrder = order({ implementation: implementationFor("PUT"), collateral: A("7"), isLong: false, isCall: false, strikes: ["220000000000"], price: 212682750n, available: 22000000n });
+      const code = allowUnverifiedStructureCollateral ? "STRUCTURE_UNSUPPORTED" : "STRUCTURE_COLLATERAL_UNVERIFIED";
+      expect(() => quoteSellFill({ client, order: testOrder, collateralBudget: 22000000n, now, allowUnverifiedStructureCollateral })).toThrowError(expect.objectContaining({ code }));
+    }
+  });
+
+  test("single-strike calls fail closed when the SDK's two decimals views disagree", () => {
+    // getCollateralDecimals (dist/index.js:2510) reads the deprecated collateralTokens map and
+    // falls back to 18; only USDC, WETH and cbBTC are in it on Base.
+    for (const [symbol, supported] of [["USDC", true], ["cbBTC", true], ["WETH", false], ["aBasUSDC", false], ["aBasWETH", false], ["cbXRP", false]] as const) {
+      const token = Object.values(config.tokens).find((item) => item.symbol === symbol)!;
+      const testOrder = order({ implementation: implementationFor("LINEAR_CALL"), collateral: token.address, isLong: false, isCall: true, strikes: ["220000000000"], price: 212682750n, available: 22000000n * 10n ** BigInt(token.decimals - 6) });
+      const params = { client, order: testOrder, collateralBudget: testOrder.availableAmount, now, allowUnverifiedStructureCollateral: true };
+      if (supported) {
+        const q = quoteSellFill(params);
+        expect(q.contractSizeDecimals).toBe(token.decimals);
+        expect(q.numContracts).toBe(client.optionBook.calculateMaxContracts(testOrder));
+        expect(q.collateralRequired).toBe(testOrder.availableAmount);
+      } else {
+        expect(() => quoteSellFill(params)).toThrowError(expect.objectContaining({ code: "STRUCTURE_UNSUPPORTED" }));
+      }
+      // Multi-strike calls never reach that SDK branch, so they stay quotable with the opt-in.
+      const spread = order({ implementation: implementationFor("CALL_SPREAD"), collateral: token.address, isLong: false, isCall: true, strikes: ["220000000000", "230000000000"], price: 212682750n, available: 22000000n * 10n ** BigInt(token.decimals - 6) });
+      expect(quoteSellFill({ client, order: spread, collateralBudget: spread.availableAmount, now, allowUnverifiedStructureCollateral: true }).contractSizeDecimals).toBe(token.decimals);
     }
   });
 });

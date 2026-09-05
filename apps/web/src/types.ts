@@ -5,6 +5,11 @@
  * TODO-OWNER: mock contracts and collateral absent from the mockup are nullable
  * (round 2 item C). They must be supplied before constructing ThesisAiContext.
  * Mock records are not validated onchain contexts or database insert payloads.
+ *
+ * Round 6 (owner 2026-09-05, "a pure text opinion is fine also"): a thesis is a
+ * post. Text is required; the market and structure it names are optional; the
+ * creator's own backing fill is optional. `ThesisAiContext` below is untouched —
+ * it is the frozen shared contract, and only a backed thesis can fill it.
  */
 export type ThesisDirection = "bull" | "bear";
 export type ThesisStatus = "draft" | "pending" | "open" | "expired" | "settled" | "cancelled";
@@ -74,22 +79,27 @@ export interface SideStats {
     amountUsd: string;
     signed: boolean;
 }
-export interface Thesis extends Omit<ThesisAiContext, "creator" | "structure"> {
-    id: string;
-    slug: string;
-    creatorUserId: string;
-    creatorPositionId: string | null;
-    creator: Creator;
-    structure: Omit<ThesisAiContext["structure"], "contracts" | "collateralSymbol"> & {
-        contracts: string | null;
-        collateralSymbol: string | null;
-        legs: {
-            strikeUsd: string;
-            isCall: boolean;
-            isLong: boolean;
-        }[];
-    };
-    endingSoon: boolean;
+/** The tradable structure a post names. Optional: a post may be text only. */
+export type ThesisStructure = Omit<ThesisAiContext["structure"], "contracts" | "collateralSymbol"> & {
+    contracts: string | null;
+    collateralSymbol: string | null;
+    legs: {
+        strikeUsd: string;
+        isCall: boolean;
+        isLong: boolean;
+    }[];
+};
+/**
+ * The creator's own fill behind a post, and the sides other traders took on it.
+ * Absent when the creator only wrote an opinion.
+ */
+export interface ThesisBacking {
+    creatorPositionId: string;
+    economics: ThesisAiContext["economics"];
+    verification: ThesisAiContext["verification"];
+    pooledUsd: string | null;
+    bull: SideStats;
+    bear: SideStats;
     mock: {
         settledAgoMinutes: number | null;
         settledWinner: ThesisDirection | null;
@@ -98,11 +108,29 @@ export interface Thesis extends Omit<ThesisAiContext, "creator" | "structure"> {
         payoutPerContractUsd: string | null;
         transactionFragment: string | null;
     };
-    pooledUsd: string | null;
-    bull: SideStats;
-    bear: SideStats;
-    fills: number;
+}
+export interface Thesis {
+    id: string;
+    slug: string;
+    creatorUserId: string;
+    creator: Creator;
+    thesis: ThesisAiContext["thesis"];
+    /**
+     * Snapshot instant every relative label on this post is measured from. It
+     * supplies `ThesisAiContext.market.dataAsOf`, so the shared contract keeps
+     * exactly the fields PRD §10.3 lists and there is one source of truth here.
+     */
+    dataAsOf: string;
+    /** Null for a pure text opinion: the post names no market. */
+    market: Omit<ThesisAiContext["market"], "dataAsOf"> | null;
+    /** Null when the post names no tradable structure. */
+    structure: ThesisStructure | null;
+    /** Null when the creator has not filled a position behind this post. */
+    backing: ThesisBacking | null;
+    endingSoon: boolean;
     likes: number;
+    /** Whether the connected wallet has liked this post. */
+    likedByViewer: boolean;
     commentCount: number;
 }
 export interface Position {
@@ -163,16 +191,49 @@ export interface Ticket {
     breakEvenPricesUsd: string[];
     liquidityLeftUsd: string;
 }
+/** The post thread page: the post, what it is tagged to, and the replies. */
 export interface ThesisDetail {
     thesis: Thesis;
     shareUrl: string;
     shareHeadline: string;
     settlementLabel: string;
-    spotChangePct: string;
+    spotChangePct: string | null;
     participants: Participant[];
     comments: Comment[];
     activity: ActivityItem[];
     activityCount: number;
     participantCount: number;
+}
+/** One live option structure the OptionBook has liquidity for. */
+export interface MarketStructure {
+    id: string;
+    expiryAt: string;
+    productType: string;
+    isCall: boolean;
+    strikesUsd: string[];
+    premiumPerContractUsd: string;
+    maxPayoutMultiple: string;
+    liquidityLeftUsd: string;
+}
+/** A per-asset market page: price history, the live book, and the ticket. */
+export interface Market {
+    slug: string;
+    chainId: 8453;
+    underlyingAsset: string;
+    name: string;
+    currentSpotPriceUsd: string;
+    changePct: string;
+    dataAsOf: string;
+    /** Hourly closes, oldest first. `time` is a UTC epoch in SECONDS, the unit
+     *  the chart library's `UTCTimestamp` uses. */
+    series: {
+        time: number;
+        priceUsd: string;
+    }[];
+    structures: MarketStructure[];
+    /** Which structure the ticket is quoting; must be one of `structures`. */
+    selectedStructureId: string;
     ticket: Ticket;
+    /** Slugs of the theses tagged to this market, most recent first. */
+    taggedThesisSlugs: string[];
 }

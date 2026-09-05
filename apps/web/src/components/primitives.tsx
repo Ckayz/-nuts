@@ -1,5 +1,6 @@
+import Link from "next/link";
 import type { CSSProperties } from "react";
-import type { ThesisStatus } from "@/lib/display-types";
+import type { Tag, ThesisStatus } from "@/lib/display-types";
 
 export function Avatar({
 	initials,
@@ -89,5 +90,29 @@ export function TodoOwner({ style }: { style?: CSSProperties }) {
 		<span className="todo" style={style}>
 			TODO-OWNER
 		</span>
+	);
+}
+
+/**
+ * The market and structure chips a post is tagged with. A post that names no
+ * market renders nothing; the chips are the only route from a post to trading.
+ */
+export function TagRow({ tag, backed }: { tag: Tag | null; backed?: boolean }) {
+	if (!tag) return null;
+	return (
+		<div className="tags">
+			<Link className="tag mkt" href={`/m/${tag.slug}`}>
+				<b>{tag.asset}</b>
+				market
+			</Link>
+			{tag.structureLabel ? (
+				<Link className="tag" href={`/m/${tag.slug}`}>
+					{tag.structureLabel}
+				</Link>
+			) : null}
+			{backed ? null : (
+				<span className="tag">no position yet</span>
+			)}
+		</div>
 	);
 }

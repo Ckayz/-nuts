@@ -20,9 +20,18 @@ if (url) {
   }
   // Constructing a Client parses exactly as Pool does; it does not connect.
   // @types/pg omits this runtime property of the installed driver.
-  const { host, port, database } = (new Client({ connectionString: url }) as unknown as {
-    connectionParameters: { host: string; port: number; database: string };
-  }).connectionParameters;
+  const client = new Client({ connectionString: url });
+  if (!("connectionParameters" in client)) {
+    throw new Error("Cannot inspect drizzle-kit destination");
+  }
+  const parameters = client.connectionParameters;
+  if (typeof parameters !== "object" || parameters === null ||
+      !("host" in parameters) || typeof parameters.host !== "string" ||
+      !("port" in parameters) || typeof parameters.port !== "number" ||
+      !("database" in parameters) || typeof parameters.database !== "string") {
+    throw new Error("Invalid drizzle-kit destination parameters");
+  }
+  const { host, port, database } = parameters;
   // Never print credentials or query parameters.
   console.error(`drizzle-kit target: ${host}:${port}/${database}`);
   if (!["127.0.0.1", "localhost"].includes(host) && process.env.DRIZZLE_ALLOW_REMOTE !== "1") {

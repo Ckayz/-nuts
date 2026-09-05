@@ -7,3 +7,4 @@ export * from "./follows";
 export * from "./positions";
 export * from "./theses";
 export * from "./users";
+export * from "./likes";

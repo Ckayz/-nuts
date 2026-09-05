@@ -1,18 +1,23 @@
 import Link from "next/link";
 import { PositionCard } from "@/components/feed/position-card";
-import {
-	CommentIcon,
-	HeartIcon,
-	ShareIcon,
-	SparkIcon,
-} from "@/components/icons";
-import { Avatar, StatusChip } from "@/components/primitives";
+import { CommentIcon, ShareIcon, SparkIcon } from "@/components/icons";
+import { LikeButton } from "@/components/feed/like-button";
+import { Avatar, StatusChip, TagRow } from "@/components/primitives";
 import type { Thesis } from "@/lib/display-types";
 
+/**
+ * One post in the feed. Owner 2026-09-05: a thesis is a post, so there is no
+ * trade button here — trading is on the market page. Three states:
+ *   text only  — headline, rationale, like / comment / share;
+ *   tagged     — plus the market chip and, when named, the structure chip;
+ *   backed     — plus the verified badge and the creator's live position card.
+ */
 export function CalloutPost({ thesis }: { thesis: Thesis }) {
-	const settled = thesis.status === "settled";
 	return (
-		<article className={settled ? "post settled" : "post"}>
+		<article
+			className={thesis.backing?.settled ? "post settled" : "post"}
+			aria-labelledby={`post-${thesis.slug}`}
+		>
 			<div className="thread">
 				<Avatar initials={thesis.creator.initials} size="lg" />
 			</div>
@@ -21,22 +26,31 @@ export function CalloutPost({ thesis }: { thesis: Thesis }) {
 					<b>{thesis.creator.displayName}</b>
 					<span className="mono">@{thesis.creator.handle}</span>
 					<span>{thesis.postedLabel}</span>
-					<StatusChip status={thesis.status} label={thesis.statusLabel} />
+					{thesis.status && thesis.statusLabel ? (
+						<StatusChip status={thesis.status} label={thesis.statusLabel} />
+					) : null}
 				</div>
-				<p className="h">
+				<p className="h" id={`post-${thesis.slug}`}>
 					<Link href={`/t/${thesis.slug}`}>{thesis.headline}</Link>
 				</p>
 				{thesis.note ? <p className="t">{thesis.note}</p> : null}
-				<PositionCard thesis={thesis} />
+				<TagRow tag={thesis.tag} backed={thesis.backing !== null} />
+				{thesis.backing ? (
+					<PositionCard
+						asset={thesis.asset}
+						structure={thesis.structure}
+						backing={thesis.backing}
+					/>
+				) : null}
 				<div className="acts">
-					<button type="button" aria-label={`Like, ${thesis.likes}`}>
-						<HeartIcon />
-						{thesis.likes}
-					</button>
-					<button type="button" aria-label={`Comments, ${thesis.commentCount}`}>
+					<LikeButton likes={thesis.likes} liked={thesis.likedByViewer} />
+					<Link
+						href={`/t/${thesis.slug}`}
+						aria-label={`Comments, ${thesis.commentCount}`}
+					>
 						<CommentIcon />
 						{thesis.commentCount}
-					</button>
+					</Link>
 					<button type="button">
 						<ShareIcon />
 						share
@@ -45,16 +59,6 @@ export function CalloutPost({ thesis }: { thesis: Thesis }) {
 						<SparkIcon />
 						Explain
 					</button>
-					{settled ? null : (
-						<span className="sides">
-							<button type="button" className="b1">
-								Bull
-							</button>
-							<button type="button" className="b2">
-								Bear
-							</button>
-						</span>
-					)}
 				</div>
 			</div>
 		</article>

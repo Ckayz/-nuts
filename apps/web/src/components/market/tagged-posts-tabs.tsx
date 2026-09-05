@@ -1,16 +1,28 @@
 "use client";
-import { useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { CalloutPost } from "@/components/feed/callout-post";
+import { TabHeading } from "@/components/feed/tabs";
 import type { Thesis } from "@/lib/display-types";
 
 /**
- * "Posts about <asset>" — the mockup's `#market` third card (lines 817-855).
+ * "Theses" — the second tab of the market page's centre table
+ * (`market-tabs.tsx`), and before that the mockup's `#market` third card
+ * (lines 817-855).
  *
- * The posts sit inside the card as hairline-separated rows rather than as their
- * own stacked surfaces, and the All / Backed filter is a pair of pills in the
- * card header. Tab semantics, roving focus and the arrow keys are unchanged from
- * before the redesign; only the pills' look is new, so both `aria-selected`
- * (the truth for a tab) and the mockup's pill styling are on the same button.
+ * The posts sit as hairline-separated rows rather than as their own stacked
+ * surfaces, filtered by an All / Backed pair of pills.
+ *
+ * The pills used to be a hand-rolled `role="tablist"` copied out of
+ * `components/feed/tabs.tsx`; it is now that component's `pills` variant, so the
+ * repo has ONE tab implementation and not a third copy of the keyboard rules.
+ * The visible change from that fold is the semantics of the pills themselves:
+ * they are `aria-pressed` filter buttons, exactly as the feed's Trending /
+ * Ending / Settled pills are, rather than `role="tab"` with roving focus. That
+ * is the shared component's contract for a pill row, and `index.css` already
+ * styles `aria-pressed` and `aria-selected` identically.
+ *
+ * It renders the tab card's CONTENTS, not a card of its own — see the note in
+ * `structures-list.tsx`.
  */
 export function TaggedPostsTabs({
 	posts,
@@ -19,67 +31,34 @@ export function TaggedPostsTabs({
 	databaseMode = false,
 }: {
 	posts: Thesis[];
-	/** e.g. "BTC". Names the card, as the mockup does. */
+	/** e.g. "BTC". Names the filter row, as the card heading used to. */
 	asset?: string;
 	signedIn?: boolean;
 	databaseMode?: boolean;
 }) {
 	const id = useId();
-	const [tab, setTab] = useState<"all" | "backed">("all");
-	const all = useRef<HTMLButtonElement>(null);
-	const backed = useRef<HTMLButtonElement>(null);
-	const visible = tab === "all" ? posts : posts.filter((post) => post.backingCard != null);
+	const [filter, setFilter] = useState(0);
+	const backed = filter === 1;
+	const visible = backed ? posts.filter((post) => post.backingCard != null) : posts;
 	return (
-		<section className="card">
-			<div className="card-h tagged-h">
-				<h3>{asset ? `Posts about ${asset}` : "Tagged posts"}</h3>
-				<span
-					className="x"
-					role="tablist"
-					aria-label={asset ? `Posts about ${asset}` : "Tagged posts"}
-					onKeyDown={(event) => {
-						if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-						event.preventDefault();
-						const next =
-							event.key === "Home"
-								? "all"
-								: event.key === "End"
-									? "backed"
-									: tab === "all"
-										? "backed"
-										: "all";
-						setTab(next);
-						(next === "all" ? all : backed).current?.focus();
-					}}
-				>
-					{(["all", "backed"] as const).map((value) => (
-						<button
-							key={value}
-							type="button"
-							className="pill"
-							role="tab"
-							ref={value === "all" ? all : backed}
-							id={`${id}-${value}`}
-							aria-selected={tab === value}
-							aria-controls={`${id}-panel`}
-							tabIndex={tab === value ? 0 : -1}
-							onClick={() => setTab(value)}
-						>
-							{value === "all" ? "All" : "Backed"}
-						</button>
-					))}
-				</span>
+		<>
+			<div className="tagged-filter">
+				<TabHeading
+					id={id}
+					labels={["All", "Backed"]}
+					selected={filter}
+					onSelect={setFilter}
+					variant="pills"
+					label={asset ? `Posts about ${asset}` : "Tagged posts"}
+				/>
 			</div>
-			<div
-				className="card-b tagged"
-				role="tabpanel"
-				id={`${id}-panel`}
-				aria-labelledby={`${id}-${tab}`}
-				tabIndex={0}
-			>
+			{/* No nested `role="tabpanel"`: this list already sits inside the centre
+			    card's Theses panel (`market-tabs.tsx`), and the pills above it are
+			    `aria-pressed` filters, which do not own a panel. */}
+			<div className="card-b tagged">
 				{visible.length === 0 ? (
 					<span className="empty">
-						{tab === "backed"
+						{backed
 							? "No post about this market is backed by a position yet."
 							: "No post names this market yet."}
 					</span>
@@ -87,10 +66,16 @@ export function TaggedPostsTabs({
 					visible.map((post) => (
 						// Round-1 fold item 20: the mockup's market-page post is text plus
 						// a "Backed" chip, not the full card the feed draws.
-						<CalloutPost key={post.slug} thesis={post} signedIn={signedIn} databaseMode={databaseMode} compact />
+						<CalloutPost
+							key={post.slug}
+							thesis={post}
+							signedIn={signedIn}
+							databaseMode={databaseMode}
+							compact
+						/>
 					))
 				)}
 			</div>
-		</section>
+		</>
 	);
 }

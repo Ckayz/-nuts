@@ -64,6 +64,13 @@
       "when": 1788605684012,
       "tag": "0008_trade_recording_fences",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788643327055,
+      "tag": "0009_market_thesis_index",
+      "breakpoints": true
     }
   ]
 }

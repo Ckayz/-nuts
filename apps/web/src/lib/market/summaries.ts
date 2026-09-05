@@ -40,17 +40,34 @@ export async function marketSummariesData(): Promise<MarketSummariesData> {
 
 
 /**
- * Book statistics for one asset's stat tiles: the makers' median implied vol,
- * and how the live orders split between calls and puts.
+ * Book statistics for one asset's stat tiles and its About panel: the makers'
+ * median implied vol, how the live orders split between calls and puts, and how
+ * they split between the two sides a taker can take.
+ *
+ * `buys` / `sells` are TAKER sides, which is what `TradeableOrder.side` carries
+ * (`lib/thetanuts/orders.ts` sets it from `takerSide(order)`, and CLAUDE.md
+ * records that raw `isLong` is the MAKER's flag): `buy` is an order this app's
+ * visitor could take by paying a premium, `sell` one they could take by posting
+ * collateral. They are ORDERS RESTING ON THE BOOK, never trades — the OptionBook
+ * publishes no trade history, so a "234 buys / 23 sells" in fomo's sense does not
+ * exist here and is not invented.
  *
  * Reads the SAME cached order snapshot the rest of the page already reads, so
  * this costs no extra network call. Returns an empty object in mock mode and
- * whenever the book cannot be read — the tiles then simply do not appear, which
- * is the honest rendering of "we do not know", never a zero.
+ * whenever the book cannot be read — the tiles and bars then simply do not
+ * appear, which is the honest rendering of "we do not know", never a zero.
  */
-export async function marketBookStats(
-	asset: string,
-): Promise<{ impliedVol?: number | null; calls?: number | null; puts?: number | null }> {
+export interface MarketBookStats {
+	impliedVol?: number | null;
+	calls?: number | null;
+	puts?: number | null;
+	/** Live orders whose TAKER side is a buy (pay premium). */
+	buys?: number | null;
+	/** Live orders whose TAKER side is a sell (post collateral). */
+	sells?: number | null;
+}
+
+export async function marketBookStats(asset: string): Promise<MarketBookStats> {
 	if (!usingDatabase()) return {};
 	try {
 		const { getOrderSnapshot, isFeedUnavailable } = await import("@/lib/thetanuts/orders");
@@ -62,13 +79,17 @@ export async function marketBookStats(
 		const { medianImpliedVol } = await import("./implied-vol");
 		let calls = 0;
 		let puts = 0;
+		let buys = 0;
+		let sells = 0;
 		for (const order of orders) {
 			if (order.isCall) calls += 1;
 			else puts += 1;
+			if (order.side === "buy") buys += 1;
+			else sells += 1;
 		}
 		// `sdkOrder` is where the SDK parks `rawApiData.greeks`; the reader checks
 		// every documented position and returns null when none carries an iv.
-		return { impliedVol: medianImpliedVol(orders), calls, puts };
+		return { impliedVol: medianImpliedVol(orders), calls, puts, buys, sells };
 	} catch {
 		return {};
 	}

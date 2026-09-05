@@ -199,7 +199,6 @@
   .tfs button{border:1px solid transparent;border-radius:7px;padding:4px 10px;font-family:var(--mono);font-size:11px;color:var(--m)}
   .tfs button[aria-pressed="true"]{background:var(--s2);border-color:var(--l2);color:var(--k)}
   .tfs button:hover{color:var(--k)}
-  .chartwrap{height:300px;width:100%}
   tr.sel td{background:var(--acc-soft)}
   tbody tr:hover td{background:var(--s2)}
   .bookmeta{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
@@ -468,16 +467,7 @@
         <div><span class="lbl">Tagged posts</span><span class="v">2</span></div>
       </div>
 
-      <div class="chartbox">
-        <div class="hh">
-          <span class="lbl">BTC spot</span>
-          <span class="tfs" role="group" aria-label="Chart window">
-            <button aria-pressed="false">1H</button><button aria-pressed="false">4H</button><button aria-pressed="false">1D</button><button aria-pressed="true">7D</button><button aria-pressed="false">1M</button><button aria-pressed="false">ALL</button>
-          </span>
-        </div>
-        <div class="chartwrap"><canvas id="mktchart" width="800" height="300" aria-label="BTC spot price, 7 days"></canvas></div>
-        <span class="note">Chart windows on offer <span class="todo">TODO-OWNER</span></span>
-      </div>
+      <!-- Owner 2026-09-05 14:1x: no price chart. Thetanuts exposes only the live spot price, no history; a generated series would lie to users. Spot and 24h change are numbers in the header and stat tiles. -->
 
       <div class="sec">
         <div class="bookmeta">
@@ -609,7 +599,7 @@
       <div class="charts">
         <div class="chartbox">
           <div class="hh"><span class="lbl">BTC spot · 7d · entries pinned</span><span class="v">$79,607 <span class="bull" style="font-size:12px">+1.65%</span></span></div>
-          <canvas id="spot" width="800" height="220" aria-label="BTC spot price, 7 days, with participant entries marked"></canvas>
+          <!-- Owner 2026-09-05 14:1x: no spot-price chart here either (no price history at Thetanuts). The payoff chart below is real math from the structure and stays. -->
           <div class="legend"><span><i style="background:var(--k)"></i>spot</span><span><i style="background:var(--bear)"></i>78,000 long put</span><span><i style="background:var(--dim)"></i>74,000 short put</span><span><i style="background:var(--bull);width:8px;height:8px;border-radius:50%"></i>bull entry</span><span><i style="background:var(--bear);width:8px;height:8px;border-radius:50%"></i>bear entry</span></div>
         </div>
         <div class="chartbox">
@@ -681,8 +671,6 @@
     document.getElementById('view-thesis').hidden=v!=='thesis';
     document.getElementById('view-market').hidden=v!=='market';
     document.querySelectorAll('.nav [data-view]').forEach(function(b){b.setAttribute('aria-current',b.dataset.view===v?'page':'false')});
-    if(v==='thesis') drawSpot();
-    if(v==='market') drawMarket();
   }
   document.querySelectorAll('.nav [data-view]').forEach(function(b){b.addEventListener('click',function(){show(b.dataset.view)})});
   // open the post thread from any callout headline, trending row, or position row
@@ -709,60 +697,6 @@
   var css=getComputedStyle(document.documentElement);
   function tok(n){return css.getPropertyValue(n).trim()}
   var drawn=false;
-  function drawSpot(){
-    if(drawn) return; drawn=true;
-    var c=document.getElementById('spot');var w=c.clientWidth||800,h=220;c.width=w*2;c.height=h*2;
-    var g=c.getContext('2d');g.scale(2,2);
-    var n=168,pts=[],p=78100,s=7;
-    function rnd(){s=(s*9301+49297)%233280;return s/233280-0.5}
-    for(var i=0;i<n;i++){p+=rnd()*420+(i>110?18:-2);pts.push(p)}
-    pts[n-1]=79607;
-    var lo=73500,hi=81500,padL=8,padR=52,padT=10,padB=18;
-    function X(i){return padL+(w-padL-padR)*i/(n-1)}
-    function Y(v){return padT+(h-padT-padB)*(1-(v-lo)/(hi-lo))}
-    g.strokeStyle=tok('--l');g.lineWidth=1;
-    [74000,76000,78000,80000].forEach(function(v){g.beginPath();g.moveTo(padL,Y(v));g.lineTo(w-padR,Y(v));g.stroke();
-      g.fillStyle=tok('--dim');g.font='10px '+tok('--mono');g.textAlign='left';g.fillText((v/1000)+'k',w-padR+6,Y(v)+3)});
-    function dash(v,col){g.save();g.setLineDash([4,4]);g.strokeStyle=col;g.lineWidth=1;g.beginPath();g.moveTo(padL,Y(v));g.lineTo(w-padR,Y(v));g.stroke();g.restore()}
-    dash(78000,tok('--bear-fill'));dash(74000,tok('--dim'));
-    var grad=g.createLinearGradient(0,padT,0,h);grad.addColorStop(0,'rgba(245,197,66,.16)');grad.addColorStop(1,'rgba(245,197,66,0)');
-    g.beginPath();g.moveTo(X(0),Y(pts[0]));for(var i=1;i<n;i++)g.lineTo(X(i),Y(pts[i]));g.lineTo(X(n-1),h-padB);g.lineTo(X(0),h-padB);g.closePath();g.fillStyle=grad;g.fill();
-    g.beginPath();g.moveTo(X(0),Y(pts[0]));for(i=1;i<n;i++)g.lineTo(X(i),Y(pts[i]));g.strokeStyle=tok('--k');g.lineWidth=1.6;g.stroke();
-    [[150,'MK',1],[153,'DV',1],[157,'0X',0],[163,'JL',1],[165,'RH',0]].forEach(function(e){var x=X(e[0]),y=Y(pts[e[0]]);
-      g.beginPath();g.arc(x,y,8,0,Math.PI*2);g.fillStyle=e[2]?tok('--bull-fill'):tok('--bear-fill');g.fill();
-      g.lineWidth=2;g.strokeStyle=tok('--s');g.stroke();
-      g.fillStyle=e[2]?'#04130a':'#fff';g.font='700 7px '+tok('--sans');g.textAlign='center';g.fillText(e[1],x,y+2.5)});
-    g.beginPath();g.arc(X(n-1),Y(pts[n-1]),3.5,0,Math.PI*2);g.fillStyle=tok('--acc');g.fill();
-    g.fillStyle=tok('--dim');g.font='10px '+tok('--mono');g.textAlign='center';
-    ['29 Aug','31 Aug','2 Sep','4 Sep','now'].forEach(function(t,k){g.fillText(t,X(Math.round(k*(n-1)/4)),h-4)});
-  }
-  // Market-page chart. In the app this canvas is TradingView lightweight-charts;
-  // here it is the same seeded walk as drawSpot(), taller and without entry pins,
-  // so the mockup shows the space the real chart occupies.
-  var mdrawn=false;
-  function drawMarket(){
-    if(mdrawn) return; mdrawn=true;
-    var c=document.getElementById('mktchart');var w=c.clientWidth||800,h=300;c.width=w*2;c.height=h*2;
-    var g=c.getContext('2d');g.scale(2,2);
-    var n=168,pts=[],p=78100,s=7;
-    function rnd(){s=(s*9301+49297)%233280;return s/233280-0.5}
-    for(var i=0;i<n;i++){p+=rnd()*420+(i>110?18:-2);pts.push(p)}
-    var shift=79607-pts[n-1];for(var j=0;j<n;j++)pts[j]+=shift;
-    var lo=77500,hi=83000,padL=8,padR=60,padT=12,padB=20;
-    function X(i){return padL+(w-padL-padR)*i/(n-1)}
-    function Y(v){return padT+(h-padT-padB)*(1-(v-lo)/(hi-lo))}
-    g.strokeStyle=tok('--l');g.lineWidth=1;
-    [78000,79000,80000,81000,82000].forEach(function(v){g.beginPath();g.moveTo(padL,Y(v));g.lineTo(w-padR,Y(v));g.stroke();
-      g.fillStyle=tok('--dim');g.font='10px '+tok('--mono');g.textAlign='left';g.fillText((v/1000)+'k',w-padR+6,Y(v)+3)});
-    var grad=g.createLinearGradient(0,padT,0,h);grad.addColorStop(0,'rgba(245,197,66,.16)');grad.addColorStop(1,'rgba(245,197,66,0)');
-    g.beginPath();g.moveTo(X(0),Y(pts[0]));for(var i=1;i<n;i++)g.lineTo(X(i),Y(pts[i]));g.lineTo(X(n-1),h-padB);g.lineTo(X(0),h-padB);g.closePath();g.fillStyle=grad;g.fill();
-    g.beginPath();g.moveTo(X(0),Y(pts[0]));for(i=1;i<n;i++)g.lineTo(X(i),Y(pts[i]));g.strokeStyle=tok('--k');g.lineWidth=1.6;g.stroke();
-    g.save();g.setLineDash([4,4]);g.strokeStyle=tok('--acc');g.beginPath();g.moveTo(padL,Y(79607));g.lineTo(w-padR,Y(79607));g.stroke();g.restore();
-    g.fillStyle=tok('--acc');g.fillRect(w-padR+2,Y(79607)-8,54,16);
-    g.fillStyle=tok('--acc-ink');g.font='600 10px '+tok('--mono');g.textAlign='center';g.fillText('79,607',w-padR+29,Y(79607)+3.5);
-    g.fillStyle=tok('--dim');g.font='10px '+tok('--mono');g.textAlign='center';
-    ['29 Aug','31 Aug','2 Sep','4 Sep','now'].forEach(function(t,k){g.fillText(t,X(Math.round(k*(n-1)/4)),h-4)});
-  }
   (function(){
     var svg=document.getElementById('payoff'),W=400,H=220,padL=44,padR=10,padT=12,padB=26;
     var xlo=70000,xhi=84000,ylo=-4800,yhi=4800;

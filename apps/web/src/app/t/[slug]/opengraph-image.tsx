@@ -14,14 +14,14 @@ export default async function Image({ params }: { params: Promise<{ slug: string
   const { thesis, verified, pnl } = detail;
   const bodyText = ogTextOrNull(thesis.note);
   return new ImageResponse(
-    <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", fontFamily: "Manrope", background: "#070511", color: "#f7f7f7", padding: 48, gap: 28 }}>
+    <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", fontFamily: "Manrope", background: "#060510", color: "#f7f7f7", padding: 48, gap: 28 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 32 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 52, height: 52, borderRadius: 15, background: "#f7f7f7" }}>
-          <div style={{ display: "flex", width: 21, height: 21, borderRadius: 5, fontFamily: "Manrope", background: "#070511", transform: "rotate(45deg)" }} />
+          <div style={{ display: "flex", width: 21, height: 21, borderRadius: 5, fontFamily: "Manrope", background: "#060510", transform: "rotate(45deg)" }} />
         </div>
         <span>Thesis.fun</span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#181623", border: "1px solid #282438", borderRadius: 20, padding: 32, gap: 22 }}>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#12111a", border: "1px solid #282438", borderRadius: 20, padding: 32, gap: 22 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 24 }}>
           <span>{ogTextOrNull(thesis.creator.handle ? `@${thesis.creator.handle}` : thesis.creator.walletAddress)}</span>
           {verified ? <span style={{ color: "#f7f7f7" }}>Verified</span> : null}

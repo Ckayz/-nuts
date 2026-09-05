@@ -89,6 +89,11 @@ export async function marketBookStats(asset: string): Promise<MarketBookStats> {
 		}
 		// `sdkOrder` is where the SDK parks `rawApiData.greeks`; the reader checks
 		// every documented position and returns null when none carries an iv.
+		//
+		// D-R3-3: `orders` here is EVERY live order for this asset — every strike
+		// and every expiry — and the statistic is an unweighted median. Both the
+		// cohort and the statistic are TODO-OWNER; see `medianImpliedVol`'s own
+		// comment in `./implied-vol.ts`. Neither is changed here.
 		return { impliedVol: medianImpliedVol(orders), calls, puts, buys, sells };
 	} catch {
 		return {};

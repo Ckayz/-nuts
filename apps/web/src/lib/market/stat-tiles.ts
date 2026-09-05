@@ -40,6 +40,13 @@ export interface MarketStatTile {
 	label: string;
 	/** The value below, already formatted. */
 	value: string;
+	/**
+	 * D-R3-3 (pass 3): this tile prints a figure whose AGGREGATION RULE nobody
+	 * has approved, so it is shown with the same `TodoOwner` marker every other
+	 * unapproved number on this app carries. The rule itself is documented where
+	 * it lives (`./implied-vol.ts` `medianImpliedVol`) and is unchanged.
+	 */
+	todoOwner?: boolean;
 }
 
 export function marketStatTiles(
@@ -51,7 +58,10 @@ export function marketStatTiles(
 	// Omitted rather than zeroed when no maker quotes one: "0.0%" would read as
 	// "this market has no volatility", which is a claim the book does not make.
 	const iv = impliedVolLabel(book.impliedVol ?? null);
-	if (iv !== null) tiles.push({ label: "Implied vol", value: iv });
+	// D-R3-3: the label is unchanged — the marker beside it is what says the
+	// cohort ("every live order for this asset, all strikes and expiries") and
+	// the statistic (an unweighted median) are still the owner's to name.
+	if (iv !== null) tiles.push({ label: "Implied vol", value: iv, todoOwner: true });
 	tiles.push({ label: "Structures", value: String(market.structureCount) });
 	tiles.push({ label: "Expiries", value: String(market.expiryCount) });
 	if (typeof book.calls === "number" && typeof book.puts === "number") {

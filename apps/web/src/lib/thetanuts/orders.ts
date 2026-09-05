@@ -145,7 +145,26 @@ export function isFeedUnavailable(value: object): value is FeedUnavailable {
 }
 
 async function fetchSnapshot(): Promise<OrderSnapshot | FeedUnusable> {
- const [response, data] = await Promise.all([rawOrderApi.request("/"), readClient.api.getMarketData()]);
+ // C-m1. A TRANSPORT failure — DNS, a timeout, a 5xx the SDK rejects on, an
+ // aborted socket — used to throw straight out of here and out of
+ // `getOrderSnapshot`, so every caller had to survive an exception that the
+ // FeedUnusable result exists precisely to describe. It is the same fact as an
+ // unreadable payload: the book could not be read, and that is never an empty
+ // book.
+ let response: Awaited<ReturnType<typeof rawOrderApi.request>>;
+ let data: Awaited<ReturnType<typeof readClient.api.getMarketData>>;
+ try {
+  [response, data] = await Promise.all([rawOrderApi.request("/"), readClient.api.getMarketData()]);
+ } catch (error) {
+  return { error: "feed_unusable", droppedEntries: 0,
+   detail: `The Thetanuts order feed could not be reached (${error instanceof Error ? error.message : String(error)}), so the OptionBook could not be read. This is a transport failure, not an empty book.` };
+ }
+ // A null or non-object payload is the same class of failure: reading `.data`
+ // off it used to throw a TypeError from inside this function.
+ if (typeof response !== "object" || response === null) {
+  return { error: "feed_unusable", droppedEntries: 0,
+   detail: "The Thetanuts order feed returned no response body, so the OptionBook could not be read. This is a feed/adapter failure, not an empty book." };
+ }
  // No `?? []` fallback: a payload that carries no `orders` array is a feed whose shape this
  // adapter does not understand. Defaulting it to an empty list produces output byte-identical
  // to a genuinely empty book, which reads to the model as "there is nothing to trade".

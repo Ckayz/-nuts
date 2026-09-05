@@ -26,6 +26,7 @@ import {
 	decimalFromUsd8,
 	derivePnlAtSpot,
 	derivedRisk,
+	isPastExpiry,
 	resolvePnl,
 	usd8FromDecimal,
 	usd8FromSpotNumber,
@@ -361,6 +362,9 @@ describe("resolvePnl — which number a status is allowed to show", () => {
 		derivation: BUY_PUT,
 		spotUsd8: SPOT_74K,
 		unavailableReason: "no reason given",
+		// C7: not yet expired unless a case says so.
+		expiryAt: "2026-12-31T08:00:00.000Z",
+		asOf: "2026-09-05T08:00:00.000Z",
 	} as const;
 
 	test("a settled row shows only its recorded final P&L", () => {
@@ -388,6 +392,67 @@ describe("resolvePnl — which number a status is allowed to show", () => {
 		const result = resolvePnl({ ...base, status: "expired" });
 		expect(result.pnlUsd).toBeNull();
 		expect(result.detail).toContain("Settlement pending");
+	});
+
+	/**
+	 * C7. There is no expiry or settlement reconciliation yet, so a position
+	 * stays `confirmed` forever after its option expires. Deriving P&L at
+	 * TODAY's spot for a finished option asserts a live position that no longer
+	 * exists.
+	 */
+	describe("C7: an option past its expiry is settlement-pending, never derived", () => {
+		const expired = { ...base, expiryAt: "2026-09-05T07:59:59.000Z" } as const;
+
+		test("a confirmed row past expiry shows no derived figure", () => {
+			const result = resolvePnl({ ...expired, status: "confirmed" });
+			expect(result.pnlUsd).toBeNull();
+			expect(result.basis).toBe("unavailable");
+			expect(result.detail).toContain("Settlement pending");
+			expect(result.detail).toContain("expired");
+			// Without the fence this same input derives a number.
+			const live = resolvePnl({ ...base, status: "confirmed" });
+			expect(live.pnlUsd).not.toBeNull();
+			expect(live.basis).toBe("derived");
+		});
+
+		test("an indexed row past expiry does not show its recorded estimate either", () => {
+			const result = resolvePnl({ ...expired, status: "indexed", estimatedPnlUsd: "42" });
+			expect(result.pnlUsd).toBeNull();
+			expect(result.basis).toBe("unavailable");
+			// The same row before expiry does show it.
+			expect(resolvePnl({ ...base, status: "indexed", estimatedPnlUsd: "42" }).pnlUsd).toBe("42");
+		});
+
+		test("expiry exactly at `asOf` counts as expired", () => {
+			const result = resolvePnl({ ...base, status: "confirmed", expiryAt: base.asOf });
+			expect(result.basis).toBe("unavailable");
+			expect(result.detail).toContain("Settlement pending");
+		});
+
+		test("one second before expiry is still live", () => {
+			const result = resolvePnl({ ...base, status: "confirmed", expiryAt: "2026-09-05T08:00:01.000Z" });
+			expect(result.basis).toBe("derived");
+		});
+
+		test("a settled row past expiry still shows its recorded final P&L", () => {
+			const result = resolvePnl({ ...expired, status: "settled", finalPnlUsd: "-12.5", settlementPriceUsd: "80000" });
+			expect(result.pnlUsd).toBe("-12.5");
+			expect(result.basis).toBe("settled");
+		});
+
+		test("failed and pending keep their own sentences past expiry", () => {
+			expect(resolvePnl({ ...expired, status: "failed" }).detail).toContain("transaction failed");
+			expect(resolvePnl({ ...expired, status: "pending" }).detail).toContain("not been confirmed");
+		});
+
+		test("an unreadable or absent expiry never claims settlement is pending", () => {
+			for (const expiryAt of [null, "not a date", ""]) {
+				expect(resolvePnl({ ...base, status: "confirmed", expiryAt }).basis).toBe("derived");
+			}
+			expect(isPastExpiry(null, base.asOf)).toBe(false);
+			expect(isPastExpiry("not a date", base.asOf)).toBe(false);
+			expect(isPastExpiry(base.expiryAt, "not a date")).toBe(false);
+		});
 	});
 
 	test("a failed transaction is not a position", () => {

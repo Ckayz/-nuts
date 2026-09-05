@@ -175,6 +175,10 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 			derivation.inputs === null
 				? derivation.reason
 				: "No P&L: the recorded fill amounts do not satisfy the risk model's own checks, so any figure would be a guess.",
+		// C7: an expired option is finished, so no live estimate and no spot
+		// derivation may be shown for it.
+		expiryAt: instrument?.expiryAt ?? null,
+		asOf: asOf.toISOString(),
 	});
 
 	// Recorded first, derived second: a figure the fill wrote down beats one this
@@ -288,17 +292,28 @@ export function pnlCardFor(input: PositionViewInput): View.PnlCard {
  * a settled row shows its recorded result or nothing; an open one shows the
  * recorded estimate or nothing). Every field the feed cannot know renders "—".
  */
-export function linkedPositionCard(value: Domain.LinkedPosition, asOf: Date = new Date()): View.PnlCard {
+export function linkedPositionCard(
+	value: Domain.LinkedPosition,
+	asOf: Date = new Date(),
+	collateralUsdPrice8: string | null = null,
+): View.PnlCard {
+	// C8. The instrument and the raw amounts are decoded by the batch reader
+	// through the SAME mapper `/p/[id]` uses, so the card and the position page
+	// cannot disagree about the side, the asset or the entry amount. They were
+	// hardcoded null here, which routed a SELLER's fill down the buyer branch:
+	// "Premium paid" printed next to the premium the seller RECEIVED, and the
+	// asset came from the post's tag rather than the order.
 	return pnlCardFor({
 		detail: {
 			position: value.position,
 			owner: value.owner,
-			instrument: null,
-			quantities: null,
+			instrument: value.instrument ?? null,
+			quantities: value.quantities ?? null,
 			thesis: null,
 		},
+		// Still null: the feed reads no live spot, so nothing is derived here.
 		spotUsd8: null,
-		collateralUsdPrice8: null,
+		collateralUsdPrice8,
 		asOf,
 	});
 }
@@ -321,7 +336,7 @@ export function linkedPositionCard(value: Domain.LinkedPosition, asOf: Date = ne
  * "Base · not confirmed yet" footer. Mapping an unconfirmed receipt to "Pending"
  * here would hide the recorded P&L of every fixture and every un-reindexed fill.
  */
-export function backingCard(value: Domain.Thesis): View.PnlCard | null {
+export function backingCard(value: Domain.Thesis, asOf: Date = new Date()): View.PnlCard | null {
 	const back = value.backing;
 	if (back === null) return null;
 	const settled = value.thesis.status === "settled";
@@ -357,6 +372,9 @@ export function backingCard(value: Domain.Thesis): View.PnlCard | null {
 				spotUsd8: null,
 				unavailableReason:
 					"No P&L: this post records no fill amounts for the creator's position, so nothing can be valued.",
+				// C7: the post's own market expiry, when it names one.
+				expiryAt,
+				asOf: asOf.toISOString(),
 			});
 			return { usd: resolved.pnlUsd, detail: resolved.detail, basis: resolved.basis };
 		})(),
@@ -380,7 +398,7 @@ export function backingCard(value: Domain.Thesis): View.PnlCard | null {
  * item 8) — the backing card, because it is the one that carries the structure.
  */
 export function withCards(view: View.Thesis, domain: Domain.Thesis, asOf: Date = new Date()): View.Thesis {
-	const backing = backingCard(domain);
+	const backing = backingCard(domain, asOf);
 	const linked = (domain.linkedPositions ?? [])
 		.filter((entry) => entry.position.id !== domain.backing?.creatorPositionId)
 		.map((entry) => linkedPositionCard(entry, asOf));

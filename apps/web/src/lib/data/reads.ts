@@ -40,6 +40,7 @@ import {
 	mapThesis,
 	type ThesisAggregates,
 } from "./map";
+import type { PositionInstrument, PositionQuantities } from "@/lib/position/types";
 
 /** The shared handle, or a transaction handle from `db.transaction` (tests). */
 export type Database =
@@ -473,12 +474,21 @@ export async function settled(options: ReadOptions = {}) { return rankedTheses("
  * restructured.
  *
  * The join to `theses` is a LEFT join because a standalone position belongs to
- * no post (migration 0007). `getPortfolio` above still uses an INNER join, so it
- * does not list standalone positions yet — flagged for the orchestrator.
+ * no post (migration 0007). F29: this comment used to say `getPortfolio` still
+ * inner-joined and dropped standalone positions; it left-joins (`:294`, read
+ * 2026-09-05), so standalone positions ARE listed.
  */
 export interface PositionDetail {
 	position: Domain.Position;
 	owner: Domain.Creator;
+	/**
+	 * C8. Decoded from the stored order snapshot, so a trade card states the
+	 * same side, asset and amounts as that position's own page. Optional
+	 * because `getPosition` below returns the same shape for callers that only
+	 * need the row.
+	 */
+	instrument?: PositionInstrument | null;
+	quantities?: PositionQuantities | null;
 }
 
 export async function getPosition(id: string, options: ReadOptions = {}): Promise<PositionDetail | null> {
@@ -502,10 +512,18 @@ export async function listPositionsByIds(
 		.innerJoin(users, eq(users.id, positions.userId))
 		.leftJoin(theses, eq(theses.id, positions.thesisId))
 		.where(inArray(positions.id, wanted));
+	const { positionPageDetailFromRow } = await import("@/lib/position/read");
 	for (const row of rows) {
+		// C8. The SAME mapper `/p/[id]` uses, so a linked trade card and that
+		// position's own page cannot state different things about one fill: the
+		// taker side, the asset and the raw amounts all come from the stored
+		// order snapshot instead of being left null.
+		const detail = positionPageDetailFromRow(row);
 		result.set(row.position.id.toLowerCase(), {
-			position: mapPosition({ position: row.position, thesis: row.thesis }),
-			owner: mapCreator(row.user),
+			position: detail.position,
+			owner: detail.owner,
+			instrument: detail.instrument,
+			quantities: detail.quantities,
 		});
 	}
 	return result;

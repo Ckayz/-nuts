@@ -128,8 +128,12 @@ export interface Participant {
     isCreator?: boolean;
 }
 export interface Position {
-    thesisSlug: string;
-    thesisHeadline: string;
+    /** `positions.id`. Every position has its own page at `/p/<id>`. */
+    id: string;
+    /** Null for a standalone position, which belongs to no post. */
+    thesisSlug: string | null;
+    /** Null for a standalone position. */
+    thesisHeadline: string | null;
     asset: string;
     side: Side;
     riskedUsd: DisplayAmount;

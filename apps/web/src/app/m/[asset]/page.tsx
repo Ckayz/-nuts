@@ -1,37 +1,105 @@
 import Link from "next/link";
+import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import { CalloutPost } from "@/components/feed/callout-post";
-import { PriceChart } from "@/components/market/price-chart";
+import { MarketRail } from "@/components/market/market-rail";
 import { StructuresList } from "@/components/market/structures-list";
 import { TakeASide } from "@/components/market/take-a-side";
 import { TodoOwner } from "@/components/primitives";
+import { usingDatabase } from "@/lib/data/source";
 import { usd, usd2 } from "@/lib/format";
 import { markets, marketBySlug, marketSummaries, thesesByMarket } from "@/lib/view-data";
+import type { Market, MarketSummary, Thesis } from "@/lib/display-types";
+import type { TradePanelContext } from "@/lib/trade/types";
 
 /**
  * The market page. Owner 2026-09-05, from the fomo demo: trading lives here,
- * not in a post — price chart in the centre, the live book under it, the ticket
- * on the right, and the posts tagged to this market below.
+ * not in a post — the live book in the centre, the ticket on the right, and the
+ * posts tagged to this market below.
  *
- * TODO-OWNER: which chart windows ship. The row below is the mockup's, and the
- * buttons do not switch anything yet.
+ * NO PRICE CHART (owner 2026-09-05, "remove the chart then"): Thetanuts
+ * publishes a spot price and no history — `api.getMarketData()` returns
+ * `{prices, metadata}` and nothing else, measured the same day — and this app
+ * does not call a third-party price API, so there is no series to draw and the
+ * owner will not ship an example one. The live spot stays, as a number.
  */
-const CHART_WINDOWS = ["1H", "4H", "1D", "7D", "1M", "ALL"] as const;
-const SELECTED_WINDOW = "7D";
 
-export function generateStaticParams() {
-	return markets.map((m) => ({ asset: m.slug }));
+/**
+ * Dynamic in both modes, for the same reason `/t/[slug]` is (see the note at the
+ * end of `src/lib/page-data.ts`): the book changes between renders, and while
+ * `generateStaticParams` was exported Next still listed the route as SSG even
+ * with `force-dynamic` set. Enumerating assets at build time would also mean
+ * calling the OptionBook feed from the build.
+ */
+export const dynamic = "force-dynamic";
+
+interface Loaded {
+	market: Market;
+	summaries: MarketSummary[];
+	tagged: Thesis[];
+	trade: TradePanelContext | null;
+	unavailable: string | null;
+}
+
+async function load(asset: string, params: Record<string, string | undefined>): Promise<Loaded | null> {
+	if (!usingDatabase()) {
+		const market = marketBySlug(asset);
+		if (!market) return null;
+		return {
+			market,
+			summaries: marketSummaries,
+			tagged: thesesByMarket(market.slug),
+			trade: null,
+			unavailable: null,
+		};
+	}
+	await connection();
+	const { marketPageData } = await import("@/lib/market/page");
+	const data = await marketPageData(asset, {
+		thesisId: params.thesis ?? null,
+		side: params.side ?? null,
+		structureId: params.structure ?? null,
+		budgetInput: params.budget ?? null,
+	});
+	if (data === null) return null;
+	if ("error" in data) {
+		// The book could not be read. Say that, rather than render a page that
+		// looks like Thetanuts has no liquidity for this asset.
+		const fallback = marketBySlug(asset);
+		if (!fallback) return null;
+		return { market: fallback, summaries: [], tagged: [], trade: null, unavailable: data.detail };
+	}
+	return { ...data, unavailable: null };
 }
 
 export default async function MarketPage({
 	params,
+	searchParams,
 }: {
 	params: Promise<{ asset: string }>;
+	searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
 	const { asset } = await params;
-	const market = marketBySlug(asset);
-	if (!market) notFound();
-	const tagged = thesesByMarket(market.slug);
+	const query = await searchParams;
+	const single = (key: string): string | undefined => {
+		const value = query[key];
+		return Array.isArray(value) ? value[0] : value;
+	};
+	const loaded = await load(asset, {
+		thesis: single("thesis"),
+		side: single("side"),
+		structure: single("structure"),
+		budget: single("budget"),
+	});
+	if (loaded === null) notFound();
+	const { market, summaries, tagged, trade, unavailable } = loaded;
+	// Selecting another structure keeps the post and side the visitor arrived
+	// with, so a link from a post does not silently drop what it was about.
+	const carried: Record<string, string> = {};
+	for (const key of ["thesis", "side", "budget"] as const) {
+		const value = single(key);
+		if (value !== undefined) carried[key] = value;
+	}
 
 	return (
 		<div className="work">
@@ -40,28 +108,25 @@ export default async function MarketPage({
 					<div className="sec-h">
 						<h2 className="h2">Markets</h2>
 						<span className="mono dim" style={{ fontSize: "11px" }}>
-							{marketSummaries.length} live
+							{summaries.length} live
 						</span>
 					</div>
 					<div className="tl">
-						{marketSummaries.map((m) => (
+						{summaries.map((m) => (
 							<Link className="it" href={`/m/${m.slug}`} key={m.slug}>
 								<span className={`thumb ${m.slug}`}>{m.asset}</span>
 								<div className="b">
 									<span className="n">{m.name}</span>
 									<span className="d">
 										<span>{m.spotUsd.usd2.replace("$", "")}</span>
-										<span className={m.changeClass || undefined}>
-											{m.changeLabel}
-										</span>
+										<span className={m.changeClass || undefined}>{m.changeLabel}</span>
 									</span>
 								</div>
 							</Link>
 						))}
 					</div>
 					<span className="note">
-						Assets, strikes and expiries come from live OptionBook orders.
-						Nothing here is a hardcoded list.
+						Assets, strikes and expiries come from live OptionBook orders. Nothing here is a hardcoded list.
 					</span>
 				</div>
 			</aside>
@@ -79,11 +144,11 @@ export default async function MarketPage({
 					</div>
 					<span className="px">
 						{usd2(market.spotUsd)}
-						<span className={`ch ${market.changeClass}`}>
-							{market.changeLabel} · 24h
-						</span>
+						<span className={`ch ${market.changeClass}`}>{market.changeLabel} · 24h</span>
 					</span>
 				</header>
+
+				{unavailable !== null ? <span className="note">{unavailable}</span> : null}
 
 				<div className="board">
 					<div>
@@ -92,9 +157,7 @@ export default async function MarketPage({
 					</div>
 					<div>
 						<span className="lbl">24h</span>
-						<span className={`v ${market.changeClass}`}>
-							{market.changeLabel}
-						</span>
+						<span className={`v ${market.changeClass}`}>{market.changeLabel}</span>
 					</div>
 					<div>
 						<span className="lbl">Structures</span>
@@ -106,33 +169,12 @@ export default async function MarketPage({
 					</div>
 				</div>
 
-				<div className="chartbox">
-					<div className="hh">
-						<span className="lbl">{market.asset} spot</span>
-						<span className="tfs" role="group" aria-label="Chart window">
-							{CHART_WINDOWS.map((w) => (
-								<button
-									type="button"
-									key={w}
-									aria-pressed={w === SELECTED_WINDOW}
-								>
-									{w}
-								</button>
-							))}
-						</span>
-					</div>
-					<PriceChart
-						series={market.series}
-						label={`${market.asset} spot price history`}
-						priceLineValue={Number(market.spotUsd.raw)}
-						priceDecimals={Number(market.spotUsd.raw) >= 1000 ? 0 : 2}
-					/>
-					<span className="note">
-						Chart windows on offer <TodoOwner />
-					</span>
-				</div>
-
-				<StructuresList rows={market.structures} />
+				<StructuresList
+					rows={market.structures}
+					slug={market.slug}
+					query={carried}
+					live={trade !== null}
+				/>
 
 				<div className="sec">
 					<div className="sec-h">
@@ -150,22 +192,31 @@ export default async function MarketPage({
 			</main>
 
 			<aside className="col r">
-				<TakeASide
-					ticket={market.ticket}
-					structureLabel={market.selectedLabel}
-					expiryLabel={market.selectedExpiryLabel}
-				/>
-				<div className="panel">
-					<h3>Post about {market.asset}</h3>
-					<span className="note">
-						Write your read on this market. A post is text first — tag this
-						structure if you want, and it shows the verified badge only once
-						your own fill confirms.
-					</span>
-					<Link className="btn block" href="/new">
-						Write a post
-					</Link>
-				</div>
+				{trade === null ? (
+					<>
+						<TakeASide
+							ticket={market.ticket}
+							structureLabel={market.selectedLabel}
+							expiryLabel={market.selectedExpiryLabel}
+						/>
+						<div className="panel">
+							<h3>Post about {market.asset}</h3>
+							<span className="note">
+								Write your read on this market. A post is text first — tag this structure if you want,
+								and it shows the verified badge only once your own fill confirms.
+							</span>
+							<Link className="btn block" href="/new">
+								Write a post
+							</Link>
+						</div>
+					</>
+				) : (
+					<MarketRail
+						trade={trade}
+						structureLabel={market.selectedLabel}
+						expiryLabel={market.selectedExpiryLabel}
+					/>
+				)}
 			</aside>
 		</div>
 	);

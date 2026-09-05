@@ -120,15 +120,14 @@ em{font-style:normal}
 .nav a[aria-current="page"]::after,.nav button[aria-current="page"]::after{content:"";position:absolute;left:0;right:0;bottom:-1px;
   height:2px;background:var(--accent);border-radius:2px 2px 0 0}
 .nav .spacer{margin-left:auto}
-/* Adaptation: the mockup's nav ends with mockup-only view switchers; the app
-   puts the Create control there (the icon rail it replaces owned the only
-   route to /new). It must beat the `.nav a` height and colour above. */
 /* The nav's "Leaderboard" item is an in-page anchor. `.top` (60px) and `.nav`
    (46px) are both sticky, so without this the card lands underneath them. */
 #top-traders{scroll-margin-top:114px}
-.nav a.btn{height:30px;font-size:13px;padding:0 14px;color:var(--accent-ink)}
-.nav a.btn:hover{color:var(--accent-ink)}
-.nav a.btn::after{display:none}
+/* `.nav a.btn` lived here to style the Create control the nav used to carry.
+   Owner decision 5 (2026-09-06) moved it to the top bar, so the three rules are
+   gone with it — nothing in `.nav` is a button any more. `.nav .spacer` above
+   stays: it is a class-for-class port of the mockup's own nav, which still has
+   one before its view switchers. */
 
 /* ---------- shell ---------- */
 .wrap{max-width:1392px;margin:0 auto;padding:22px 24px 60px}

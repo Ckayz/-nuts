@@ -102,6 +102,22 @@ function SafeAnchor({ href, children }: ComponentProps<"a">) {
 	);
 }
 
+/**
+ * A heading a model wrote, rendered as emphasised prose.
+ *
+ * `LinkedText` runs over it for the same reason it runs over paragraphs and
+ * list items: a market path inside a heading is still a market path.
+ */
+function Heading({ children }: ComponentProps<"h1">) {
+	return (
+		<p className="agent-md-heading">
+			<strong>
+				<LinkedText>{children}</LinkedText>
+			</strong>
+		</p>
+	);
+}
+
 export function AgentMarkdown({ text }: { readonly text: string }) {
 	return (
 		<div className="agent-md">
@@ -115,6 +131,10 @@ export function AgentMarkdown({ text }: { readonly text: string }) {
 					"ul",
 					"ol",
 					"li",
+					// D-minor (lane D pass 2): h1-h4 stay LISTED so `components` below can
+					// rewrite them; removing them here instead was measured to unwrap a
+					// reply's "# BTC" to a bare text node with no emphasis at all
+					// (`<div class="agent-md">BTC\n<p>...</p></div>`).
 					"h1",
 					"h2",
 					"h3",
@@ -135,6 +155,17 @@ export function AgentMarkdown({ text }: { readonly text: string }) {
 				unwrapDisallowed
 				components={{
 					a: SafeAnchor,
+					// A MODEL REPLY OWNS NO HEADING. `/m/<asset>` already renders the
+					// page's only `<h1>` and the panel beside it renders an `<h2>`
+					// (`agent-heading.test.tsx`); a reply beginning "# BTC" put a SECOND
+					// `<h1>` on that page (measured: `page {"h1":2}`), undoing that fold
+					// from inside the conversation. Every heading level a reply writes is
+					// rendered as emphasised paragraph text instead — no new element
+					// types, and nothing joins the document outline.
+					h1: Heading,
+					h2: Heading,
+					h3: Heading,
+					h4: Heading,
 					p: ({ children }) => (
 						<p>
 							<LinkedText>{children}</LinkedText>

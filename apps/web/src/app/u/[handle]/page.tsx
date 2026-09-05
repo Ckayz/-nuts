@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { ActivityList } from "@/components/creator/activity-list";
 import { CreatorStats } from "@/components/creator/creator-stats";
@@ -11,6 +12,21 @@ import { creatorPageData } from "@/lib/page-data";
  * and segment config must be a static string, so it applies in mock mode too.
  */
 export const dynamic = "force-dynamic";
+
+/** Share metadata reads through the same mode-aware path as the page. */
+export async function generateMetadata({ params }: { params: Promise<{ handle: string }> }): Promise<Metadata> {
+	const { handle } = await params;
+	const data = await creatorPageData(handle.toLowerCase());
+	if (!data) notFound();
+	const title = data.creator.displayName;
+	const description = data.creator.walletAddress ?? `@${data.creator.handle}`;
+	return {
+		title,
+		description,
+		openGraph: { title, description, type: "profile" },
+		twitter: { card: "summary_large_image", title, description },
+	};
+}
 
 export default async function CreatorPage({
 	params,

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActivityList } from "@/components/creator/activity-list";
@@ -31,6 +32,20 @@ import { thesisDetailData, socialPageState } from "@/lib/page-data";
  * number and is deliberately not used.
  */
 export const dynamic = "force-dynamic";
+
+/** Share metadata reads through the same mode-aware path as the page. */
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+	const detail = await thesisDetailData((await params).slug);
+	if (!detail) notFound();
+	const title = detail.thesis.headline;
+	const description = detail.thesis.note ?? detail.thesis.headline;
+	return {
+		title,
+		description,
+		openGraph: { title, description, type: "article" },
+		twitter: { card: "summary_large_image", title, description },
+	};
+}
 
 export default async function ThesisPage({
 	params,

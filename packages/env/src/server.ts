@@ -33,6 +33,8 @@ export const env = createEnv({
 		 * are the same.
 		 */
 		DIRECT_DATABASE_URL: z.string().optional(),
+		SESSION_SECRET: z.string().min(32).optional(),
+		DATA_SOURCE: z.enum(["mock", "db"]).default("mock"),
 		NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 
 		/** OpenRouter key for the agent's model calls. Server-only, never exposed. */
@@ -61,3 +63,8 @@ export const env = createEnv({
 	skipValidation: !!process.env.SKIP_ENV_VALIDATION,
 	emptyStringAsUndefined: true,
 });
+
+// Keep the explicit build-time validation bypass consistent with createEnv.
+if (!process.env.SKIP_ENV_VALIDATION && env.NODE_ENV === "production" && !env.SESSION_SECRET) {
+  throw new Error("SESSION_SECRET is required in production (at least 32 characters)");
+}

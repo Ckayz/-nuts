@@ -16,6 +16,7 @@ const EXPIRY = new Date("2026-09-11T08:00:00.000Z");
 
 const user: UserRow = {
 	id: "10000000-0000-4000-8000-000000000001",
+	handle: null,
 	walletAddress: "0x00000000000000000000000000000000feed0001",
 	displayName: "Alice Probe",
 	bio: null,
@@ -28,6 +29,7 @@ const user: UserRow = {
 function thesisRow(overrides: Partial<ThesisRow> = {}): ThesisRow {
 	return {
 		id: "20000000-0000-4000-8000-000000000001",
+		slug: "text-only-post-2000",
 		creatorUserId: user.id,
 		headline: "Text only post",
 		rationale: null,

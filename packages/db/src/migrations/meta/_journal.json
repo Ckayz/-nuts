@@ -36,6 +36,13 @@
       "when": 1788578953200,
       "tag": "0004_unbacked_wallet_fence",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788585888788,
+      "tag": "0005_slugs_and_handles",
+      "breakpoints": true
     }
   ]
 }

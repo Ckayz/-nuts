@@ -363,7 +363,12 @@ describe("resolvePnl — which number a status is allowed to show", () => {
 		finalPnlUsd: null,
 		estimatedPnlUsd: null,
 		settlementPriceUsd: null,
-		derivation: BUY_PUT,
+		// The RULES module takes the derived figure as an input; the risk MODEL
+		// that produces it stays in `pnl.ts` (see `lifecycle.ts`'s header for the
+		// client-bundle failure that forced the split). These tests compute it the
+		// same way `view.ts` does, so they still exercise a real derived number.
+		derivable: true,
+		derivedPnlUsd: derivePnlAtSpot(BUY_PUT, SPOT_74K),
 		spotUsd8: SPOT_74K,
 		unavailableReason: "no reason given",
 		// C7: not yet expired unless a case says so.
@@ -504,7 +509,8 @@ describe("resolvePnl — which number a status is allowed to show", () => {
 		const result = resolvePnl({
 			...base,
 			status: "indexed",
-			derivation: null,
+			derivable: false,
+			derivedPnlUsd: null,
 			unavailableReason: "No P&L: put fly has no payoff model.",
 		});
 		expect(result.detail).toBe("No P&L: put fly has no payoff model.");

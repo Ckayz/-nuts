@@ -2,7 +2,10 @@
 import type * as Domain from "@/types";
 import type * as View from "./display-types";
 import { renderTextWithLinks, tradeLinkHref } from "./thesis/links";
-import { failedButOnChain, lifecycleStatus, resolvePnl } from "./position/pnl";
+// NOT from `./position/pnl`: that module imports `@nuts/thetanuts`, whose
+// bundle reaches for `fs/promises`, and this file is imported by CLIENT
+// components. `./position/lifecycle` holds the same rules with no SDK.
+import { failedButOnChain, lifecycleStatus, resolvePnl } from "./position/lifecycle";
 /** Validate and split decimal strings without a binary floating-point conversion. */
 function decimal(value: string) {
     if (!/^-?\d+(?:\.\d+)?$/.test(value))
@@ -412,7 +415,9 @@ export function position(value: Domain.Position, asOf: Date = new Date()): View.
         finalPnlUsd: value.economics.finalPnlUsd,
         estimatedPnlUsd: value.economics.estimatedPnlUsd,
         settlementPriceUsd: value.economics.settlementPriceUsd,
-        derivation: null,
+        // A list reads no order snapshot and no spot, so nothing is derived here.
+        derivable: false,
+        derivedPnlUsd: null,
         spotUsd8: null,
         unavailableReason: "No P&L recorded for this fill yet.",
         expiryAt: value.expiryAt ?? null,

@@ -25,6 +25,7 @@ import {
 	type DerivationInputs,
 	type DerivedRisk,
 	derivedRisk,
+	derivePnlAtSpot,
 	lifecycleStatus,
 	resolvePnl,
 } from "./pnl";
@@ -188,7 +189,11 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 		finalPnlUsd: economics.finalPnlUsd,
 		estimatedPnlUsd: economics.estimatedPnlUsd,
 		settlementPriceUsd: economics.settlementPriceUsd,
-		derivation: derivation.inputs,
+		// The RULES module is SDK-free (see `lifecycle.ts`), so the risk model runs
+		// HERE and only its answer crosses over.
+		derivable: derivation.inputs !== null,
+		derivedPnlUsd:
+			derivation.inputs === null || spotUsd8 === null ? null : derivePnlAtSpot(derivation.inputs, spotUsd8),
 		spotUsd8,
 		// When a derivation WAS possible but produced nothing, the raw amounts
 		// failed the risk model's own parameter checks. Say that, rather than an
@@ -397,7 +402,8 @@ export function backingCard(value: Domain.Thesis, asOf: Date = new Date()): View
 				finalPnlUsd: economics.finalPnlUsd,
 				estimatedPnlUsd: economics.estimatedPnlUsd,
 				settlementPriceUsd: economics.settlementPriceUsd,
-				derivation: null,
+				derivable: false,
+				derivedPnlUsd: null,
 				spotUsd8: null,
 				unavailableReason:
 					"No P&L: this post records no fill amounts for the creator's position, so nothing can be valued.",

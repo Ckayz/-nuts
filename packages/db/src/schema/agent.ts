@@ -104,8 +104,9 @@ export const agentProposals = pgTable(
 		txData: text("tx_data"),
 
 		/**
-		 * OptionBook order signatures expire 59s after issue (PRD 14). Calldata built
-		 * from a source fetched before this instant must be rebuilt, not sent.
+		 * PRD §14 reports observed remaining signature validity of 59–113 seconds.
+		 * Complete collateral approval before fetching the order; build and broadcast
+		 * calldata within 30 seconds of this fetch, otherwise refresh and rebuild.
 		 */
 		sourceFetchedAt: timestamp("source_fetched_at", { withTimezone: true }).notNull(),
 		approvedAt: timestamp("approved_at", { withTimezone: true }),

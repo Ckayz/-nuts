@@ -704,7 +704,10 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				</a>
 			)}
 
-			{message && <p className="mt-2 text-destructive text-xs">{message}</p>}
+			{/* D-n6: neutral, like the market ticket's own failure line
+			    (`.ticket .msg`, styles/market.css). Colour is for money only, so
+			    a failure reads as a hairlined note, never as red text. */}
+			{message && <p className="agent-msg">{message}</p>}
 		</div>
 	);
 }

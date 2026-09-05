@@ -16,11 +16,30 @@ import {
 } from "@nuts/ui/components/input-group";
 
 import "@/styles/agent.css";
+import { TodoOwner } from "@/components/primitives";
 import { suggestionsFor } from "@/lib/agent/suggestions";
 import { AgentMarkdown } from "./agent-markdown";
 import { ToolActivity } from "./tool-activity";
 import { TradeApproval } from "./trade-approval";
 import { TradeExecution, type PreparedTrade } from "./trade-execution";
+
+/**
+ * D-N3 (lane D confirming pass). The sentences this component prints, in one
+ * block so a new one cannot be added without a tag beside it — the same fence
+ * `trade-execution.tsx` uses, and `copy.test.ts` now covers both.
+ *
+ * The mockup draws no agent view and the PRD sets no wording for one, so none
+ * of this has provenance: every entry is provisional and the owner's to write.
+ * A `TODO-OWNER` marker elsewhere in the file is not approval of these.
+ */
+const COPY = {
+	/** TODO-OWNER: the one-line description under the "Agent" heading. */
+	headerDescription: "Live Thetanuts liquidity on Base. It prepares trades; your wallet approves them.",
+	/** TODO-OWNER: what an empty conversation invites the visitor to ask. */
+	emptyDescription: "Ask about options, markets, or what a small budget could buy.",
+	/** TODO-OWNER: what a failed turn says. Nothing here names the cause. */
+	error: "Something went wrong. Try sending that again.",
+} as const;
 
 /**
  * D-C2. The four prompts offered on an empty conversation. Nobody's but this
@@ -222,7 +241,7 @@ export function AgentChat({
 			<header className="border-b py-4">
 				<h1 className="font-medium text-lg">Agent</h1>
 				<p className="text-muted-foreground text-sm">
-					Live Thetanuts liquidity on Base. It prepares trades; your wallet approves them.
+					{COPY.headerDescription} <TodoOwner />
 				</p>
 			</header>
 
@@ -230,7 +249,7 @@ export function AgentChat({
 				{messages.length === 0 && (
 					<div className="space-y-4">
 						<p className="text-muted-foreground text-sm">
-							Ask about options, markets, or what a small budget could buy.
+							{COPY.emptyDescription} <TodoOwner />
 						</p>
 						<div className="pills">
 							{STARTERS.map((s) => (
@@ -336,8 +355,8 @@ export function AgentChat({
 
 				{busy && <p className="text-muted-foreground text-sm">Thinking…</p>}
 				{error && (
-					<p className="text-destructive text-sm">
-						Something went wrong. Try sending that again.
+					<p className="agent-msg">
+						{COPY.error} <TodoOwner />
 					</p>
 				)}
 			</div>

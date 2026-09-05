@@ -44,7 +44,13 @@ export default async function DiscoverPage() {
 							<TodoOwner />
 						</div>
 					</section>
-					<FarcasterRail state={farcaster} />
+					{/* Owner decision 7 (2026-09-06): at <=900px the left column stays
+					    in the flow so the Top traders card above reaches a phone.
+					    The Farcaster rail was hidden with that column and stays
+					    hidden — the decision names the leaderboard alone. */}
+					<div className="rail-desktop-only">
+						<FarcasterRail state={farcaster} />
+					</div>
 				</div>
 			}
 			right={

@@ -33,9 +33,13 @@ import { usePathname } from "next/navigation";
  * scroll position. The owner decides whether Leaderboard gets its own page.
  *
  * DIVERGENCE from the mockup: its nav ends with mockup-only view switchers
- * (Thread / Compose). The icon rail this replaces carried the only route to
- * `/new`, so the Create button takes that slot — without it the composer would
- * be unreachable.
+ * (Thread / Compose), which this nav does not have.
+ *
+ * Owner decision 5 (2026-09-06): the Create button used to take that slot, and
+ * this row is `overflow-x:auto` — with six items it scrolled below ~500px and
+ * Create was clipped (fold-final-D measured "Cr" at 390px). It moved to the top
+ * bar, beside the wallet chip, where it is visible at every width. Nothing here
+ * routes to `/new` any more; `components/shell/top-bar.tsx` does.
  */
 export function Nav({ marketSlug, unavailable = false }: { marketSlug?: string; unavailable?: boolean }) {
 	const pathname = usePathname();
@@ -59,10 +63,6 @@ export function Nav({ marketSlug, unavailable = false }: { marketSlug?: string; 
 			</Link>
 			<Link href="/agent" aria-current={pathname.startsWith("/agent") ? "page" : undefined}>
 				Agent
-			</Link>
-			<span className="spacer" />
-			<Link href="/new" className="btn acc">
-				Create
 			</Link>
 		</nav>
 	);

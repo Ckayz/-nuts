@@ -102,7 +102,7 @@ describe("?probe=1 runs one call per model and classifies the failure", () => {
 	test("a failing model is a 503 carrying its class and nothing else", async () => {
 		const { caller } = counting((role) => {
 			if (role !== "gate") return;
-			throw Object.assign(new Error("Rate limit exceeded: free-models-per-day. key sk-or-v1-SECRET"), {
+			throw Object.assign(new Error("Rate limit exceeded: free-models-per-day. key sk-or-v1-NOT-A-REAL-KEY"), {
 				name: "AI_APICallError",
 				statusCode: 429,
 			});

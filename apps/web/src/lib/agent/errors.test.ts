@@ -169,8 +169,8 @@ describe("F-E item 2: classifyAgentError", () => {
 		const leaky = sdkError({
 			name: "AI_APICallError",
 			statusCode: 402,
-			message: "sk-or-v1-SECRET is out of credit at https://openrouter.ai/credits",
-			responseBody: "sk-or-v1-SECRET",
+			message: "sk-or-v1-NOT-A-REAL-KEY is out of credit at https://openrouter.ai/credits",
+			responseBody: "sk-or-v1-NOT-A-REAL-KEY",
 		});
 		const sentence = agentErrorSentence(leaky);
 		expect(sentence).toBe(AGENT_ERROR_SENTENCES.no_credit);

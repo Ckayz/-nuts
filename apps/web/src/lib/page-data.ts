@@ -228,7 +228,7 @@ export async function discoverData(): Promise<DiscoverData> {
 		},
 		// `getPortfolio` already applies the single fill-status rule, so nothing
 		// is filtered by status a second time here.
-		yourPositions: positions.map(display.position).filter(isOpen),
+		yourPositions: positions.map((row) => display.position(row)).filter(isOpen),
 	};
 }
 
@@ -383,7 +383,7 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		following: (await getFollowState(signedIn?.userId ?? null, profile.creator.id)).following,
 		creator: display.creator(profile.creator),
 		callouts: await toPosts(await enrichWithTradeLinks(profile.theses.filter((thesis) => renderableStatus(thesis.thesis.status)), listPositionsByIds, await siteOrigins())),
-		positions: profile.positions.map(display.participant),
+		positions: profile.positions.map((row) => display.participant(row)),
 		activity: (await listActivity(profile.creator.id)).map(display.activity),
 	};
 }
@@ -405,7 +405,7 @@ export async function portfolioData(): Promise<PortfolioData> {
 	const positions = await getPortfolio(signedIn.walletAddress);
 	const profile = await getCreator(signedIn.walletAddress, { viewerUserId: signedIn.userId });
 	// `getPortfolio` already applies the single fill-status rule.
-	const rows = positions.map(display.position);
+	const rows = positions.map((row) => display.position(row));
 	return {
 		openPositions: rows.filter(isOpen),
 		settledPositions: rows.filter((position) => !isOpen(position)),

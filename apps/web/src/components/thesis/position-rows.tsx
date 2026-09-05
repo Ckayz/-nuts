@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Avatar } from "@/components/primitives";
 import { pnlClass, signedUsd, usd } from "@/lib/format";
+import { PNL_BASIS_SHORT } from "@/lib/display";
 import type { Participant, Position } from "@/lib/display-types";
 
 export function PositionRows({ rows, title = "Onchain positions" }: { rows: (Position | Participant)[]; title?: string }) {
@@ -9,10 +10,9 @@ export function PositionRows({ rows, title = "Onchain positions" }: { rows: (Pos
    const position = "id" in row ? row : null;
    // D5. The row states the lifecycle and the P&L basis instead of collapsing
    // every non-settled status into one look. The status chip is the shared
-   // vocabulary (`POSITION_STATUS_DISPLAY`), and the basis sentence is the
-   // card's own, exposed as a title so a number is never shown without saying
-   // where it came from.
-   const content = <>{position ? <Avatar asset={position.asset} initials={position.asset} tone="asset" size={34} /> : "creator" in row ? <Avatar seed={row.creator.avatarSeed} initials={row.creator.initials} size={34} /> : <Avatar initials="" size={34} />}<span className="t"><b>{position ? position.thesisHeadline ?? position.asset : "creator" in row ? row.creator.displayName : ""}</b><i>{row.side === "bull" ? "Bull" : "Bear"} · {usd(row.riskedUsd)} risked{row.contracts !== undefined ? ` · ${row.contracts} ct` : ""}{position ? <> · <span className={`chip ${position.statusTone}`}>{position.statusLabel}</span></> : null}</i></span><span className="v"><b className={`num ${pnlClass(row.livePnlUsd) === "bear" ? "loss" : pnlClass(row.livePnlUsd) === "bull" ? "gain" : "mut"}`} title={position ? position.pnlBasisLabel : undefined}>{signedUsd(row.livePnlUsd)}</b>{position ? <i>{position.pnlLabel}</i> : null}{row.tx ? <i className="num">{row.tx.label}</i> : null}</span></>;
+   // vocabulary (`positionStatusDisplay`), and the basis is PRINTED — a `title`
+   // is invisible on a phone, which is exactly where these rows are read.
+   const content = <>{position ? <Avatar asset={position.asset} initials={position.asset} tone="asset" size={34} /> : "creator" in row ? <Avatar seed={row.creator.avatarSeed} initials={row.creator.initials} size={34} /> : <Avatar initials="" size={34} />}<span className="t"><b>{position ? position.thesisHeadline ?? position.asset : "creator" in row ? row.creator.displayName : ""}</b><i>{row.side === "bull" ? "Bull" : "Bear"} · {usd(row.riskedUsd)} risked{row.contracts !== undefined ? ` · ${row.contracts} ct` : ""}{position ? <> · <span className={`chip ${position.statusTone}`}>{position.statusLabel}</span></> : null}</i></span><span className="v"><b className={`num ${pnlClass(row.livePnlUsd) === "bear" ? "loss" : pnlClass(row.livePnlUsd) === "bull" ? "gain" : "mut"}`} title={position ? position.pnlBasisLabel : undefined}>{signedUsd(row.livePnlUsd)}</b>{position ? <i>{position.pnlLabel} · {PNL_BASIS_SHORT[position.basis]}</i> : null}{row.tx ? <i className="num">{row.tx.label}</i> : null}</span></>;
    return position ? <Link className="row position-row" href={`/p/${position.id}`} key={position.id}>{content}</Link> : row.tx ? <a className="row position-row" href={row.tx.href} key={`${row.tx.label}-${index}`}>{content}</a> : <div className="row position-row" key={index}>{content}</div>;
   })}
  </div></section>;

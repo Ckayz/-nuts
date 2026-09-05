@@ -10,8 +10,8 @@ export const wallet = { addressLabel: data.wallet.mockAddressFragment, network: 
 export const theses = data.theses.map(display.thesis);
 export const following = data.following.map(display.thesis);
 export const top = data.top.map(display.thesis);
-export const yourPositions = data.yourPositions.map(display.position);
-export const yourSettledPositions = data.yourSettledPositions.map(display.position);
+export const yourPositions = data.yourPositions.map((row) => display.position(row));
+export const yourSettledPositions = data.yourSettledPositions.map((row) => display.position(row));
 export const thesisDetails = data.thesisDetails.map(display.detail);
 export const newCallouts = { count: data.newCallouts.count, avatars: data.newCallouts.avatars.map(display.creator) };
 export const marketPrices = data.marketPrices.map(display.price);

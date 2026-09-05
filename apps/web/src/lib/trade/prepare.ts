@@ -29,8 +29,9 @@ import { takerSideDisagreement, TAKER_SIDE_CONTRADICTION } from "@/lib/market/ta
 import { parseTokenAmount } from "@/lib/market/units";
 import { isFeedUnavailable } from "@/lib/thetanuts/orders";
 import { strikesLabel } from "@/lib/display";
+import { approvalMatches, decodeApproval } from "./approval";
 import { instrumentMismatch } from "./attachment";
-import { findThesis } from "./store";
+import { findThesis, findUnrecordedFill, unrecordedFillReason } from "./store";
 import { simulateFill } from "./chain";
 import { encodeTradeTicket, type TradeTicketPayload } from "./ticket";
 import { rawOf, takerFor } from "./view";
@@ -75,7 +76,21 @@ export async function prepareTradeFor(
 	}
 	const taker = takerFor(input.side);
 
+	// C#2. A fill this wallet has already broadcast and not recorded owns the
+	// ticket until it is settled. The browser holds the same fence in
+	// `lib/trade/held-fill.ts`; this one also covers a cleared store, a second
+	// tab and another device. A read failure is NOT treated as "no such row" —
+	// it throws, and the action's own catch turns it into a refusal.
+	const unrecorded = await findUnrecordedFill(db, session.walletAddress, new Date());
+	if (unrecorded !== null) {
+		return fail("UNRECORDED_FILL", unrecordedFillReason(unrecorded.txHash));
+	}
+
 	let budget: bigint;
+	// C#8. PRD 14: "calldata must be built and broadcast within 30 seconds of the
+	// fetch that produced it." Stamped BEFORE the fetch, so the age this reports
+	// is never younger than the truth.
+	const fetchStartedAt = new Date().toISOString();
 	const found = await findStructure(input.structureId, { force: true });
 	if (found === null) return fail("STRUCTURE_GONE", "That structure is no longer on the book. Pick another one.");
 	if (isFeedUnavailable(found)) return fail(found.error.toUpperCase(), found.detail);
@@ -138,10 +153,34 @@ export async function prepareTradeFor(
 	}
 
 	if (built.approve !== undefined) {
+		// C#5. The approval is read out of its OWN BYTES before it is handed over,
+		// and refused unless it grants EXACTLY the debit to EXACTLY the contract
+		// the fill calls (PRD 10.2: "Allowances must be exact for the approved
+		// transaction"). A number returned beside the calldata is a claim about
+		// it; the calldata is the thing that will be signed.
+		const approve = asTx(built.approve);
+		const approveExpected = rawOf(quote);
+		if (approveExpected === null) return fail("QUOTE_LOST", "The quote went stale while preparing. Try again.");
+		const check = approvalMatches({
+			data: approve.data,
+			expectedSpender: asTx(built.fill).to,
+			expectedAmount: approveExpected.debit,
+		});
+		if (!check.ok) return fail("APPROVAL_NOT_EXACT", check.reason);
+		const decoded = decodeApproval(approve.data);
+		if (decoded === null) return fail("APPROVAL_NOT_EXACT", "The approval calldata could not be read.");
 		return {
 			ok: true,
 			stage: "approve",
-			approve: asTx(built.approve),
+			approve,
+			allowance: {
+				amount: decoded.amount,
+				spender: decoded.spender,
+				tokenAddress: approve.to,
+				tokenSymbol: quote.collateralSymbol,
+				tokenDecimals: quote.collateralDecimals,
+			},
+			expected: approveExpected,
 			note: `Approve ${quote.collateralSymbol} for exactly this fill. Nothing is spent until you sign the fill itself.`,
 		};
 	}
@@ -204,6 +243,7 @@ export async function prepareTradeFor(
 		thesisId: resolved.thesisId,
 		expected,
 		signatureExpiresAt: new Date(Number(quote.orderExpiry) * 1000).toISOString(),
+		preparedAt: fetchStartedAt,
 		// TODO-OWNER: how long a signature must have left before the app refuses
 		// to hand over calldata is an owner's number; nothing is imposed here
 		// beyond the book's own expiry filter.

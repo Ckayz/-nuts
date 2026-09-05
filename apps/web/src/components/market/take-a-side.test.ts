@@ -9,10 +9,12 @@ import {
 	changedEconomics,
 	recordingSettled,
 	sameEconomics,
+	sameRequest,
 	sendGuard,
 	structureChanged,
 	ticketClick,
 } from "./take-a-side";
+import type { TicketRequest } from "./take-a-side";
 import type { QuoteRaw, RecordResult } from "@/lib/trade/types";
 
 const WALLET = "0x00000000000000000000000000000000000000a1";
@@ -260,5 +262,31 @@ describe("C6-r2: the click handler consults the sent fill first", () => {
 		const records = body.indexOf("await finishRecording(fill)");
 		expect(holds).toBeGreaterThan(-1);
 		expect(records).toBeGreaterThan(holds);
+	});
+});
+
+describe("sameRequest (C#1: which trade, not which numbers)", () => {
+	const base: TicketRequest = { structureId: "s1", side: "bull", budgetInput: "5", wallet: WALLET };
+
+	test("the identical ticket is the same ticket", () => {
+		expect(sameRequest(base, { ...base })).toBe(true);
+	});
+
+	test("every field is load-bearing", () => {
+		expect(sameRequest(base, { ...base, structureId: "s2" })).toBe(false);
+		expect(sameRequest(base, { ...base, side: "bear" })).toBe(false);
+		expect(sameRequest(base, { ...base, budgetInput: "50" })).toBe(false);
+		expect(sameRequest(base, { ...base, wallet: "0x00000000000000000000000000000000000000b2" })).toBe(false);
+	});
+
+	test("an unknown identity on either side fails CLOSED", () => {
+		expect(sameRequest(base, null)).toBe(false);
+		expect(sameRequest(null, base)).toBe(false);
+		expect(sameRequest(null, null)).toBe(false);
+	});
+
+	test("a wallet that only differs in case is the same wallet, and a missing one is not", () => {
+		expect(sameRequest({ ...base, wallet: null }, { ...base, wallet: null })).toBe(true);
+		expect(sameRequest({ ...base, wallet: null }, base)).toBe(false);
 	});
 });

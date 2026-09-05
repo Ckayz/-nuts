@@ -122,6 +122,7 @@ describe("C3-r2: the agent ceiling applies to what was PREPARED", () => {
 		thesisId: null,
 		expected: quote(over),
 		signatureExpiresAt: "2026-09-05T08:00:30.000Z",
+		preparedAt: new Date().toISOString(),
 		note: "",
 	});
 
@@ -153,15 +154,67 @@ describe("C3-r2: the agent ceiling applies to what was PREPARED", () => {
 		expect(withinAgentLimits(fill({ maxLossUsd8: "not-a-number" })).ok).toBe(false);
 	});
 
-	test("the approval leg has nothing to measure and is not refused", () => {
-		const approve: PrepareResult = {
+	/**
+	 * C#5-r3. The approval leg is measured too. Round 2 returned `{ok:true}` for
+	 * every approval-stage result, and the browser sends the approval BEFORE the
+	 * gated re-preparation runs — so the reviewer sent an exact 20-USDC approval
+	 * under a card printing a $5 trade (`APPROVE_BEFORE_GATE`).
+	 */
+	const SPENDER = "0x1bdff855d6811728acadc00989e79143a2bdfded";
+	const approveData = (spender: string, amount: bigint): `0x${string}` =>
+		`0x095ea7b3${spender.slice(2).toLowerCase().padStart(64, "0")}${amount.toString(16).padStart(64, "0")}`;
+
+	const approve = (over: Partial<QuoteRaw> = {}, amount?: bigint, spender = SPENDER): PrepareResult => {
+		const expected = quote(over);
+		const value = amount ?? BigInt(expected.debit);
+		return {
 			ok: true,
 			stage: "approve",
-			approve: { to: "0xtoken", data: "0xdead", value: "0" },
+			approve: { to: "0xtoken", data: approveData(spender, value), value: "0" },
+			allowance: {
+				amount: value.toString(),
+				spender: spender.toLowerCase(),
+				tokenAddress: "0xtoken",
+				tokenSymbol: expected.collateralSymbol,
+				tokenDecimals: expected.collateralDecimals,
+			},
+			expected,
 			note: "",
 		};
-		expect(withinAgentLimits(approve)).toEqual({ ok: true });
+	};
+
+	test("an exact approval inside the ceiling passes", () => {
+		expect(withinAgentLimits(approve())).toEqual({ ok: true });
 		expect(withinAgentLimits({ ok: false, code: "X", reason: "y" })).toEqual({ ok: true });
+	});
+
+	test("the reviewer's oversized approval is refused AT THE APPROVAL STAGE", () => {
+		const gate = withinAgentLimits(approve({ maxLossUsd8: "2000000000", debit: "20000000" }));
+		expect(gate.ok).toBe(false);
+		if (gate.ok) throw new Error("unreachable");
+		expect(gate.reason).toContain("20.00");
+	});
+
+	test("PRD 10.2 USDC-only and the missing-max-loss refusal apply to the approval too", () => {
+		expect(withinAgentLimits(approve({ collateralSymbol: "aBasUSDC" })).ok).toBe(false);
+		expect(withinAgentLimits(approve({ maxLossUsd8: null })).ok).toBe(false);
+	});
+
+	test("PRD 10.2 exactness: calldata that allows more than the debit is refused", () => {
+		const over = withinAgentLimits(approve({}, BigInt(quote().debit) + 1n));
+		expect(over.ok).toBe(false);
+		if (over.ok) throw new Error("unreachable");
+		expect(over.reason).toContain("exactly");
+	});
+
+	test("an allowance granted to another contract is refused", () => {
+		const elsewhere = withinAgentLimits(approve({}, undefined, `0x${"9".repeat(40)}`));
+		// The allowance field agrees with the bytes, but neither is the OptionBook
+		// this fill calls — the exactness check compares them to each other, so the
+		// SERVER's `approvalMatches` against `built.fill.to` is what fences this.
+		// Here the pair is self-consistent, so the gate passes: the fence lives in
+		// `prepare.ts`, and `approval.test.ts` pins it.
+		expect(elsewhere.ok).toBe(true);
 	});
 });
 

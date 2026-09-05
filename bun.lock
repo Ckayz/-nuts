@@ -91,6 +91,7 @@
       },
       "devDependencies": {
         "@nuts/config": "workspace:*",
+        "@types/bun": "^1.4.1",
         "@types/node": "catalog:",
         "typescript": "catalog:",
       },

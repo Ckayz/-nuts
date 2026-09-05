@@ -95,6 +95,35 @@ export async function issueChallenge(
 }
 
 /**
+ * Reads a live challenge WITHOUT consuming it, so the caller can rebuild the
+ * signed message and check the signature before spending the nonce.
+ *
+ * Same predicate as `consumeChallenge` (nonce + wallet + unconsumed +
+ * unexpired), so a row this returns is a row `consumeChallenge` would have
+ * burned. It is deliberately not a fence on its own: the atomic consume that
+ * follows a successful verification is the single-use fence.
+ */
+export async function peekChallenge(
+	database: Database,
+	input: { nonce: string; walletAddress: string },
+): Promise<AuthChallenge | null> {
+	const walletAddress = normalizeWalletAddress(input.walletAddress);
+	const rows = await database
+		.select()
+		.from(authChallenges)
+		.where(
+			and(
+				eq(authChallenges.nonce, input.nonce),
+				eq(authChallenges.walletAddress, walletAddress),
+				isNull(authChallenges.consumedAt),
+				gt(authChallenges.expiresAt, new Date()),
+			),
+		)
+		.limit(1);
+	return rows[0] ?? null;
+}
+
+/**
  * Consumes a challenge atomically. The single UPDATE is the single-use fence:
  * two concurrent verifications race on the same row and exactly one sees
  * `consumed_at IS NULL`, so the loser gets null and no signature is checked

@@ -11,7 +11,7 @@
 import { describe, expect, test } from "bun:test";
 import { and, eq, sql } from "drizzle-orm";
 import { authChallenges, users } from "@nuts/db/schema/index";
-import { consumeChallenge, createOrFetchUser, deleteExpiredChallenges, issueChallenge, normalizeWalletAddress } from "./store";
+import { consumeChallenge, createOrFetchUser, deleteExpiredChallenges, issueChallenge, normalizeWalletAddress, peekChallenge } from "./store";
 import type { Database } from "./store";
 import { completeSignIn, startSignIn } from "./sign-in";
 import type { SignatureVerifier } from "./verifier";
@@ -164,19 +164,111 @@ if (!databaseUrl) {
 			expect(Number(count?.total)).toBe(1);
 		});
 
-		probe("a bad signature burns the nonce and creates no user", async (tx) => {
+		/**
+		 * B1. `requestSignInChallenge` is unauthenticated and hands the live row
+		 * to any caller, so a bad signature must NOT spend the nonce: otherwise
+		 * anyone could burn the challenge the honest owner is signing right now.
+		 * The nonce is spent only by a signature that verifies.
+		 */
+		probe("a bad signature leaves the nonce spendable and creates no user", async (tx) => {
 			const challenge = await startSignIn(tx, { walletAddress: WALLET, domain: DOMAIN });
 			const failed = await completeSignIn(tx, {
 				walletAddress: WALLET, nonce: challenge.nonce, signature: "0xbad", domain: DOMAIN, verify: reject,
 			});
 			expect(failed).toEqual({ ok: false, reason: "signature_invalid" });
 
-			// Replaying the same nonce with a good signature must not work.
+			// The attacker's attempt did not consume the row.
+			const [afterFailure] = await tx
+				.select()
+				.from(authChallenges)
+				.where(eq(authChallenges.nonce, challenge.nonce));
+			expect(afterFailure?.consumedAt).toBeNull();
+			expect(await peekChallenge(tx, { nonce: challenge.nonce, walletAddress: WALLET })).not.toBeNull();
+
+			// No user was created by the failed attempt.
+			const [beforeCount] = await tx
+				.select({ total: sql<string>`count(*)` })
+				.from(users)
+				.where(eq(users.walletAddress, WALLET));
+			expect(Number(beforeCount?.total)).toBe(0);
+
+			// The honest owner's real signature still works on the same nonce.
+			const honest = await completeSignIn(tx, {
+				walletAddress: WALLET, nonce: challenge.nonce, signature: "0xabcdef", domain: DOMAIN, verify: accept,
+			});
+			expect(honest.ok).toBe(true);
+			const [spent] = await tx
+				.select()
+				.from(authChallenges)
+				.where(eq(authChallenges.nonce, challenge.nonce));
+			expect(spent?.consumedAt).not.toBeNull();
+		});
+
+		/** B1. Junk from anyone must never cost the owner their live challenge. */
+		probe("a stranger cannot burn a wallet's live challenge with junk attempts", async (tx) => {
+			const challenge = await startSignIn(tx, { walletAddress: WALLET, domain: DOMAIN });
+			for (let index = 0; index < 25; index += 1) {
+				const attempt = await completeSignIn(tx, {
+					walletAddress: WALLET,
+					nonce: challenge.nonce,
+					signature: `0x${index.toString(16).padStart(4, "0")}`,
+					domain: DOMAIN,
+					verify: reject,
+				});
+				expect(attempt).toEqual({ ok: false, reason: "signature_invalid" });
+			}
+			// Non-hex junk (refused before the verifier) must not spend it either.
+			expect(
+				await completeSignIn(tx, {
+					walletAddress: WALLET, nonce: challenge.nonce, signature: "not-hex", domain: DOMAIN, verify: reject,
+				}),
+			).toEqual({ ok: false, reason: "signature_invalid" });
+			// A wrong-domain attempt must not spend it either.
+			expect(
+				await completeSignIn(tx, {
+					walletAddress: WALLET, nonce: challenge.nonce, signature: "0x01", domain: "evil.example", verify: accept,
+				}),
+			).toEqual({ ok: false, reason: "domain_mismatch" });
+
+			const [row] = await tx
+				.select()
+				.from(authChallenges)
+				.where(eq(authChallenges.nonce, challenge.nonce));
+			expect(row?.consumedAt).toBeNull();
+		});
+
+		/** B1. Single use survives the reorder: a verified nonce is spent once. */
+		probe("a verified nonce cannot be replayed", async (tx) => {
+			const challenge = await startSignIn(tx, { walletAddress: WALLET, domain: DOMAIN });
+			const first = await completeSignIn(tx, {
+				walletAddress: WALLET, nonce: challenge.nonce, signature: "0x01", domain: DOMAIN, verify: accept,
+			});
+			expect(first.ok).toBe(true);
 			const replay = await completeSignIn(tx, {
-				walletAddress: WALLET, nonce: challenge.nonce, signature: "0xbad", domain: DOMAIN, verify: accept,
+				walletAddress: WALLET, nonce: challenge.nonce, signature: "0x01", domain: DOMAIN, verify: accept,
 			});
 			expect(replay).toEqual({ ok: false, reason: "challenge_invalid" });
+		});
 
+		/**
+		 * B1. The consume race loser reports `challenge_invalid`, not a user.
+		 * Simulated by spending the row from inside the verifier, which is the
+		 * window a second concurrent request occupies.
+		 */
+		probe("the consume race loser gets challenge_invalid", async (tx) => {
+			const challenge = await startSignIn(tx, { walletAddress: WALLET, domain: DOMAIN });
+			const result = await completeSignIn(tx, {
+				walletAddress: WALLET,
+				nonce: challenge.nonce,
+				signature: "0x01",
+				domain: DOMAIN,
+				verify: async () => {
+					// The competing request wins the UPDATE while we verify.
+					await consumeChallenge(tx, { nonce: challenge.nonce, walletAddress: WALLET });
+					return true;
+				},
+			});
+			expect(result).toEqual({ ok: false, reason: "challenge_invalid" });
 			const [count] = await tx
 				.select({ total: sql<string>`count(*)` })
 				.from(users)

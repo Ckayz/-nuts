@@ -10,6 +10,8 @@ import { calls, HASH, neverLandingReceipt, replies, resetTradeMocks, USDC, WALLE
 import type { QuoteRaw } from "@/lib/trade/types";
 import type { PreparedTrade } from "./trade-execution";
 
+const BOOK = "0x1bdff855d6811728acadc00989e79143a2bdfded";
+
 const RAW: QuoteRaw = {
 	budget: "5000000",
 	numContracts: "10000",
@@ -54,9 +56,26 @@ beforeAll(async () => {
 	({ TradeExecution } = (await import("./trade-execution")) as unknown as { TradeExecution: typeof TradeExecution });
 });
 
+/**
+ * C-P2-1. Every send now re-checks server eligibility (`prepareTradeFor` runs
+ * `findUnrecordedFill`), so the default server answer has to be a WORKING
+ * preparation or no probe in this file could send anything. It hands back the
+ * same calldata and ticket the card was mounted with, so what a probe asserts
+ * about `sends` and `records` is unchanged by the round trip itself.
+ */
 function reset(): void {
 	resetTradeMocks();
-	replies.agentPrepare = async () => ({ ok: false, code: "X", reason: "no" });
+	replies.agentPrepare = async () => ({
+		ok: true,
+		stage: "fill",
+		fill: { to: BOOK as `0x${string}`, data: "0xFILL" as const, value: "0" as const },
+		token: "tok",
+		thesisId: null,
+		expected: RAW,
+		signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+		preparedAt: new Date().toISOString(),
+		note: "",
+	});
 }
 
 function primary(h: Mounted) {
@@ -174,7 +193,6 @@ describe("C#3 / C#4 (= lane D's D-C1): one recording-result handler", () => {
 const word = (hex: string) => hex.padStart(64, "0");
 const approveData = (spender: string, amount: bigint) =>
 	`0x095ea7b3${word(spender.slice(2).toLowerCase())}${word(amount.toString(16))}`;
-const BOOK = "0x1bdff855d6811728acadc00989e79143a2bdfded";
 
 function approveTrade(over: { calldataAmount?: bigint; printedAmount?: string; allowance?: PreparedTrade["allowance"] } = {}): PreparedTrade {
 	const printed = over.printedAmount ?? "5000000";
@@ -331,15 +349,32 @@ describe("C#8: fill calldata is never broadcast past PRD 14's 30-second window",
 		expect(h.text()).toContain("9 USDC");
 	});
 
-	test("a fresh fill is sent without a re-preparation", async () => {
+	/**
+	 * C-P2-1 changed this: a fresh fill costs ONE round trip now, and what is
+	 * broadcast is what that round trip returned. It used to assert
+	 * `prepares: 0`, which is the hole tab 2 walked through.
+	 */
+	test("a fresh fill is re-checked once and the SERVER's calldata is what goes out", async () => {
 		reset();
+		replies.agentPrepare = async () => ({
+			ok: true,
+			stage: "fill",
+			fill: { to: BOOK as `0x${string}`, data: "0xFRESH" as const, value: "0" as const },
+			token: "tok2",
+			thesisId: null,
+			expected: RAW,
+			signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+			preparedAt: new Date().toISOString(),
+			note: "",
+		});
 		const h = mount(TradeExecution, { trade: fillTrade() });
 		press(h);
 		await h.settle();
 		expect({ prepares: calls.agentPrepares, sends: calls.sends.map((s) => s.data) }).toEqual({
-			prepares: 0,
-			sends: ["0xFILL"],
+			prepares: 1,
+			sends: ["0xFRESH"],
 		});
+		expect(calls.records.map((r) => r.token)).toEqual(["tok2"]);
 	});
 });
 
@@ -399,7 +434,9 @@ describe("C-R1: a second mounted card must not send a second fill", () => {
 			bSaysHeld: b.text().includes("is not recorded yet"),
 		}).toEqual({
 			afterFirst: { sends: 1, records: 1, a: "Record the fill" },
-			afterSecond: { sends: 1, prepares: 0, records: 1 },
+			// C-P2-1: the ONE preparation is card a's own pre-send re-check. Card b
+			// found the hold locally and adopted it, so it never round-tripped.
+			afterSecond: { sends: 1, prepares: 1, records: 1 },
 			bLabel: "Record the fill",
 			bSaysHeld: true,
 		});
@@ -460,14 +497,21 @@ describe("C-R1: a second mounted card must not send a second fill", () => {
 		}
 	});
 
-	test("with a working store a fresh card still sends without an extra round trip", async () => {
+	/**
+	 * C-P2-1. A working store no longer buys a send without the server fence:
+	 * the store only proves what THIS browsing context knows. The refusal the
+	 * server can raise is the point, so this probe drives the same fence and
+	 * shows it passing when there is genuinely nothing unrecorded.
+	 */
+	test("with a working store a fresh card still asks the server first", async () => {
 		reset();
+		serverWithUnrecordedFence();
 		const h = mount(TradeExecution, { trade: fillTrade() });
 		press(h);
 		await h.settle();
 		expect({ prepares: calls.agentPrepares, sends: calls.sends.map((s) => s.data) }).toEqual({
-			prepares: 0,
-			sends: ["0xFILL"],
+			prepares: 1,
+			sends: ["0xFRESH"],
 		});
 	});
 });
@@ -502,5 +546,88 @@ describe("M5: the agent card stops waiting for an approval and says so", () => {
 		await h.settle();
 		expect(h.text()).toContain("The approval did not succeed on Base");
 		expect(calls.sends.length).toBe(1);
+	});
+});
+
+/**
+ * C-P2-1 (lane C pass 2, MAJOR). Every browsing context has its OWN
+ * `sessionStorage`, so the hold tab 1 wrote is invisible to tab 2. The
+ * reviewer's measurement on the unfixed component:
+ *
+ *   REVIEW_CROSS_TAB {"sends":2,"prepares":0,"records":2}
+ *
+ * The store is swapped for an empty one between the two presses, which is
+ * exactly what a second tab (or a second device, or a cleared store) looks like
+ * to this component.
+ */
+describe("C-P2-1: a second TAB cannot bypass the server's unrecorded-fill fence", () => {
+	function serverFence(): void {
+		replies.agentPrepare = async () => {
+			if (calls.records.length > 0) {
+				return { ok: false, code: "UNRECORDED_FILL", reason: "Your last fill is not recorded yet." };
+			}
+			return {
+				ok: true,
+				stage: "fill",
+				fill: { to: BOOK as `0x${string}`, data: "0xFRESH" as const, value: "0" as const },
+				token: "tok2",
+				thesisId: null,
+				expected: RAW,
+				signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+				preparedAt: new Date().toISOString(),
+				note: "",
+			};
+		};
+	}
+
+	/** A brand-new browsing context: same wallet, its own empty store. */
+	function newTabStorage(): () => void {
+		const real = (globalThis as { sessionStorage?: unknown }).sessionStorage;
+		const own = new Map<string, string>();
+		(globalThis as { sessionStorage?: unknown }).sessionStorage = {
+			getItem: (key: string) => own.get(key) ?? null,
+			setItem: (key: string, value: string) => {
+				own.set(key, value);
+			},
+			removeItem: (key: string) => {
+				own.delete(key);
+			},
+		};
+		return () => {
+			(globalThis as { sessionStorage?: unknown }).sessionStorage = real;
+		};
+	}
+
+	test("REVIEW_CROSS_TAB — the second tab's fresh card sends nothing", async () => {
+		reset();
+		serverFence();
+		replies.record = async () => ({ ok: false, code: "LOST", reason: "The server did not answer." });
+
+		const tabOne = mount(TradeExecution, { trade: fillTrade() });
+		press(tabOne);
+		await tabOne.settle();
+		const afterFirst = { sends: calls.sends.length, records: calls.records.length };
+
+		const restore = newTabStorage();
+		try {
+			const tabTwo = mount(TradeExecution, { trade: fillTrade() });
+			press(tabTwo);
+			await tabTwo.settle();
+			expect({
+				afterFirst,
+				crossTab: {
+					sends: calls.sends.length,
+					prepares: calls.agentPrepares,
+					records: calls.records.length,
+				},
+				refused: tabTwo.text().includes("not recorded yet"),
+			}).toEqual({
+				afterFirst: { sends: 1, records: 1 },
+				crossTab: { sends: 1, prepares: 2, records: 1 },
+				refused: true,
+			});
+		} finally {
+			restore();
+		}
 	});
 });

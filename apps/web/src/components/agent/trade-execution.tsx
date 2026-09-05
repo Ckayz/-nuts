@@ -611,10 +611,33 @@ export function TradeExecution({ trade }: { trade: PreparedTrade }) {
 				}
 			}
 
-			// C-R1. With no store there is no browser fence at all, so the SERVER
-			// fence has to run before the money moves. One round trip is enough:
-			// the approval branch above already made one.
-			if (sessionFillStore() === null && !preparedThisSend) {
+			// C-P2-1 (lane C pass 2, MAJOR). The local hold FIRST, because it is
+			// free and it can adopt the fill this browsing context already holds.
+			if (anotherFillIsHeld()) return;
+
+			// C-P2-1. Then the SERVER fence, on every send this click did not
+			// already prepare — with a working store or without one.
+			//
+			// This used to be `sessionFillStore() === null && !preparedThisSend`,
+			// i.e. the server was only asked when the browser had no store at all.
+			// `sessionStorage` is per BROWSING CONTEXT: tab 2's store is empty, so
+			// tab 2's fresh card saw no hold, skipped the round trip and broadcast
+			// its calldata while tab 1's fill was still unrecorded
+			// (`REVIEW_CROSS_TAB {"sends":2,"prepares":0,"records":2}`; the same
+			// hole covers a second device and a cleared store). `prepareTradeFor`
+			// runs `findUnrecordedFill` and refuses with `UNRECORDED_FILL` while
+			// the wallet has a fresh `pending` row (`lib/trade/prepare.ts:84`),
+			// which is the only fence that sees across contexts at all. One round
+			// trip; the approval branch above already counts as this click's.
+			//
+			// RESIDUAL, stated plainly rather than implied: the server fence keys
+			// on the `pending` row `recordTrade` inserts, so it cannot see (a) two
+			// tabs whose sends happen inside the same instant, before either
+			// recording reaches the server, or (b) a fill that was broadcast and
+			// whose `recordTrade` never arrived at all (tab closed, request lost),
+			// because no row was ever written. Both still need the reload-recovery
+			// UI the owner has open.
+			if (!preparedThisSend) {
 				const failed = await reprepare();
 				if (failed !== null) {
 					setPhase("error");

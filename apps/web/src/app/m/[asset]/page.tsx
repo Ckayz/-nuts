@@ -8,6 +8,7 @@ import { YourPositionsRail } from "@/components/market/your-positions-rail";
 import { TaggedPostsTabs } from "@/components/market/tagged-posts-tabs";
 import { getSession } from "@/lib/auth/session";
 import { MarketRail } from "@/components/market/market-rail";
+import { AgentChat } from "@/components/agent/agent-chat";
 import { StructuresList } from "@/components/market/structures-list";
 import { TakeASide } from "@/components/market/take-a-side";
 import { usd, usd2 } from "@/lib/format";
@@ -169,6 +170,18 @@ export default async function MarketPage({
 						expiryLabel={market.selectedExpiryLabel}
 					/>
 				)}
+
+				{/* Directly under the ticket, not at the bottom of the rail: the right
+				    column is ONE `position:sticky` stack, so a tall panel added below
+				    the other cards pushes them past the bottom of the viewport where
+				    sticky cannot reach them. The panel caps its own height too. */}
+				<section className="card pad mkt-panel agent-inline">
+					<h3 style={{ fontSize: "15px" }}>
+						Ask about {market.asset}
+						<TodoOwner />
+					</h3>
+					<AgentChat asset={market.asset} variant="panel" />
+				</section>
 
 				<section className="card">
 					<div className="card-h">

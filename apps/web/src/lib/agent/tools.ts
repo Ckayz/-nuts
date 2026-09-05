@@ -289,9 +289,42 @@ export const getThesisContext = tool({
 });
 
 /** Every read tool. Safe to run without user approval. */
+/**
+ * Every read tool. Safe to run without user approval.
+ *
+ * Kept as a plain object for the unscoped `/agent` page, which is how it has
+ * always been used.
+ */
 export const readTools = {
 	searchOptionBookOrders,
 	getMarketData,
 	previewOptionBookTrade,
 	getThesisContext,
 };
+
+/**
+ * Read tools for a conversation that is already about one market.
+ *
+ * The asset is bound HERE, in a closure, rather than being handed to the model
+ * as an argument — the same rule `createExecutionTools` states for the connected
+ * account: a value the model can name is a value a prompt-injected model can
+ * change.
+ *
+ * It is a DEFAULT, not a filter. A search that names its own asset wins, so
+ * someone reading the ETH panel who asks about BTC gets BTC. Scope narrows where
+ * the conversation starts; it does not decide what may be discussed.
+ */
+export function createReadTools({ asset }: { readonly asset: string | null }) {
+	if (asset === null) return readTools;
+
+	const scopedSearch = tool({
+		...searchOptionBookOrders,
+		execute: async (input, options) =>
+			searchOptionBookOrders.execute?.(
+				{ ...input, asset: input.asset ?? asset },
+				options,
+			),
+	} as typeof searchOptionBookOrders);
+
+	return { ...readTools, searchOptionBookOrders: scopedSearch };
+}

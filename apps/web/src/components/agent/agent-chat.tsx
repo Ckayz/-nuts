@@ -63,6 +63,8 @@ export function chatRequestBody(input: {
 	readonly body: unknown;
 	readonly walletAddress: string | undefined;
 	readonly thesisId: string | null;
+	/** Optional so existing callers, and the tests pinning them, are unchanged. */
+	readonly asset?: string | null;
 }): Record<string, unknown> {
 	return {
 		...(input.body as Record<string, unknown> | undefined),
@@ -70,6 +72,7 @@ export function chatRequestBody(input: {
 		walletAddress: input.walletAddress,
 		// Omitted rather than sent as null: the route's schema marks it optional.
 		...(input.thesisId === null ? {} : { thesisId: input.thesisId }),
+		...(input.asset === null || input.asset === undefined ? {} : { asset: input.asset }),
 	};
 }
 
@@ -111,7 +114,26 @@ export function approvalRequest(part: unknown): { id: string; input: Record<stri
 	return { id, input };
 }
 
-export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
+export function AgentChat({
+	thesisId = null,
+	asset = null,
+	variant = "page",
+}: {
+	/** The post this conversation is about (`/agent?thesis=<uuid>`). */
+	readonly thesisId?: string | null;
+	/**
+	 * The market this conversation is about. Defaults the agent's search; it does
+	 * not stop the user asking about something else.
+	 */
+	readonly asset?: string | null;
+	/**
+	 * `page` fills the viewport under the header. `panel` sits inside a card in a
+	 * column and caps its own height — the market page's right rail is one sticky
+	 * stack, so a panel that grows without limit pushes the cards below it out of
+	 * reach.
+	 */
+	readonly variant?: "page" | "panel";
+}) {
 	const [input, setInput] = useState("");
 	const { address } = useAccount();
 
@@ -123,8 +145,10 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 	}, [address]);
 
 	const thesisRef = useRef<string | null>(thesisId);
+	const assetRef = useRef<string | null>(asset);
 	useEffect(() => {
 		thesisRef.current = thesisId;
+		assetRef.current = asset;
 	}, [thesisId]);
 
 	const [transport] = useState(
@@ -147,6 +171,7 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 						body,
 						walletAddress: addressRef.current,
 						thesisId: thesisRef.current,
+						asset: assetRef.current,
 					}),
 				}),
 			}),
@@ -187,7 +212,13 @@ export function AgentChat({ thesisId = null }: { thesisId?: string | null }) {
 		// `top:60px` (line 97), which the file's own `.sticky{top:126px}` (line
 		// 127) already states as the combined height. `min-h-0` keeps the message
 		// list the only scrolling element.
-		<div className="mx-auto flex h-[calc(100dvh-126px)] min-h-0 w-full max-w-3xl flex-col px-4">
+		<div
+			className={
+				variant === "panel"
+					? "agent-panel flex min-h-0 flex-col"
+					: "mx-auto flex h-[calc(100dvh-126px)] min-h-0 w-full max-w-3xl flex-col px-4"
+			}
+		>
 			<header className="border-b py-4">
 				<h1 className="font-medium text-lg">Agent</h1>
 				<p className="text-muted-foreground text-sm">

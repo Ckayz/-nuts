@@ -43,4 +43,18 @@ export const agentChatBodySchema = z.object({
 		.string()
 		.regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
 		.optional(),
+
+	/**
+	 * The market this conversation is about, when the chat was opened from one
+	 * (`/m/eth` mounts the panel with it). It only DEFAULTS the agent's search;
+	 * it is not a cage, so someone in the ETH panel asking about BTC still gets
+	 * an answer.
+	 *
+	 * Fenced like `thesisId`: a ticker shape, not free text, because it reaches
+	 * a tool's default argument.
+	 */
+	asset: z
+		.string()
+		.regex(/^[A-Za-z0-9]{1,12}$/)
+		.optional(),
 });

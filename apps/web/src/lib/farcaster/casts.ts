@@ -75,6 +75,163 @@ export const FARCASTER_REVALIDATE_SECONDS = 300;
 /** TODO-OWNER: how much of a cast body the rail prints before it is cut. */
 export const FARCASTER_TEXT_LIMIT = 180;
 
+const NEYNAR_SEARCH_URL = "https://api.neynar.com/v2/farcaster/cast/search";
+
+/**
+ * What the rail asks Farcaster for.
+ *
+ * MEASURED 2026-09-06 against the live API, because the obvious approaches are
+ * worse and it is not obvious why:
+ *
+ *   channel feed `base,farcaster`  five casts, five of them airdrop, whitelist
+ *                                  and referral spam — including a Honeygain
+ *                                  affiliate link.
+ *   channel feed `base` alone      six casts, all by ONE account, and all reply
+ *                                  fragments ("i guess so yeah").
+ *   `mode=semantic`                on-topic but ancient: 470-511 days old, from
+ *                                  accounts with 0-23 followers. `sort_type`
+ *                                  made no difference to it.
+ *   `mode=hybrid` + `after:`       fresh AND on-topic. What this uses.
+ *
+ * The query is TWO WORDS on purpose. Hybrid mode ANDs its terms, and the live
+ * shelf is thin: "options" alone returns 40 casts, "options implied volatility"
+ * returns 9, and "options implied volatility strike" returns ZERO. Adding a
+ * fifth term does not sharpen the rail, it empties it.
+ *
+ * Of the queries that return anything, this one is the only one whose results
+ * survive `citesALevel` — "options trading calls puts" returns 40 casts and
+ * NONE of them clear it, because that phrasing retrieves explainers rather than
+ * observations. TODO-OWNER: the query text.
+ */
+export const FARCASTER_SEARCH_QUERY = "implied volatility";
+
+/**
+ * How far back the rail will look, as an `after:YYYY-MM-DD` operator.
+ *
+ * MEASURED: the newest genuine options post found in any probe was 30 days old.
+ * Farcaster does not carry a live options conversation, so a 7-day window
+ * returns nothing at all. TODO-OWNER: the window.
+ */
+export const FARCASTER_MAX_AGE_DAYS = 45;
+
+/**
+ * A follower floor, which is NOT the main defence and cannot be.
+ *
+ * MEASURED: the bot farm posting "Unlock the power of crypto options!" across
+ * @xyeuli, @q1uiver15, @bl4de22, @tr4nquil19, @p1oneer2, @m4ximum and
+ * @c0rridor16 carries 325-404 followers each, while the one genuinely useful
+ * post in the whole probe (@preetrank, "$BTC upside implied volatility has hit
+ * a record low of 23%") carries 162. A follower floor set high enough to catch
+ * the farm would delete the good post first. It is set low, to drop only the
+ * 0-2 follower throwaway accounts, and `dedupeKey` does the real work.
+ * TODO-OWNER: the floor.
+ */
+export const FARCASTER_MIN_FOLLOWERS = 25;
+
+/**
+ * How many casts to ask for per rail slot. The filters reject most of a page —
+ * one probe returned seven casts that collapsed to a single row after dedupe —
+ * so asking for exactly five would reliably render one. TODO-OWNER.
+ */
+const OVERFETCH = 8;
+
+/**
+ * Characters of normalised text compared when collapsing duplicates.
+ *
+ * MEASURED: 28, not 40. The farm's shared opening "Unlock the power of crypto
+ * options!" normalises to 33 characters, so a 40-character key reaches past it
+ * into the part they vary ("…Learn about calls", "…Understand the Greeks") and
+ * every copy hashes differently. 28 stops inside the shared run.
+ */
+const DEDUPE_PREFIX = 28;
+
+/**
+ * The farm's signature is that many accounts post the SAME sentence. Normalise
+ * away case, punctuation and spacing, then key on the opening; the seven
+ * "Unlock the power of crypto options!" casts collapse to one.
+ */
+export function dedupeKey(text: string): string {
+	return text
+		.toLowerCase()
+		.replace(/https?:\/\/\S+/g, " ")
+		.replace(/[^a-z0-9 ]+/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+		.slice(0, DEDUPE_PREFIX);
+}
+
+/**
+ * Does this cast cite a level?
+ *
+ * This is the filter that actually works, and it is worth saying why. Farcaster
+ * has very little genuine options conversation, and what fills the query
+ * instead is a content farm writing explainers: "Calls give you the right to
+ * buy, Puts the right to sell." Those accounts carry 325-445 followers — MORE
+ * than the one genuinely useful poster found in any probe — so no follower
+ * floor separates them.
+ *
+ * What separates them is that a market observation cites something: a $TICKER,
+ * a percentage, or a price. "$BTC upside implied volatility has hit a record
+ * low of 23%" cites; "Unlock the power of crypto options!" does not.
+ *
+ * MEASURED 2026-09-06: on `implied volatility` this keeps 2 of 5 and both are
+ * real; on `options trading calls puts` it keeps 0 of 40, which is the correct
+ * answer for a page containing no observations at all.
+ */
+export function citesALevel(text: string): boolean {
+	return /\$[A-Za-z]{2,6}\b|\d+(?:[.,]\d+)?\s?%|\$\s?\d/.test(text);
+}
+
+/**
+ * Choose what the rail shows, in the order Neynar returned it.
+ *
+ * Pure, so the rules are testable without the network. Every rejection is one
+ * the live probes justified: replies read as fragments, throwaway accounts are
+ * noise, stale casts misrepresent a feed as live, repeated text is a farm, and
+ * one author filling the rail is what the `base` channel did.
+ */
+export function selectRelevantCasts(
+	casts: readonly FarcasterRailCast[],
+	options: { limit?: number; minFollowers?: number; maxAgeDays?: number; now?: Date } = {},
+): FarcasterRailCast[] {
+	const limit = options.limit ?? FARCASTER_RAIL_LIMIT;
+	const minFollowers = options.minFollowers ?? FARCASTER_MIN_FOLLOWERS;
+	const maxAgeDays = options.maxAgeDays ?? FARCASTER_MAX_AGE_DAYS;
+	const now = options.now ?? new Date();
+	const cutoff = now.getTime() - maxAgeDays * 86_400_000;
+
+	const seenText = new Set<string>();
+	const seenAuthor = new Set<string>();
+	const kept: FarcasterRailCast[] = [];
+
+	for (const cast of casts) {
+		if (kept.length >= limit) break;
+		if (cast.isReply) continue;
+		// An absent follower count is not evidence of a real account.
+		if ((cast.followerCount ?? 0) < minFollowers) continue;
+		// An unreadable or absent timestamp cannot be shown as recent.
+		const at = cast.timestamp === null ? Number.NaN : Date.parse(cast.timestamp);
+		if (!Number.isFinite(at) || at < cutoff) continue;
+		// An explainer is not a market observation; see citesALevel.
+		if (!citesALevel(cast.text)) continue;
+		const key = dedupeKey(cast.text);
+		if (key === "" || seenText.has(key)) continue;
+		const author = cast.username.toLowerCase();
+		if (seenAuthor.has(author)) continue;
+		seenText.add(key);
+		seenAuthor.add(author);
+		kept.push(cast);
+	}
+	return kept;
+}
+
+/** `after:` takes a plain date. Built from the window above, in UTC. */
+export function searchQueryFor(now: Date = new Date(), maxAgeDays = FARCASTER_MAX_AGE_DAYS): string {
+	const since = new Date(now.getTime() - maxAgeDays * 86_400_000);
+	const day = since.toISOString().slice(0, 10);
+	return `${FARCASTER_SEARCH_QUERY} after:${day}`;
+}
+
 const NEYNAR_CHANNEL_FEED_URL = "https://api.neynar.com/v2/farcaster/feed/channels/";
 
 /** A cast reduced to exactly what the rail draws. Nothing here is derived or guessed. */
@@ -91,6 +248,12 @@ export interface FarcasterRailCast {
 	text: string;
 	/** `channel.id` when the cast carries a channel; null otherwise. */
 	channelId: string | null;
+	/** ISO 8601 `timestamp`; null when absent. Used only to age it out. */
+	timestamp: string | null;
+	/** True when `parent_hash` is set — a reply, shown out of its thread. */
+	isReply: boolean;
+	/** `author.follower_count`; null when absent. */
+	followerCount: number | null;
 	/** Permalink to the cast, or null when the hash is too short to build one. */
 	url: string | null;
 }
@@ -113,17 +276,28 @@ export type FarcasterRailState =
 const castSchema = z.object({
 	hash: z.string().min(1),
 	text: z.string(),
+	// ISO 8601 upstream. Kept nullish: a row without one simply cannot be
+	// age-filtered, and is dropped rather than assumed recent.
+	timestamp: z.string().nullish(),
+	// Present and non-null only on replies. A reply out of its thread reads as a
+	// fragment ("i guess so yeah"), which is what the channel feed was full of.
+	parent_hash: z.string().nullish(),
 	author: z.object({
 		username: z.string().min(1),
 		// nullable AND not required upstream, so `nullish`, not `nullable`.
 		display_name: z.string().nullish(),
 		pfp_url: z.string().nullish(),
+		follower_count: z.number().nullish(),
 	}),
 	channel: z.object({ id: z.string().min(1) }).nullish(),
 });
 
 /** `FeedResponse` requires both keys; only `casts` is read, and only as a list. */
-const feedResponseSchema = z.object({ casts: z.array(z.unknown()) });
+const feedResponseSchema = z.union([
+	// Cast search nests its page under `result`; the channel feed does not.
+	z.object({ result: z.object({ casts: z.array(z.unknown()) }) }).transform((v) => v.result),
+	z.object({ casts: z.array(z.unknown()) }),
+]);
 
 /**
  * Cut a cast body to `limit` characters on a word boundary where one is close
@@ -181,7 +355,7 @@ function httpsAvatar(raw: string | null | undefined): string | null {
 export function parseCast(row: unknown, limit = FARCASTER_TEXT_LIMIT): FarcasterRailCast | null {
 	const parsed = castSchema.safeParse(row);
 	if (!parsed.success) return null;
-	const { hash, text, author, channel } = parsed.data;
+	const { hash, text, timestamp, parent_hash, author, channel } = parsed.data;
 	const body = truncateCastText(text, limit);
 	// A cast with no readable body is not something to show a visitor.
 	if (body === "") return null;
@@ -193,6 +367,9 @@ export function parseCast(row: unknown, limit = FARCASTER_TEXT_LIMIT): Farcaster
 		text: body,
 		channelId: channel?.id ?? null,
 		url: farcasterCastUrl(author.username, hash),
+		timestamp: timestamp ?? null,
+		isReply: typeof parent_hash === "string" && parent_hash !== "",
+		followerCount: typeof author.follower_count === "number" ? author.follower_count : null,
 	};
 }
 
@@ -207,7 +384,13 @@ export function parseCast(row: unknown, limit = FARCASTER_TEXT_LIMIT): Farcaster
  */
 export function parseFarcasterFeed(
 	body: unknown,
-	options: { limit?: number; textLimit?: number } = {},
+	options: {
+		limit?: number;
+		textLimit?: number;
+		minFollowers?: number;
+		maxAgeDays?: number;
+		now?: Date;
+	} = {},
 ): FarcasterRailState {
 	const parsed = feedResponseSchema.safeParse(body);
 	if (!parsed.success) {
@@ -217,18 +400,29 @@ export function parseFarcasterFeed(
 		};
 	}
 	const rows = parsed.data.casts;
-	const casts: FarcasterRailCast[] = [];
+	// Parse everything first, THEN choose. Rejecting during the parse would
+	// conflate "this row is not the documented shape" with "this row is a bot",
+	// and only the first of those means the feed could not be read.
+	const understood: FarcasterRailCast[] = [];
 	for (const row of rows) {
 		const cast = parseCast(row, options.textLimit ?? FARCASTER_TEXT_LIMIT);
-		if (cast !== null) casts.push(cast);
-		if (casts.length >= (options.limit ?? FARCASTER_RAIL_LIMIT)) break;
+		if (cast !== null) understood.push(cast);
 	}
-	if (casts.length === 0 && rows.length > 0) {
+	if (understood.length === 0 && rows.length > 0) {
 		return {
 			status: "unavailable",
 			detail: `Neynar returned ${rows.length} cast(s) and none matched the documented shape, so the Farcaster feed could not be read.`,
 		};
 	}
+	const casts = selectRelevantCasts(understood, {
+		limit: options.limit ?? FARCASTER_RAIL_LIMIT,
+		minFollowers: options.minFollowers,
+		maxAgeDays: options.maxAgeDays,
+		now: options.now,
+	});
+	// Understood the answer, and nothing in it clears the bar. That is a quiet
+	// result, not a broken one, and the rail says so rather than claiming a
+	// failure it did not have.
 	return { status: "ready", casts };
 }
 
@@ -241,16 +435,26 @@ export function parseFarcasterFeed(
  */
 export async function loadFarcasterRail(
 	apiKey: string | undefined,
-	options: { limit?: number; channelIds?: string; fetchImpl?: typeof fetch } = {},
+	options: {
+		limit?: number;
+		query?: string;
+		now?: Date;
+		minFollowers?: number;
+		maxAgeDays?: number;
+		fetchImpl?: typeof fetch;
+	} = {},
 ): Promise<FarcasterRailState> {
 	if (apiKey === undefined || apiKey.trim() === "") return { status: "unconfigured" };
 	const limit = options.limit ?? FARCASTER_RAIL_LIMIT;
-	const url = new URL(NEYNAR_CHANNEL_FEED_URL);
-	url.searchParams.set("channel_ids", options.channelIds ?? FARCASTER_CHANNEL_IDS);
-	// Documented bounds: minimum 1, maximum 100.
-	url.searchParams.set("limit", String(Math.min(Math.max(limit, 1), 100)));
-	url.searchParams.set("with_replies", "false");
-	url.searchParams.set("with_recasts", "false");
+	const url = new URL(NEYNAR_SEARCH_URL);
+	url.searchParams.set("q", options.query ?? searchQueryFor(options.now));
+	// hybrid, not semantic: semantic returned 470-511 day old casts from
+	// 0-follower accounts, and ignored sort_type. See FARCASTER_SEARCH_QUERY.
+	url.searchParams.set("mode", "hybrid");
+	// Over-fetch, because the filters below reject most of a page: the seven
+	// casts of one probe collapsed to one after dedupe. Documented bounds are
+	// 1..100, and cast search is the one endpoint rate-limited at 120 RPM.
+	url.searchParams.set("limit", String(Math.min(Math.max(limit * OVERFETCH, 1), 100)));
 
 	const request = options.fetchImpl ?? fetch;
 	let response: Response;
@@ -276,7 +480,12 @@ export async function loadFarcasterRail(
 	} catch {
 		return { status: "unavailable", detail: "Neynar returned a body that is not JSON." };
 	}
-	return parseFarcasterFeed(body, { limit });
+	return parseFarcasterFeed(body, {
+		limit,
+		minFollowers: options.minFollowers,
+		maxAgeDays: options.maxAgeDays,
+		now: options.now,
+	});
 }
 
 /**

@@ -45,8 +45,10 @@ function harness(signOutImpl?: () => Promise<void>) {
 		calls,
 		handled,
 		signedOutCount: () => signedOut,
-		run: (mismatched: boolean, address: string | undefined) =>
-			syncSessionToAccount({ mismatched, address, handled, signOut, onSignedOut: () => { signedOut += 1; } }),
+		// The signed-in session is A unless a case says otherwise; the guard is
+		// keyed on the session AND the connected address (B-R2).
+		run: (mismatched: boolean, address: string | undefined, sessionWallet: string | null = A) =>
+			syncSessionToAccount({ mismatched, sessionWallet, address, handled, signOut, onSignedOut: () => { signedOut += 1; } }),
 	};
 }
 
@@ -96,6 +98,24 @@ test("a FAILED sign-out stays retryable and never claims the session was cleared
 	expect(h.calls).toHaveLength(2);
 });
 
+/**
+ * B-R2 (lane B pass 2). The guard remembered the connected ADDRESS only, so a
+ * second signed-in session under the same connected wallet matched the old mark
+ * and was never signed out. The reviewer measured `NEW_SESSION_SAME_ADDRESS 1`.
+ */
+test("B-R2: a DIFFERENT mismatched session under the same address signs out again", async () => {
+	const h = harness();
+	await h.run(true, B, A);
+	expect(h.calls).toHaveLength(1);
+	// Signed in as C while still connected to B: a new session, a new sign-out.
+	await h.run(true, B, "0x00000000000000000000000000000000000000cc");
+	expect(h.calls).toHaveLength(2);
+	expect(h.signedOutCount()).toBe(2);
+	// The same pair again is still handled exactly once.
+	await h.run(true, B, "0x00000000000000000000000000000000000000cc");
+	expect(h.calls).toHaveLength(2);
+});
+
 test("switching to a THIRD account signs out again", async () => {
 	const h = harness();
 	await h.run(true, B);
@@ -142,6 +162,10 @@ test("the hook runs the effect through the guard and defaults to the real signOu
 	const source = readFileSync(new URL("./use-session-mismatch.ts", import.meta.url), "utf8");
 	expect(source).toContain("void syncSessionToAccount({");
 	expect(source).toContain("handled,");
+	// B-R2: the effect must carry NO dependency array, or a failed sign-out is
+	// never retried until the person switches accounts.
+	expect(source).toContain("\t\t});\n\t});\n\treturn mismatched;");
+	expect(source).not.toContain("}, [mismatched, address]);");
 	expect(source).toContain("signOut: () => signOutRef.current(),");
 	// The seam DEFAULTS to the real action, so a caller that passes nothing —
 	// `WalletBar` — still signs the server session out.
@@ -206,23 +230,43 @@ describe("useSessionMismatch, mounted", () => {
 	});
 
 	/**
-	 * A failed sign-out leaves the guard clear, so the NEXT effect run retries.
-	 * The effect's deps are `[mismatched, address]`: a re-render that changes
-	 * neither does NOT re-run it, so the retry rides on the next account change
-	 * rather than on any render. That is what this pins — the doc comment used to
-	 * promise a retry "on a later render", which is not what the hook does.
+	 * B-R2 (lane B pass 2), the reviewer's own sequence. The effect's deps used to
+	 * be `[mismatched, address]`, so a failed sign-out was retried ONLY if the
+	 * person switched accounts again: the reviewer measured `FIRST_FAILURE 1 /
+	 * RECOVERED_RERENDER 1 / NEW_SESSION_SAME_ADDRESS 1`, i.e. the old identity
+	 * stayed usable for likes, comments and follows indefinitely. The effect now
+	 * has no dependency array, and the guard is keyed on session + address.
 	 */
-	test("a failed sign-out retries on the next account change, not on a bare re-render", async () => {
-		const h = mountHook(async () => { throw new Error("network down"); });
+	test("B-R2: a failed sign-out is retried on a later render and by a new mismatched session", async () => {
+		let recovered = false;
+		const h = mountHook(async () => { if (!recovered) throw new Error("network down"); });
+		await h.set({ session: A, address: B });
+		expect(h.calls).toHaveLength(1); // FIRST_FAILURE
+		expect(h.text()).toBe("mismatch"); // the server session is still live
+		// A bare re-render once the network is back: the retry happens here. This
+		// is the step that used to stay at 1.
+		recovered = true;
+		await h.set({});
+		expect(h.calls).toHaveLength(2); // RECOVERED_RERENDER
+		// A DIFFERENT signed-in session under the same connected wallet is its own
+		// unit of work, so it signs out too.
+		await h.set({ session: "0x00000000000000000000000000000000000000cc" });
+		expect(h.calls).toHaveLength(3); // NEW_SESSION_SAME_ADDRESS
+	});
+
+	/**
+	 * The bound on the retry: at most ONE attempt per render. A successful
+	 * sign-out is not repeated by the extra renders the no-deps effect now sees,
+	 * and the failure path sets no state, so it cannot schedule its own re-run.
+	 */
+	test("B-R2: a SUCCESSFUL sign-out is not repeated by later renders", async () => {
+		const h = mountHook(async () => {});
 		await h.set({ session: A, address: B });
 		expect(h.calls).toHaveLength(1);
-		expect(h.text()).toBe("mismatch"); // the server session is still live
-		// A re-render that changes neither dep: the effect does not run again.
+		await h.set({});
+		await h.set({});
 		await h.set({});
 		expect(h.calls).toHaveLength(1);
-		// A new address changes a dep, so the retry happens.
-		await h.set({ address: "0x00000000000000000000000000000000000000cc" });
-		expect(h.calls).toHaveLength(2);
 	});
 });
 

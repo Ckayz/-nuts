@@ -51,11 +51,62 @@ export const env = createEnv({
 		 * of two acceptable credentials.
 		 */
 		OPENROUTER_API_KEY: z.string().min(1).optional(),
-		/** Primary model for agent turns. */
-		AGENT_MODEL: z.string().min(1).default("anthropic/claude-sonnet-4.5"),
+		/**
+		 * Primary model for agent turns.
+		 *
+		 * A free-tier OpenRouter model by owner direction (2026-09-06): the key
+		 * that shipped is a personal free-tier key that had already exhausted its
+		 * credit in production once. Measured 2026-09-06 02:1x through
+		 * `apps/web/src/lib/agent/model.ts` on the agent's real call shape
+		 * (`generateText` + a tool): `minimax/minimax-m3:free` returned
+		 * `tool_calls: true` with the correct argument, `finish_reason: "stop"`,
+		 * 917-919 total tokens across three runs. OpenRouter lists it free
+		 * (prompt 0 / completion 0),
+		 * `tools` supported, context 1,048,576.
+		 *
+		 * A free tier is rate-limited and flaky by nature: 429 and 502 are normal,
+		 * not exceptional. Measured on this account 2026-09-06 02:2x, a 429 body
+		 * reads `Rate limit exceeded: free-models-per-day`, `X-RateLimit-Limit: 50`
+		 * — FIFTY free model requests per day, shared across every `:free` id and
+		 * reset at 00:00 UTC. A day's probing exhausted it. That ceiling sits under
+		 * the app's own daily caps (PRD 10.2), so it, not PRD 10.2, is what a demo
+		 * hits first. OpenRouter's stated remedy is adding 10 credits, which lifts
+		 * it to 1000/day. TODO-OWNER.
+		 *
+		 * Both agent call sites already answer a provider failure with an honest
+		 * short message rather than a stack trace, verified against a REAL 429
+		 * (2026-09-06 02:2x): the chat route's `streamText` does not throw out of
+		 * the handler, `onError` fires, and the browser receives only "The agent is
+		 * unavailable right now. Please try again." The scope gate's failure path
+		 * covers `AGENT_GATE_MODEL` the same way.
+		 *
+		 * TODO-OWNER: the model id.
+		 */
+		AGENT_MODEL: z.string().min(1).default("minimax/minimax-m3:free"),
 		/**
 		 * Small, fast model for the pre-model scope gate (PRD 10.8 layer 1).
 		 * Runs on every inbound message, so it must stay cheap.
+		 *
+		 * NOT moved to a free tier, against the same owner direction, because
+		 * measurement refused it. The gate calls `generateObject` under
+		 * `maxOutputTokens: 120` (an owner-owned number, see scope.ts), and the
+		 * route is fail-closed: a gate that cannot run returns 503, so a gate
+		 * model that cannot emit the object breaks EVERY message. Measured
+		 * 2026-09-06 02:2x through `checkScope` itself, at the 120-token cap:
+		 * `nvidia/nemotron-3.5-lightning:free` (the candidate) degraded 7/7 with
+		 * "No object generated: could not parse the response"; `openrouter/free`
+		 * passed 3/12; `minimax/minimax-m3:free`, `minimax/minimax-m2.7:free` and
+		 * `google/gemma-4-26b-a4b-it:free` degraded every trial; the two
+		 * `thinkingmachines/inkling*:free` ids refuse non-agentic callers. Cause,
+		 * confirmed by raising the cap in a probe: nemotron spends 247-1300 output
+		 * tokens reasoning and then passes 4/4 at `maxOutputTokens: 1500`, so 120
+		 * starves it. (`minimax/minimax-m3:free` fails the schema even at 1500.)
+		 * The remaining 10 free ids are UNMEASURED: the account's shared
+		 * free-models rate limit was exhausted by this sweep, which is itself the
+		 * point — one machine probing free models exhausts the tier.
+		 *
+		 * TODO-OWNER: raise the gate's `maxOutputTokens` (scope.ts already flags
+		 * it) to let a free reasoning model run here, or keep paying for this one.
 		 */
 		AGENT_GATE_MODEL: z.string().min(1).default("anthropic/claude-haiku-4.5"),
 

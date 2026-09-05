@@ -12,11 +12,21 @@ Table derived from `packages/env/src/server.ts` and `packages/env/src/web.ts` at
 | DATA_SOURCE | Defaulted; set for deployment | Operator selects the database read path |
 | NODE_ENV | Defaulted | Runtime/build environment |
 | OPENROUTER_API_KEY | Yes | OpenRouter account API keys |
-| AGENT_MODEL | Defaulted | Schema default or operator's model configuration |
-| AGENT_GATE_MODEL | Defaulted | Schema default or operator's scope-gate model configuration |
+| AGENT_MODEL | Defaulted | Schema default (`minimax/minimax-m3:free`, a free-tier OpenRouter model) or operator's model configuration |
+| AGENT_GATE_MODEL | Defaulted | Schema default (`anthropic/claude-haiku-4.5`, paid) or operator's scope-gate model configuration |
 | BASE_RPC_URL | Defaulted | Base mainnet RPC provider |
 | THESIS_REFERRER | Defaulted | Owner-approved platform wallet; override only with owner direction |
 | THETANUTS_ORDERS_URL | Defaulted | Legacy feed configuration; unused by the SDK-backed order adapter |
+
+The default `AGENT_MODEL` is a free-tier OpenRouter model: free tiers are
+rate-limited and return 429 or 502 under load, and the app's own daily model
+limits (PRD 10.2) still apply on top of the provider's. Measured 2026-09-06 on
+the owner's key, the provider ceiling is the tighter one: 50 free model requests
+per day shared across every `:free` id (`X-RateLimit-Limit: 50`, reset 00:00
+UTC), after which every call 429s and the agent answers "The agent is
+unavailable right now." OpenRouter's stated remedy is adding 10 credits to the
+account, which raises it to 1000/day. The gate model is deliberately left on a
+paid id — see `packages/env/src/server.ts` for the measurement that forced that.
 
 ## Local verify
 

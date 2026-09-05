@@ -8,6 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { MAX_LOSS_USD, MAX_LOSS_USD8 } from "./limits";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -58,7 +59,12 @@ describe("agent money path", () => {
 	const execute = read("./execute.ts");
 
 	test("PRD 10.2: the agent risk ceiling is unchanged at 10 USD", () => {
-		expect(execute).toContain("const MAX_LOSS_USD = 10;");
+		// C3-r2: the constant moved to `lib/agent/limits.ts`, where BOTH the tool
+		// and the post-approval action read it. Asserted as a value, not as source
+		// text, so a rename cannot quietly change the number.
+		expect(MAX_LOSS_USD).toBe(10);
+		expect(MAX_LOSS_USD8).toBe(1_000_000_000n);
+		expect(execute).toContain("withinAgentLimits(prepared)");
 	});
 
 	test("calldata comes from the ONE shared path, never a second one", () => {
@@ -99,20 +105,32 @@ describe("agent money path", () => {
 		expect(component).toContain('approvalReceipt.status !== "success"');
 		// And the re-prepare happens after it.
 		expect(component.indexOf("waitForTransactionReceipt(config,")).toBeLessThan(
-			component.indexOf("const second = await prepareTrade("),
+			component.indexOf("const second = await prepareAgentTrade("),
 		);
+		// C3-r2: the post-approval leg goes through the AGENT's action, which
+		// re-applies the PRD 10.2 ceiling. `prepareTrade` (the market ticket's)
+		// does not, and this is the leg that builds the fill calldata.
+		expect(component).not.toContain("await prepareTrade(");
 	});
 
 	test("the receipt is recorded through recordTrade, and a held hash is never re-filled", () => {
 		const component = read("../../components/agent/trade-execution.tsx");
 		expect(component).toContain("recordTrade({ token: ready.token, txHash: fillHash })");
-		// C6: a hash already held short-circuits into recording, before any send.
-		expect(component).toContain("if (hash !== null) {");
-		expect(component.indexOf("if (hash !== null) {")).toBeLessThan(
+		// C6 / C5-r2: a sent fill short-circuits into recording, before any send —
+		// and before the QUOTE-EXPIRY check, which has nothing to do with money
+		// that has already moved.
+		expect(component).toContain("if (sent !== null) {");
+		expect(component.indexOf("if (sent !== null) {")).toBeLessThan(
 			component.indexOf("setPhase(\"approving\")"),
 		);
-		// The hash is stored before anything that can throw after the send.
-		expect(component.indexOf("setHash(fillHash);")).toBeLessThan(
+		expect(component.indexOf("if (sent !== null) {")).toBeLessThan(
+			component.indexOf("setPhase(\"expired\")"),
+		);
+		// C5-r2: recovered with the token that BUILT the calldata, never
+		// `trade.token` (which is empty whenever an approval was needed).
+		expect(component).toContain("recordTrade({ token: sent.token, txHash: sent.hash })");
+		// The sent pair is stored before anything that can throw after the send.
+		expect(component.indexOf("setSent({ hash: fillHash, token: ready.token });")).toBeLessThan(
 			component.indexOf("const recorded = await recordTrade("),
 		);
 	});

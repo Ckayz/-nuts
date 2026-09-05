@@ -27,6 +27,7 @@ import {
 	getMarketPage,
 	readClient,
 	sideNoteFor,
+	STRUCTURE_UNAVAILABLE,
 	ticketFrom,
 	type LiveStructure,
 } from "./live";
@@ -38,7 +39,14 @@ export interface MarketPageData {
 	readonly market: MarketView;
 	readonly summaries: MarketSummary[];
 	readonly tagged: ThesisView[];
-	readonly trade: TradePanelContext;
+	/**
+	 * C12-r2. Null when the instrument that was asked for is no longer on the
+	 * book. The page then renders `unavailable` instead of a ticket, because a
+	 * ticket built from the page's default structure would be a silent
+	 * substitution (PRD 8.4).
+	 */
+	readonly trade: TradePanelContext | null;
+	readonly unavailable: string | null;
 }
 
 export interface MarketPageParams {
@@ -134,6 +142,23 @@ export async function marketPageData(
 	if (isFeedUnavailable(page)) return page;
 
 	const { structure } = page;
+	if (page.requestedStructureMissing) {
+		// C12-r2. No quote, no ticket, no `?thesis=` attachment: the instrument
+		// that was asked for is gone and nothing else may stand in for it.
+		const { listFeed: listAll, listPositionsByIds: byIds } = await import("@/lib/data/reads");
+		const rows = await listAll({ viewerUserId: session?.userId ?? null });
+		const posts = await toPosts(await enrichWithTradeLinks(rows, byIds, await siteOrigins()));
+		return {
+			market: {
+				...page.market,
+				ticket: ticketFrom(structure, { ok: false, code: "STRUCTURE_GONE", reason: STRUCTURE_UNAVAILABLE }, ""),
+			},
+			summaries: page.summaries,
+			tagged: posts.filter((post) => post.tag !== null && post.tag.asset === structure.asset),
+			trade: null,
+			unavailable: STRUCTURE_UNAVAILABLE,
+		};
+	}
 	const budgetInput = params.budgetInput?.trim() || DEFAULT_BUDGET_INPUT;
 	const bullQuote = quoteOne(structure, "bull", budgetInput);
 	const bearQuote = quoteOne(structure, "bear", budgetInput);
@@ -174,5 +199,6 @@ export async function marketPageData(
 		summaries: page.summaries,
 		tagged,
 		trade,
+		unavailable: null,
 	};
 }

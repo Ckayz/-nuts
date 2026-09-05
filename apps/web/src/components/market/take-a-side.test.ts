@@ -4,8 +4,16 @@
  * economics comparison (C5).
  */
 import { describe, expect, test } from "bun:test";
-import { changedEconomics, sameEconomics, sendGuard, structureChanged } from "./take-a-side";
-import type { QuoteRaw } from "@/lib/trade/types";
+import { readFileSync } from "node:fs";
+import {
+	changedEconomics,
+	recordingSettled,
+	sameEconomics,
+	sendGuard,
+	structureChanged,
+	ticketClick,
+} from "./take-a-side";
+import type { QuoteRaw, RecordResult } from "@/lib/trade/types";
 
 const WALLET = "0x00000000000000000000000000000000000000a1";
 const BASE = 8453;
@@ -176,5 +184,81 @@ describe("structureChanged", () => {
 		expect(structureChanged(A, A.toUpperCase())).toBe(true);
 		expect(structureChanged(A, `${A}0`)).toBe(true);
 		expect(structureChanged(A, A.slice(0, -1))).toBe(true);
+	});
+});
+
+/**
+ * C6-r2 (lane C confirming pass, finding 2). A recording that fails must never
+ * put a Trade button back in front of a user whose fill is already on chain.
+ *
+ * The reviewer's probe MARKET_RECORD_FAILURE drove the real component with a
+ * stubbed wallet and measured `{"sends":2,"records":2}`: the click handler
+ * cleared the hash and prepared a second fill. These pin the two decisions that
+ * handler now makes, and `sign()` is asserted to consult the first one BEFORE
+ * it clears anything — the bug was entirely in the order of those lines.
+ */
+describe("ticketClick (C6-r2: a sent fill owns every further click)", () => {
+	const sent = { token: "ticket-token", txHash: `0x${"ab".repeat(32)}` };
+
+	test("with nothing sent, a click prepares a fill", () => {
+		expect(ticketClick(null)).toEqual({ kind: "prepare" });
+	});
+
+	test("with a fill sent, a click records THAT hash with THAT ticket", () => {
+		expect(ticketClick(sent)).toEqual({ kind: "record", token: sent.token, txHash: sent.txHash });
+	});
+
+	test("the recorded pair is the sent pair, never a re-derived one", () => {
+		const action = ticketClick(sent);
+		if (action.kind !== "record") throw new Error("unreachable");
+		expect(action.token).toBe(sent.token);
+		expect(action.txHash).toBe(sent.txHash);
+	});
+});
+
+describe("recordingSettled (C6-r2: only a durable row releases the hash)", () => {
+	const success: RecordResult = {
+		ok: true,
+		status: "confirmed",
+		positionId: "p1",
+		thesisId: null,
+		txHash: `0x${"ab".repeat(32)}`,
+		card: null,
+		settled: null,
+	};
+
+	test("a confirmed row releases it", () => {
+		expect(recordingSettled(success)).toBe(true);
+	});
+
+	test("a reverted fill also releases it: the row is durable and terminal", () => {
+		expect(recordingSettled({ ...success, status: "failed", card: null, settled: null })).toBe(true);
+	});
+
+	test("every refusal keeps it held — the money already left the wallet", () => {
+		for (const code of ["CHAIN_UNAVAILABLE", "FILL_DOES_NOT_MATCH", "FILL_QUANTITY_UNPROVEN", "TX_HASH_TAKEN"]) {
+			expect(recordingSettled({ ok: false, code, reason: "no" })).toBe(false);
+		}
+	});
+});
+
+describe("C6-r2: the click handler consults the sent fill first", () => {
+	const source = readFileSync(new URL("./take-a-side.tsx", import.meta.url), "utf8");
+
+	test("`sign` reads the sent fill before it clears the hash or the card", () => {
+		const body = source.slice(source.indexOf("const sign = useCallback"));
+		const decides = body.indexOf("ticketClick(sentRef.current)");
+		const clears = body.indexOf("setTxHash(null)");
+		expect(decides).toBeGreaterThan(-1);
+		expect(clears).toBeGreaterThan(-1);
+		expect(decides).toBeLessThan(clears);
+	});
+
+	test("the sent fill is held BEFORE the recording is attempted", () => {
+		const body = source.slice(source.indexOf("const sign = useCallback"));
+		const holds = body.indexOf("holdSent(fill)");
+		const records = body.indexOf("await finishRecording(fill)");
+		expect(holds).toBeGreaterThan(-1);
+		expect(records).toBeGreaterThan(holds);
 	});
 });

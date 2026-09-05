@@ -229,3 +229,39 @@ describe.skipIf(!liveBookTests)("taker-SELL money, reproduced from decoded fill 
 		expect(maxLoss).toBe(22000000n - (21268n - 2658n));
 	});
 });
+
+/**
+ * C12-r2 (lane C confirming pass, finding 12). PRD 8.4: "The app must not
+ * silently substitute another asset, expiry, or direction."
+ *
+ * `getMarketPage` used to fall back with `requested ?? defaultStructure(...)`,
+ * so a link to a structure the book no longer carries opened ANOTHER instrument
+ * with a live ticket on it. The page now says so, and `marketPageData` turns
+ * that flag into `trade: null`.
+ */
+describe.skipIf(!liveBookTests)("C12-r2: a requested structure that vanished", () => {
+	test("is reported as missing, and a live one is not", async () => {
+		const { getMarketPage } = await import("./live");
+		const asset = book.assets[0];
+		if (asset === undefined) throw new Error("live book has no assets");
+		const live = asset.structures[0];
+		if (live === undefined) throw new Error("live asset has no structures");
+
+		const gone = await getMarketPage(asset.slug, { structureId: "expired-original" });
+		if (gone === null || "error" in gone) throw new Error("no page for a live asset");
+		expect(gone.requestedStructureMissing).toBe(true);
+		// The table still renders, so the visitor can choose another instrument —
+		// what must never happen is a TICKET for that substitute.
+		expect(gone.structure.id).not.toBe("expired-original");
+
+		const present = await getMarketPage(asset.slug, { structureId: live.id });
+		if (present === null || "error" in present) throw new Error("no page for a live asset");
+		expect(present.requestedStructureMissing).toBe(false);
+		expect(present.structure.id).toBe(live.id);
+
+		// No structure asked for at all is not a miss.
+		const plain = await getMarketPage(asset.slug);
+		if (plain === null || "error" in plain) throw new Error("no page for a live asset");
+		expect(plain.requestedStructureMissing).toBe(false);
+	});
+});

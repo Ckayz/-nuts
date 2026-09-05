@@ -258,6 +258,19 @@ export async function recordTradeFor(
 				`Base could not be read to confirm this fill. Nothing was recorded; try again. Transaction ${txHash}.`,
 			);
 		}
+		if (counted.code === "FILL_QUANTITY_UNPROVEN") {
+			// C1-r2. The fill is real and the wallet is its taker, but this
+			// transaction does not expose the `fillOrder` call, so the number of
+			// contracts cannot be proven from the chain. Storing the browser's
+			// figure is exactly what the fences exist to stop.
+			await markFailed(pending.id, ticket.wallet, "fill_quantity_unproven");
+			return fail(
+				"FILL_QUANTITY_UNPROVEN",
+				// TODO-OWNER: wording. It has to say the trade happened and that only
+				// the record is missing, or it reads like the money was lost.
+				`This transaction does not expose its OptionBook fill, so the number of contracts cannot be proven from Base and nothing was recorded. Your trade is still on chain. Transaction ${txHash}.`,
+			);
+		}
 		await markFailed(pending.id, ticket.wallet, "filled_order_differs_from_prepared");
 		return fail(
 			"FILL_DOES_NOT_MATCH",
@@ -655,7 +668,7 @@ async function insertPending(
 
 type ContractCount =
 	| { ok: true; contracts: bigint }
-	| { ok: false; code: "FILL_DOES_NOT_MATCH" | "CHAIN_UNAVAILABLE" };
+	| { ok: false; code: "FILL_DOES_NOT_MATCH" | "CHAIN_UNAVAILABLE" | "FILL_QUANTITY_UNPROVEN" };
 
 /**
  * C1. The contract count actually filled.
@@ -673,11 +686,31 @@ type ContractCount =
  *
  * Now: a direct OptionBook `fillOrder` MUST decode and MUST match the prepared
  * order — a mismatch refuses. A chain read that throws is reported as
- * unavailable so the caller can retry instead of recording. Only a transaction
- * that is genuinely not a direct `fillOrder` (a smart wallet's batch or
- * UserOperation) uses the ticket's count, and only when it reproduces the
- * emitted premium — on top of the maker+nonce binding `matchFillEvent` already
- * required, so the event itself is bound to the prepared order.
+ * unavailable so the caller can retry instead of recording.
+ *
+ * C1-r2 (lane C confirming pass, finding 11). The remaining fall-through is
+ * GONE. A transaction that is not a direct `fillOrder` (a smart wallet's batch
+ * or a UserOperation) used to be recorded with the TICKET's own contract count
+ * whenever `count x price / 1e8` equalled the emitted premium. That relation is
+ * not injective, and the counterexample is small: at `price = 50000000`,
+ *
+ *   2000000 x 50000000 / 1e8 = 1000000
+ *   2000001 x 50000000 / 1e8 = 1000000     (bigint floor)
+ *
+ * so the browser could name any count inside the rounding window and the row
+ * would store it. `OrderFilled` carries no quantity (`ParsedOrderFilled`:
+ * nonce, buyer, seller, optionAddress, premiumAmount, feeCollected, referrer,
+ * referralFeePaid, sellerWasMaker), and no batch/router calldata layout for
+ * these wallets has been measured — CLAUDE.md forbids guessing one — so there
+ * is nothing left that PROVES the quantity. It therefore refuses:
+ * `FILL_QUANTITY_UNPROVEN`, fail closed.
+ *
+ * Consequence, stated rather than hidden: a wallet that wraps the fill (a smart
+ * wallet batching approve+fill, an ERC-4337 UserOperation) cannot record its
+ * position until the inner fill can be decoded. The money is on chain and the
+ * `positions` row carries the hash and the refusal reason, so the fill is
+ * recoverable once a decoder exists. TODO-OWNER: whether to build that decoder
+ * from a measured batch, or to keep refusing.
  */
 async function contractsFrom(context: {
 	client: ChainReader;
@@ -726,10 +759,8 @@ async function contractsFrom(context: {
 		return reproducesPremium(filled) ? { ok: true, contracts: filled } : { ok: false, code: "FILL_DOES_NOT_MATCH" };
 	}
 
-	const expected = BigInt(ticket.expectedContracts);
-	return reproducesPremium(expected)
-		? { ok: true, contracts: expected }
-		: { ok: false, code: "FILL_DOES_NOT_MATCH" };
+	// C1-r2. No direct `fillOrder` calldata, therefore no proof of quantity.
+	return { ok: false, code: "FILL_QUANTITY_UNPROVEN" };
 }
 
 /**

@@ -6,6 +6,7 @@ import { buildFillTransactions } from "@nuts/thetanuts";
 import { env } from "@nuts/env/server";
 
 import { findByInstrumentKey, instrumentKey } from "@/lib/thetanuts/instrument";
+import { AGENT_COLLATERAL, MAX_LOSS_USD, withinAgentLimits } from "./limits";
 import { structureIdOf } from "@/lib/market/structures";
 import { prepareTradeFor } from "@/lib/trade/prepare";
 import {
@@ -45,9 +46,6 @@ import {
  *    path is exactly what those fences exist to prevent.
  */
 
-/** Ceiling on agent-prepared trades (PRD 10.2), re-enforced here at prepare time. */
-const MAX_LOSS_USD = 10;
-
 /** Decimal token amount to base units. Mirrors the parsing sizeFill already validated. */
 function toBaseUnits(amount: string, decimals: number): bigint {
 	const [whole = "0", fraction = ""] = amount.split(".");
@@ -56,10 +54,16 @@ function toBaseUnits(amount: string, decimals: number): bigint {
 
 /**
  * Refuse to hand over calldata built from an order whose signature is about to
- * expire. Measured signature lifetimes are 59-113s, so a preview that survives
- * this check still leaves the user time to sign (PRD 14).
+ * expire.
+ *
+ * C13-r2 (lane C confirming pass, finding 13). This was 25, which is not a
+ * number anyone chose: PRD 14 says "calldata must be built and broadcast within
+ * 30 seconds of the fetch that produced it", so an order with less than 30
+ * seconds of signature life left cannot satisfy that window. 30 is the PRD's
+ * number; measured signature lifetimes are 59-113 s, so a fresh order clears it.
+ * TODO-OWNER: the PRD's 30 s is the owner's; this file only enforces it.
  */
-const MIN_SIGNATURE_SECONDS = 25;
+const MIN_SIGNATURE_SECONDS = 30;
 
 export interface ExecutionToolsParams {
 	/** Connected wallet, from the request. Null when the user has not connected. */
@@ -157,6 +161,15 @@ export function createExecutionTools({ account, session, thesisId }: ExecutionTo
 				return { prepared: false as const, asOf, instrumentKey: key, ...quote };
 			}
 
+			// C3-r2. PRD 10.2's collateral rule, checked before anything is built.
+			if (quote.collateralToken.symbol !== AGENT_COLLATERAL) {
+				return {
+					prepared: false as const,
+					asOf,
+					reason: `The agent prepares ${AGENT_COLLATERAL} trades only, and this order settles in ${quote.collateralToken.symbol}.`,
+				};
+			}
+
 			const tokenUsd = collateralUsdPrice(quote.collateralToken.symbol) ?? undefined;
 			const valuation = usdRisk(quote.maxLoss.amount, tokenUsd, MAX_LOSS_USD);
 			if (!valuation) {
@@ -200,6 +213,22 @@ export function createExecutionTools({ account, session, thesisId }: ExecutionTo
 					reason: `The trade could not be prepared (${prepared.code}): ${prepared.reason}`,
 				};
 			}
+
+			/**
+			 * C3-r2 (lane C confirming pass, finding 3). THE CEILING, ON WHAT WAS
+			 * ACTUALLY PREPARED.
+			 *
+			 * Everything above checked the quote THIS tool computed. But
+			 * `prepareTradeFor` re-reads the book, re-quotes and re-sizes on its
+			 * own, so its answer can be larger than the one that passed: the
+			 * reviewer measured a $20 request that this tool capped to $5 of risk
+			 * on a thin book and that came back as `returnedRiskUsd8` 2000000000 =
+			 * $20 of executable risk once liquidity returned. The same gate runs on
+			 * the post-approval preparation (`lib/agent/actions.ts`), which is the
+			 * leg that used to bypass it entirely.
+			 */
+			const gate = withinAgentLimits(prepared);
+			if (!gate.ok) return { prepared: false as const, asOf, reason: gate.reason };
 
 			return {
 				prepared: true as const,

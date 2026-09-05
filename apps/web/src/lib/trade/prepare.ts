@@ -29,6 +29,7 @@ import { takerSideDisagreement, TAKER_SIDE_CONTRADICTION } from "@/lib/market/ta
 import { parseTokenAmount } from "@/lib/market/units";
 import { isFeedUnavailable } from "@/lib/thetanuts/orders";
 import { strikesLabel } from "@/lib/display";
+import { instrumentMismatch } from "./attachment";
 import { findThesis } from "./store";
 import { simulateFill } from "./chain";
 import { encodeTradeTicket, type TradeTicketPayload } from "./ticket";
@@ -274,9 +275,22 @@ async function resolveAttachment(context: {
 			},
 		};
 	}
+	// C12-r2 (lane C confirming pass, finding 12). PRD 8.4: "The app must not
+	// silently substitute another asset, expiry, or direction." The asset alone
+	// was checked, so an ETH December call could be attached to a post about an
+	// ETH October put and counted as backing it.
+	const mismatch = instrumentMismatch(thesis, structure);
+	if (mismatch !== null) {
+		return {
+			error: {
+				code: "THESIS_OTHER_INSTRUMENT",
+				// TODO-OWNER: wording.
+				reason: `That post names a different ${mismatch}, so this fill would not be the trade it describes.`,
+			},
+		};
+	}
 	return { thesisId: thesis.id, role: "participant", positionSide };
 }
-
 export async function prepareTrade(input: PrepareTradeInput): Promise<PrepareResult> {
 	return prepareTradeFor(await getSession(), input);
 }

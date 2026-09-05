@@ -4,6 +4,9 @@ export interface DisplayAmount {
     usd: string;
     usd2: string;
     signed: string;
+    /** Signed to two decimals, e.g. "+$39.95". ADDED for the position page's hero
+     *  figure, where rounding a P&L to whole dollars would hide real cents. */
+    signed2: string;
     pnlClass: string;
 }
 export type Side = "bull" | "bear";
@@ -128,8 +131,12 @@ export interface Participant {
     isCreator?: boolean;
 }
 export interface Position {
-    thesisSlug: string;
-    thesisHeadline: string;
+    /** `positions.id`. Every position has its own page at `/p/<id>`. */
+    id: string;
+    /** Null for a standalone position, which belongs to no post. */
+    thesisSlug: string | null;
+    /** Null for a standalone position. */
+    thesisHeadline: string | null;
     asset: string;
     side: Side;
     riskedUsd: DisplayAmount;
@@ -247,4 +254,68 @@ export interface Market extends MarketSummary {
     selectedLabel: string;
     /** Expiry of the selected structure, e.g. "11 Sep 26 08:00 UTC". */
     selectedExpiryLabel: string;
+}
+
+/**
+ * How a position's P&L number was arrived at. Rendered as its own sentence next
+ * to the number so an estimate is never read as a settled result (PRD 14).
+ */
+export type PnlBasis = "settled" | "estimate" | "derived" | "unavailable";
+/** One of the three tiles under the big P&L figure. */
+export interface PnlStat {
+    label: string;
+    /** Already formatted, "—" when unavailable. */
+    value: string;
+}
+/**
+ * The share card a trader copies a link to: owner, status, instrument, one big
+ * signed P&L figure, three stat tiles. Same shape at both sizes; `compact` is a
+ * render option, not a different card.
+ */
+export interface PnlCard {
+    /** `positions.id`; this card's own page is `/p/<id>`. */
+    id: string;
+    owner: Creator;
+    /** Status chip copy, e.g. "Open" or "Settlement pending". */
+    statusLabel: string;
+    /** Which chip tone to use; reuses the post chip classes. */
+    statusTone: ThesisStatus;
+    /** Date the fill was recorded, e.g. "5 Sep 2026". */
+    dateLabel: string;
+    /** The instrument line, e.g. "BTC 78,000 / 74,000 P · 11 SEP". */
+    instrumentLabel: string;
+    /** Null when the order snapshot does not name the underlying. */
+    asset: string | null;
+    side: Side;
+    /** "Bull" / "Bear" as rendered. */
+    sideLabel: string;
+    /** The big number. `"—"` in every field when no honest value exists. */
+    pnl: DisplayAmount;
+    /** "Result" once settled, "Live P&L" while the option is open. */
+    pnlLabel: string;
+    /** Percent in brackets, e.g. "+38.4% of risked"; null when not computable. */
+    pnlPctLabel: string | null;
+    /** One sentence saying exactly where the number came from. */
+    pnlBasisLabel: string;
+    basis: PnlBasis;
+    /** Left to right under the figure. */
+    stats: readonly [PnlStat, PnlStat, PnlStat];
+    /** Present only for a fill confirmed onchain (PRD 7.3). */
+    tx?: TxRef;
+    verified: boolean;
+}
+/** Everything `/p/[id]` renders. */
+export interface PositionPage {
+    card: PnlCard;
+    /** `users.handle` or wallet address of the owner; the href is built as `/u/${ownerHandle}`. */
+    ownerHandle: string;
+    /** The post this position backs; null for a standalone fill. */
+    thesis: { slug: string; headline: string } | null;
+    /** Market page slug, e.g. "btc"; null when the underlying is unknown. */
+    marketSlug: string | null;
+    /** Structure id to preselect on the market page; null when the option has expired
+     *  or the instrument is unknown, so the link never points at nothing. */
+    structureId: string | null;
+    /** Label + value rows under the card. */
+    facts: readonly { label: string; value: string }[];
 }

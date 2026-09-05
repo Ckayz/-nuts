@@ -21,10 +21,10 @@ function group(value: string, digits = 0): string {
 }
 export function amount(value: string | null): View.DisplayAmount {
     if (value === null)
-        return { raw: "—", usd: "—", usd2: "—", signed: "—", pnlClass: "" };
+        return { raw: "—", usd: "—", usd2: "—", signed: "—", signed2: "—", pnlClass: "" };
     const { sign } = decimal(value);
     const minus = sign < 0 ? "−" : "";
-    return { raw: value, usd: `${minus}$${group(value)}`, usd2: `${minus}$${group(value, 2)}`, signed: `${sign > 0 ? "+" : minus}$${group(value)}`, pnlClass: sign > 0 ? "bull" : sign < 0 ? "bear" : "" };
+    return { raw: value, usd: `${minus}$${group(value)}`, usd2: `${minus}$${group(value, 2)}`, signed: `${sign > 0 ? "+" : minus}$${group(value)}`, signed2: `${sign > 0 ? "+" : minus}$${group(value, 2)}`, pnlClass: sign > 0 ? "bull" : sign < 0 ? "bear" : "" };
 }
 function optionalAmount(value: string | null) { return value === null ? undefined : amount(value); }
 /** Preserve the exact input when a nonzero quantity would round to zero. */
@@ -36,7 +36,10 @@ export function quantity(value: string | null) {
     return `${sign < 0 ? "-" : ""}${rounded}`;
 }
 function fragment(value: string, leading = 6, trailing = 4) { return value.length > leading + trailing + 1 ? `${value.slice(0, leading)}…${value.slice(-trailing)}` : value; }
-function tx(hash: string | null, mockFragment: string | null): View.TxRef | undefined {
+/** Exported for the position page (lib/position), which renders one position's
+ *  own transaction link. One implementation, so the truncation and the BaseScan
+ *  URL cannot drift between a post and a position. */
+export function tx(hash: string | null, mockFragment: string | null): View.TxRef | undefined {
     if (!hash && !mockFragment)
         return undefined;
     return { label: `${hash ? fragment(hash) : mockFragment} ↗`, href: hash ? `https://basescan.org/tx/${hash}` : "#" };
@@ -45,7 +48,10 @@ function elapsed(createdAt: string, asOf: string) {
     const minutes = Math.max(0, Math.floor((Date.parse(asOf) - Date.parse(createdAt)) / 60000));
     return minutes >= 60 ? `${Math.floor(minutes / 60)}h` : `${minutes}m`;
 }
-function expiryLabel(value: string, full = false) {
+/** Exported for the live market page (lib/market), which builds the market View
+ *  from OptionBook orders instead of a Domain.Market fixture. Same wording, one
+ *  implementation: the mock page and the live page must not drift apart. */
+export function expiryLabel(value: string, full = false) {
     const date = new Date(value);
     const day = String(date.getUTCDate()).padStart(2, "0");
     const month = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" }).format(date);
@@ -54,7 +60,10 @@ function expiryLabel(value: string, full = false) {
     return `${day} ${month} ${String(date.getUTCFullYear()).slice(-2)} ${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")} UTC`;
 }
 function pctLabel(value: string) { return `${decimal(value).sign > 0 ? "+" : ""}${value}%`; }
-function strikesLabel(strikesUsd: string[], isCall: boolean) { return `${strikesUsd.map(v => group(v)).join(" / ")} ${isCall ? "C" : "P"}`; }
+/** Exported for the live market page (lib/market), which builds the market View
+ *  from OptionBook orders instead of a Domain.Market fixture. Same wording, one
+ *  implementation: the mock page and the live page must not drift apart. */
+export function strikesLabel(strikesUsd: string[], isCall: boolean) { return `${strikesUsd.map(v => group(v)).join(" / ")} ${isCall ? "C" : "P"}`; }
 /** Market slugs are derived from the asset: the book, not a hardcoded list. */
 export function marketSlug(asset: string) { return asset.toLowerCase(); }
 export function creator(value: Domain.Creator): View.Creator {
@@ -122,7 +131,7 @@ export function thesis(value: Domain.Thesis): View.Thesis {
         likes: value.likes, likedByViewer: value.likedByViewer, commentCount: value.commentCount };
 }
 export function position(value: Domain.Position): View.Position {
-    return { thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(value.status === "settled" ? value.economics.finalPnlUsd : value.economics.estimatedPnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled: value.status === "settled" };
+    return { id: value.id, thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(value.status === "settled" ? value.economics.finalPnlUsd : value.economics.estimatedPnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled: value.status === "settled" };
 }
 export function participant(value: Domain.Participant): View.Participant {
     return { ...position(value), creator: creator(value.creator), says: value.says, isCreator: value.role === "creator" };

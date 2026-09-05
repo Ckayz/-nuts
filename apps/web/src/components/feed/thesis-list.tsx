@@ -30,12 +30,20 @@ export function TrendingList({ items }: { items: TrendingItem[] }) {
 	);
 }
 
+/**
+ * A row in a positions list. It links to the POSITION, not to a post: a position
+ * is its own thing (owner 2026-09-05, "trade is just trade") and since migration
+ * 0007 it may belong to no post at all, in which case there is no headline to
+ * show and no `/t/<slug>` to link to.
+ */
 export function PositionRow({ position }: { position: Position }) {
 	return (
-		<Link className="it" href={`/t/${position.thesisSlug}`}>
+		<Link className="it" href={`/p/${position.id}`}>
 			<Thumb asset={position.asset} />
 			<div className="b">
-				<span className="n">{position.thesisHeadline}</span>
+				<span className="n">
+					{position.thesisHeadline ?? `${position.asset} position`}
+				</span>
 				<span className="d">
 					<span className={position.side}>
 						{position.side === "bull" ? "Bull" : "Bear"}
@@ -54,7 +62,9 @@ export function PositionList({ positions }: { positions: Position[] }) {
 	return (
 		<div className="tl">
 			{positions.map((p) => (
-				<PositionRow key={`${p.thesisSlug}-${p.side}`} position={p} />
+				// Keyed by the position's own id: two fills on one post, or two
+				// standalone fills, are different rows and must not collide.
+				<PositionRow key={p.id} position={p} />
 			))}
 		</div>
 	);

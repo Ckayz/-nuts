@@ -1156,3 +1156,98 @@ export const markets: Market[] = [
         }
     }
 ];
+
+/*
+ * Position-page fixtures (round: position page). APPEND ONLY: nothing above is
+ * changed, so every existing page renders byte-identically.
+ *
+ * `/p/[id]` addresses a position by `positions.id`, so the mock rows above are
+ * reachable by their own fixture ids. The two rows below are the states the
+ * existing fixtures do not cover and the owner's model needs:
+ *   - a STANDALONE position, which belongs to no post at all (owner 2026-09-05,
+ *     "trade is just trade. post(thesis) is it's own thing"), carrying a real
+ *     uuid so the same id shape works in database mode;
+ *   - a SETTLED position, so the card's "Result" state has a fixture; it is not
+ *     added to `yourSettledPositions`, because that would change the portfolio
+ *     page, which is not this round's to change.
+ *
+ * EXAMPLE DATA, like everything else in this file. Amounts are transcribed from
+ * the mockup's BTC put-spread card so nothing new is invented: `maximumLossUsd`
+ * 250 and `estimatedPnlUsd` 96 are the mockup's own figures, reused. Wallet,
+ * transaction and option addresses stay absent; never validate these onchain.
+ */
+export const standalonePosition: Position = {
+    "id": "aaaa0000-0000-4000-8000-00000000f001",
+    "thesisId": null,
+    "userId": "mock-user-wh",
+    "role": "standalone",
+    "side": "back",
+    "status": "indexed",
+    "chainId": 8453,
+    "walletAddress": "",
+    "thesisSlug": null,
+    "thesisHeadline": null,
+    "underlyingAsset": "BTC",
+    "contracts": null,
+    "entrySpotPriceUsd": null,
+    "economics": {
+        "entryPremiumUsd": "250",
+        "entryFeesUsd": null,
+        "maximumLossUsd": "250",
+        "maximumPayoutUsd": "725",
+        "breakEvenPricesUsd": [],
+        "estimatedPnlUsd": "96",
+        "finalPnlUsd": null,
+        "settlementPriceUsd": null
+    },
+    "verification": {
+        "transactionHash": null,
+        "optionAddress": null,
+        "confirmedOnchain": false
+    },
+    "createdAt": "2026-09-05T05:12:00Z",
+    "mockTransactionFragment": null
+};
+export const settledStandalonePosition: Position = {
+    "id": "aaaa0000-0000-4000-8000-00000000f002",
+    "thesisId": null,
+    "userId": "mock-user-wh",
+    "role": "standalone",
+    "side": "counter",
+    "status": "settled",
+    "chainId": 8453,
+    "walletAddress": "",
+    "thesisSlug": null,
+    "thesisHeadline": null,
+    "underlyingAsset": "BTC",
+    "contracts": null,
+    "entrySpotPriceUsd": null,
+    "economics": {
+        "entryPremiumUsd": "250",
+        "entryFeesUsd": null,
+        "maximumLossUsd": "250",
+        "maximumPayoutUsd": "725",
+        "breakEvenPricesUsd": [],
+        "estimatedPnlUsd": null,
+        "finalPnlUsd": "-250",
+        "settlementPriceUsd": null
+    },
+    "verification": {
+        "transactionHash": null,
+        "optionAddress": null,
+        "confirmedOnchain": false
+    },
+    "createdAt": "2026-09-01T05:12:00Z",
+    "mockTransactionFragment": null
+};
+/** Every position `/p/[id]` can resolve in mock mode. */
+export const allPositions: Position[] = [
+    ...yourPositions,
+    ...yourSettledPositions,
+    ...thesisDetails.flatMap((detail) => detail.participants as Position[]),
+    standalonePosition,
+    settledStandalonePosition,
+];
+export function positionById(id: string): Position | undefined {
+    return allPositions.find((position) => position.id === id);
+}

@@ -30,7 +30,20 @@ import { publicClient } from "./chain";
  * Starting from empty tables is what makes a re-run mean the same thing as the
  * first run.
  */
+/**
+ * Gated on `DATABASE_URL` like every other integration file, so the offline
+ * suite (`DATABASE_URL='' SKIP_ENV_VALIDATION=1 bun test`) skips instead of
+ * dereferencing a client that was never created.
+ */
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+	console.log("trade record integration skipped: DATABASE_URL is not set");
+	test.skip("trade record integration requires DATABASE_URL", () => {});
+}
+const describeLive = databaseUrl ? describe : describe.skip;
+
 beforeAll(async () => {
+	if (!databaseUrl) return;
 	await db.delete(activity);
 	await db.update(theses).set({ creatorPositionId: null });
 	await db.delete(positions);
@@ -127,7 +140,7 @@ function ticketFor(input: {
 	};
 }
 
-describe("recordTrade cross-checks every number against the chain", () => {
+describeLive("recordTrade cross-checks every number against the chain", () => {
 	test("a contract count that does not reproduce the emitted premium is not confirmed", async () => {
 		const expectation = PRODUCTION_FILLS.find((f) => f.takerSide === "buy");
 		if (expectation === undefined) throw new Error("no buy fixture");
@@ -226,7 +239,7 @@ describe("recordTrade cross-checks every number against the chain", () => {
 	}, 60_000);
 });
 
-describe("recordTrade against decoded Base production fills", () => {
+describeLive("recordTrade against decoded Base production fills", () => {
 	test("taker BUY 0x9c4bb1… is stored with the economics the chain shows, as a participant", async () => {
 		const expectation = PRODUCTION_FILLS.find((f) => f.takerSide === "buy");
 		if (expectation === undefined) throw new Error("no buy fixture");
@@ -382,7 +395,7 @@ describe("recordTrade against decoded Base production fills", () => {
 	}, 60_000);
 });
 
-describe("refusals: nothing is stored when the chain does not agree", () => {
+describeLive("refusals: nothing is stored when the chain does not agree", () => {
 	const reader = (status: string, logs: readonly Log<bigint, number, false>[] = []): ChainReader => ({
 		waitForTransactionReceipt: async () => ({ status, logs }),
 		getTransaction: async () => ({ to: null, input: "0x" }),
@@ -483,7 +496,7 @@ describe("refusals: nothing is stored when the chain does not agree", () => {
 	});
 });
 
-describe("prepareTrade refuses before any calldata exists", () => {
+describeLive("prepareTrade refuses before any calldata exists", () => {
 	test("without a session", async () => {
 		const result = await prepareTradeFor(null, {
 			structureId: "0".repeat(16),
@@ -555,7 +568,7 @@ async function failure(run: () => Promise<unknown>): Promise<{ message: string; 
 	throw new Error("expected the database to refuse this write");
 }
 
-describe("migration 0007 fences", () => {
+describeLive("migration 0007 fences", () => {
 	test("thesis_id and role must agree, in both directions", async () => {
 		const wallet = `0x${randomBytes(20).toString("hex")}`;
 		const user = await seedUser(wallet);

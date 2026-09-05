@@ -143,6 +143,8 @@ The owner (2026-09-05 18:3x): "some work here my team continue better. list them
 
 ## 7. Owner decisions still open
 
+- **Resolved 2026-09-06 02:1x by the owner:** referrer whitelist is dropped (talking point only); agent models switch to free-tier OpenRouter models (`minimax/minimax-m3:free`, `nvidia/nemotron-3.5-lightning:free`, measured tool-call OK; rate-limited); accent colour = blue C `#3f6fe0`.
+
 - **From fold C r2 (2026-09-05 22:0x):** (a) a page RELOAD after a sent fill loses the client-side hold; the `pending` row survives but nothing reads it back, so reload + Trade could send a second fill — needs a UI that resumes a pending recording (new element) or a server refusal window (new number); (b) `FILL_QUANTITY_UNPROVEN` now refuses fills whose transaction is not a direct `fillOrder` (batched smart-wallet fills) until a batch layout is measured from a real fill; (c) the agent scope gate's `degraded` result now returns 503 instead of failing open — keep?
 
 - **`listActivity` page size (lane B second pass, 2026-09-05 21:50):** the activity feed has no LIMIT and no owner number exists for it; the fold writer stopped rather than invent one.

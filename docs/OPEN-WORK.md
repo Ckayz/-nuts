@@ -143,6 +143,8 @@ The owner (2026-09-05 18:3x): "some work here my team continue better. list them
 
 ## 7. Owner decisions still open
 
+- **Merge-worker finding 2026-09-05 20:5x (for the review):** `apps/web/src/components/market/take-a-side.tsx:225-229` never requotes when the structure changes — the ticket shows the previous structure's numbers under the new name (Trade disabled, so no money risk; the panel is wrong). Handed to the merge worker as an optional pure-bug fix; if it needs a wording/behaviour choice it comes back here.
+
 - **OpenRouter credits (found by Writer A 2026-09-05 20:0x, measured):** the agent key returns "requires more credits… you requested up to 1200 tokens, but can only afford 1105". `/agent` cannot answer until the key is topped up. Code path proven by the writer; balance is the owner's.
 
 Referrer wallet whitelist by Thetanuts + gas on `0xd5E6…47dd`; the tiny real fill; verified badge for a post linking a standalone trade (schema cannot link it); Bull/Bear naming on a post-less position; `tiny-fill.ts` fee check strict vs upper bound; mobile ticket hidden ≤1180 px by the mockup; accented-letter slugs; session revocation; pagination; handle-change policy; the mockup-vs-rules contradictions (D-m8); every `TODO-OWNER` (presets `$50/$100/$500/$1,000` vs the mockup's `$10/…`, rankings, limits, copy, card width, percent basis, default structure, rail limit 5).

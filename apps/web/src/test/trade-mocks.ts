@@ -16,8 +16,9 @@ export const USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 export const HASH = `0x${"1".repeat(64)}` as const;
 
 export interface Calls {
-	quotes: Array<{ side: string; budgetInput: string }>;
-	prepares: Array<{ side: string; budgetInput: string }>;
+	quotes: Array<{ structureId?: string; side: string; budgetInput: string; taker?: string }>;
+	/** I-1: `taker` is the side of the BOOK the ticket resolved for its button. */
+	prepares: Array<{ side: string; budgetInput: string; taker?: string }>;
 	agentPrepares: number;
 	sends: Array<{ to: string; data: string }>;
 	records: Array<{ token: string; txHash: string }>;
@@ -138,12 +139,12 @@ export function neverLandingReceipt(): void {
 }
 
 mock.module("@/lib/trade/actions", () => ({
-	quoteTicket: (input: { side: string; budgetInput: string }) => {
+	quoteTicket: (input: { structureId?: string; side: string; budgetInput: string; taker?: string }) => {
 		calls.quotes.push(input);
 		return replies.quote(input);
 	},
-	prepareTrade: (input: { side: string; budgetInput: string }) => {
-		calls.prepares.push({ side: input.side, budgetInput: input.budgetInput });
+	prepareTrade: (input: { side: string; budgetInput: string; taker?: string }) => {
+		calls.prepares.push({ side: input.side, budgetInput: input.budgetInput, taker: input.taker });
 		return replies.prepare(input);
 	},
 	recordTrade: (input: { token: string; txHash: string }) => {

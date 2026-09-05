@@ -15,7 +15,7 @@ import "server-only";
  * `readClient()` returns that module's client for the same reason: one SDK
  * client per process, built with `env.BASE_RPC_URL` and `env.THESIS_REFERRER`.
  */
-import { deriveMarkets, type Market } from "@nuts/thetanuts";
+import { deriveMarkets, type Market, type RiskKind } from "@nuts/thetanuts";
 import type { ThetanutsClient } from "@thetanuts-finance/thetanuts-client";
 import { env } from "@nuts/env/server";
 import { collateralUsdPrice, getOrderSnapshot, isFeedUnavailable, readClient as sharedReadClient } from "@/lib/thetanuts/orders";
@@ -26,6 +26,7 @@ import { formatBaseUnits, formatUsd8, ratioToOneDecimal } from "./units";
 import { orderLabel, productLabel, riskKindFor, structureId } from "./structures";
 import { quoteStructure, type QuoteResult, type StructureQuote, type TakerSide } from "./quote";
 import { takerSideOf } from "./taker-side";
+import { directionNameable, sideWord } from "./direction";
 
 /** The single SDK client for this process. */
 export function readClient(): ThetanutsClient {
@@ -54,6 +55,15 @@ export interface LiveStructure {
 	readonly implementationName: string | null;
 	readonly implementationAddress: string;
 	readonly isCall: boolean;
+	/**
+	 * I-1. The payoff shape, `riskKindFor(implementationName, strikes.length)`,
+	 * carried on the structure so every surface reads ONE classification. The
+	 * ticket's Bull/Bear mapping needs it (`lib/market/direction.ts`): only a
+	 * monotone payoff has a direction, and this is the app's existing test for
+	 * that. Null for a RANGER, a fly, a condor, an inverse/physical call and
+	 * anything the SDK does not name.
+	 */
+	readonly riskKind: RiskKind | null;
 	readonly strikes: readonly bigint[];
 	readonly strikesUsd: string[];
 	readonly collateralAddress: string;
@@ -125,6 +135,7 @@ function toStructure(market: Market, side: TakerSide): LiveStructure {
 		implementationName: market.implementation.info?.name ?? null,
 		implementationAddress: market.implementation.address,
 		isCall: market.side === "call",
+		riskKind: riskKindFor(market.implementation.info?.name ?? null, market.strikes.length),
 		strikes: market.strikes,
 		strikesUsd,
 		collateralAddress: market.collateralToken.address,
@@ -272,22 +283,43 @@ export function ticketFrom(structure: LiveStructure, quote: QuoteResult, sideNot
 }
 
 /**
- * The sentence under the Bull/Bear control, in the mockup's voice.
+ * The sentence under the ticket's two side buttons, in the mockup's voice.
+ *
+ * I-1 (owner 2026-09-06, decision 1). The DIRECTION WORD is now the direction of
+ * the position this taker side produces (`lib/market/direction.ts`), not the
+ * ticket's old "Bull = buy" shorthand. The VERB is unchanged and still the taker
+ * verb, because that is what actually happens to the money: on a put, the honest
+ * sentence is "Bear buys the ETH put 2,340 P and pays premium." and its
+ * counterpart is "Bull sells the ETH put 2,340 P and posts collateral."
+ *
+ * Measured before this fold, same instrument, same instant (userflow pass 3,
+ * MAJOR-1): the ticket said "Bull buys the BTC put 79,000 P and pays premium."
+ * while the resulting position's page title and Open Graph card said "Bear".
+ *
+ * A structure with no direction (RANGER, fly, condor, unnamed implementation)
+ * keeps the same sentence with no direction word at all.
  *
  * TODO-OWNER: this copy is derived from the mockup's buy-side line ("Bull buys
  * … and pays premium. Bear sells it and posts collateral. Both are live
- * OptionBook fills sized to your budget."). The sell-side wording and the money
- * sentence below it are not owner-approved.
+ * OptionBook fills sized to your budget."). The sell-side wording, the money
+ * sentence below it and the two directionless openings ("Buying the …",
+ * "Selling the …") are not owner-approved.
  */
 export function sideNoteFor(structure: LiveStructure, side: TakerSide, quote: QuoteResult): string {
 	const label = `${structure.asset} ${structure.productType} ${display.strikesLabel(structure.strikesUsd, display.strikeSide(structure.productType, structure.isCall))}`;
 	const symbol = structure.collateralSymbol ?? "collateral";
+	const named = directionNameable(structure);
+	const word = sideWord(structure, side);
 	if (side === "buy") {
-		const head = `Bull buys the ${label} and pays premium. The premium is the most you can lose.`;
+		const head = named
+			? `${word} buys the ${label} and pays premium. The premium is the most you can lose.`
+			: `Buying the ${label} pays premium. The premium is the most you can lose.`;
 		if (!quote.ok) return head;
 		return `${head} You pay ${formatBaseUnits(quote.debit, quote.collateralDecimals)} ${symbol}.`;
 	}
-	const head = `Bear sells the ${label} and posts collateral. Your loss can reach the collateral you post.`;
+	const head = named
+		? `${word} sells the ${label} and posts collateral. Your loss can reach the collateral you post.`
+		: `Selling the ${label} posts collateral. Your loss can reach the collateral you post.`;
 	if (!quote.ok) return head;
 	return `${head} You lock ${formatBaseUnits(quote.debit, quote.collateralDecimals)} ${symbol} and receive about ${formatBaseUnits(quote.credit, quote.collateralDecimals)} ${symbol} after a fee of up to ${formatBaseUnits(quote.feeEstimate, quote.collateralDecimals)} ${symbol}.`;
 }

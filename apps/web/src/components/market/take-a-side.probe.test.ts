@@ -74,8 +74,8 @@ function context(): TradePanelContext {
 		structureLabel: "ETH put 2500 P",
 		expiryLabel: "05 Sep 26 15:00 UTC",
 		sides: {
-			bull: { taker: "buy", available: true, reason: null },
-			bear: { taker: "sell", available: true, reason: null },
+			bull: { taker: "buy", word: "Bull", directional: true, available: true, reason: null },
+			bear: { taker: "sell", word: "Bear", directional: true, available: true, reason: null },
 		},
 		quote: quoteView("bull", RAW_BUY, "BUY-A"),
 		presets: ["50"],
@@ -582,5 +582,101 @@ describe("M5: the ticket stops waiting for an approval and says so", () => {
 		await h.settle();
 		expect(h.text()).toContain("The approval did not succeed on Base");
 		expect(calls.sends.length).toBe(1);
+	});
+});
+
+// ---------------------------------------------------- I-1: the direction words
+
+/**
+ * Owner 2026-09-06, decision 1. The ticket prints the words the SERVER resolved
+ * for this instrument and sends the taker side those words stand for.
+ */
+describe("I-1: Bull and Bear on the ticket name the asset's direction", () => {
+	/** A PUT: Bull SELLS it, Bear BUYS it. Shaped exactly as `lib/market/page.ts` builds it. */
+	function putContext(): TradePanelContext {
+		const base = context();
+		return {
+			...base,
+			structureLabel: "ETH put 2,340 P",
+			sides: {
+				bull: { taker: "sell", word: "Bull", directional: true, available: true, reason: null },
+				bear: { taker: "buy", word: "Bear", directional: true, available: true, reason: null },
+			},
+			quote: { ...quoteView("bear", RAW_BUY, "PUT-A"), taker: "buy", sideNote: "Bear buys the ETH put 2,340 P and pays premium." },
+		};
+	}
+
+	test("the two buttons read Bull · sell and Bear · buy on a put", () => {
+		reset();
+		const h = mountTicket(putContext());
+		const labels = h
+			.buttons()
+			.map((b) => b.text)
+			.filter((t) => /Bull|Bear|^Buy$|^Sell$/.test(t));
+		expect(labels).toEqual(["Bull · sell", "Bear · buy"]);
+		expect(h.text()).toContain("Bear buys the ETH put 2,340 P and pays premium.");
+	});
+
+	test("pressing Bull on a put quotes and prepares the SELL side", async () => {
+		reset();
+		replies.quote = async () => ({ ...quoteView("bull", RAW_SELL, "PUT-A"), taker: "sell", sideNote: "Bull sells" });
+		replies.prepare = async () => fill("0xSELL_A", RAW_SELL);
+		const h = mountTicket(putContext());
+		const bull = h.button(/^Bull/);
+		expect(bull).not.toBeNull();
+		h.click(bull!);
+		await h.settle();
+		expect(calls.quotes).toEqual([{ structureId: "s1", side: "bull", taker: "sell", budgetInput: "5" }]);
+		h.click(primary(h));
+		await h.settle();
+		expect(calls.prepares.map((c) => ({ side: c.side, taker: c.taker }))).toEqual([{ side: "bull", taker: "sell" }]);
+	});
+
+	test("a structure with no direction is labelled with the raw taker verbs", () => {
+		reset();
+		const base = context();
+		const h = mountTicket({
+			...base,
+			sides: {
+				bull: { taker: "buy", word: "Buy", directional: false, available: true, reason: null },
+				bear: { taker: "sell", word: "Sell", directional: false, available: true, reason: null },
+			},
+		});
+		const labels = h
+			.buttons()
+			.map((b) => b.text)
+			.filter((t) => /^(Buy|Sell)$/.test(t) || /Bull|Bear/.test(t));
+		expect(labels).toEqual(["Buy", "Sell"]);
+		expect(h.text()).not.toContain("Bull");
+		expect(h.text()).not.toContain("Bear");
+	});
+
+	/**
+	 * Measured on `/m/eth` at port 31610 before the fix: selecting an ETH put
+	 * spread while the panel sat on Bull left
+	 *   {"text":"Bull · sell","checked":true,"disabled":true}
+	 * — a checked, unfillable button. The server already opens on the fillable
+	 * side (`lib/market/page.ts`); this applies the same rule after a
+	 * client-side navigation.
+	 */
+	test("a structure change moves off a side this instrument cannot fill", async () => {
+		reset();
+		replies.quote = async () => quoteView("bear", RAW_BUY, "PUT-A");
+		const h = mountTicket();
+		expect(h.buttons().find((b) => /Bull/.test(b.text))?.props["aria-checked"]).toBe(true);
+		const put = putContext();
+		const next: TradePanelContext = {
+			...put,
+			structureId: "s2",
+			sides: {
+				bull: { taker: "sell", word: "Bull", directional: true, available: false, reason: "no maker" },
+				bear: { taker: "buy", word: "Bear", directional: true, available: true, reason: null },
+			},
+		};
+		h.setProps({ ticket: next.quote.ticket, structureLabel: next.structureLabel, expiryLabel: next.expiryLabel, trade: next });
+		await h.settle();
+		const checked = h.buttons().filter((b) => b.props["aria-checked"] === true).map((b) => b.text);
+		expect(checked).toEqual(["Bear · buy"]);
+		expect(calls.quotes.at(-1)).toMatchObject({ structureId: "s2", side: "bear", taker: "buy" });
 	});
 });

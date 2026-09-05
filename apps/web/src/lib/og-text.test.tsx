@@ -5,7 +5,7 @@
  * Two independent measurements per claim: the pure function's output, and a
  * REAL `ImageResponse` render with `globalThis.fetch` stubbed and counted.
  */
-import { afterEach, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { EMOJI_SEQUENCE_SOURCE, ogText, ogTextOrNull, SATORI_EMOJI_SOURCE } from "./og-text";
 

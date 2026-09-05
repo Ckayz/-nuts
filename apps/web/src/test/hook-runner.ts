@@ -26,8 +26,16 @@ import type { ReactElement } from "react";
  * process-wide, and mocking "react" for one probe file broke four unrelated
  * component tests in the same run (measured 2026-09-05).
  */
-const INTERNALS = (React as unknown as Record<string, { H: unknown }>)
+const INTERNALS_SLOT = (React as unknown as Record<string, { H: unknown } | undefined>)
 	.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+// Checked once, loudly: this runner drives real hooks through React's internal
+// dispatcher slot, and a React version that renamed the property would otherwise
+// fail somewhere far from the cause. (`noUncheckedIndexedAccess` is what made
+// the possibility visible — CL-3.)
+if (!INTERNALS_SLOT) {
+	throw new Error("React does not expose __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE; the hook runner needs it");
+}
+const INTERNALS: { H: unknown } = INTERNALS_SLOT;
 
 type Deps = readonly unknown[] | undefined;
 

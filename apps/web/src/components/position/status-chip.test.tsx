@@ -80,7 +80,7 @@ test("D-n2: the class is one the stylesheet actually defines", async () => {
 	expect(css).toContain(".chip.flat{");
 	// The bug's fingerprint: a class nobody styles.
 	expect(css).not.toContain(".chip.settled");
-	for (const emitted of [settled, open]) {
+	for (const emitted of [settled ?? "", open ?? ""]) {
 		for (const token of emitted.split(" ").slice(1)) {
 			expect(css, `.chip.${token} is not defined`).toContain(`.chip.${token}{`);
 		}

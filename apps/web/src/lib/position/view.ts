@@ -16,7 +16,7 @@
  */
 import type * as Domain from "@/types";
 import type * as View from "@/lib/display-types";
-import { amount, dateLabel, expiryLabel, marketSlug, percentLabel, pnlCard, quantity, strikeSide, strikesLabel, tx } from "@/lib/display";
+import { amount, expiryLabel, marketSlug, percentLabel, pnlCard, quantity, strikeSide, strikesLabel, tx } from "@/lib/display";
 import { decimalFromBaseUnits } from "@/lib/data/decimal";
 import { STRIKE_DECIMALS, type PositionInstrument } from "./instrument";
 import type { PositionPageDetail } from "./types";

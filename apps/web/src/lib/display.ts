@@ -1,7 +1,7 @@
 /** Pure domain → presentation boundary. Decimal values are never used for trading math. */
 import type * as Domain from "@/types";
 import type * as View from "./display-types";
-import { renderTextWithLinks, tradeLinkHref } from "./thesis/links";
+import { renderTextWithLinks } from "./thesis/links";
 // NOT from `./position/pnl`: that module imports `@nuts/thetanuts`, whose
 // bundle reaches for `fs/promises`, and this file is imported by CLIENT
 // components. `./position/lifecycle` holds the same rules with no SDK.
@@ -469,8 +469,6 @@ export function market(value: Domain.Market): View.Market {
     return { ...marketSummary(value), venueLabel: "Base · Thetanuts OptionBook",
         bookLabel: `${value.structures.length} structures · ${expiries.size} expiries`,
         structureCount: value.structures.length, expiryCount: expiries.size,
-        // Number() only after the same decimal validation every other value gets:
-        // the chart library plots pixels from it, nothing else reads it.
         structures: value.structures.map(s => marketStructure(s, value.selectedStructureId)),
         ticket: ticket(value.ticket),
         selectedLabel: `${value.underlyingAsset} ${selected.productType} ${strikesLabel(selected.strikesUsd, strikeSide(selected.productType, selected.isCall))}`,

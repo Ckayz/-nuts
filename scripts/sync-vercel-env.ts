@@ -45,8 +45,58 @@ const DEFAULT_FILES = ["apps/web/.env"];
  * allowlist already drops them. TODO-OWNER: confirm this deny list.
  */
 const SKIP_KEYS = new Set(["BETTER_AUTH_URL", "CORS_ORIGIN", "NODE_ENV"]);
-/** Values that must never reach a deployed environment. */
+/**
+ * Values that must never reach a deployed environment.
+ *
+ * The substring pattern is the fallback for values that are not URLs. It is not
+ * enough on its own: A-C3 (one-shot review 2026-09-06) measured the real script
+ * accepting `postgresql://u:p@[::1]:5432/postgres` for `production --dry-run`
+ * (`exit 0`, "would sync 1 env var") while the `127.0.0.1` fixture exited 1 —
+ * IPv6 loopback is not in the pattern, and neither are `127.0.0.2`, `0177.1` or
+ * `[0:0:0:0:0:0:0:1]`. So any value that PARSES as a URL is judged by its
+ * hostname instead, which the URL parser has already normalised.
+ */
 const LOCAL_VALUE_PATTERN = /localhost|127\.0\.0\.1|0\.0\.0\.0|^file:/i;
+/** Hostnames, after URL normalisation, that a deployed environment can never reach. */
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "0.0.0.0", "[::1]", "[::]"]);
+
+/**
+ * True when this hostname resolves on the machine that ran the script and
+ * nowhere else. `new URL(...).hostname` keeps IPv6 literals bracketed and
+ * lower-cases everything, so the bracketed forms are what this compares.
+ */
+function isLoopbackHostname(host: string): boolean {
+	if (LOOPBACK_HOSTNAMES.has(host)) return true;
+	// The whole 127.0.0.0/8 block, not just 127.0.0.1.
+	if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+	// Any written form of ::1 or ::, e.g. [0:0:0:0:0:0:0:1].
+	if (host.startsWith("[") && host.endsWith("]")) {
+		const address = host.slice(1, -1);
+		const groups = address.includes("::")
+			? (() => {
+					const [head = "", tail = ""] = address.split("::", 2);
+					const left = head === "" ? [] : head.split(":");
+					const right = tail === "" ? [] : tail.split(":");
+					return [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill("0"), ...right];
+				})()
+			: address.split(":");
+		if (groups.length === 8 && groups.every((group) => /^0*[01]$/.test(group))) {
+			return groups.every((group) => /^0*$/.test(group)) || groups.slice(0, 7).every((group) => /^0*$/.test(group));
+		}
+	}
+	return false;
+}
+
+/** True when the value would point a deployed environment at the machine that ran this script. */
+function isLocalValue(value: string): boolean {
+	try {
+		if (isLoopbackHostname(new URL(value).hostname.toLowerCase())) return true;
+	} catch {
+		// Not a URL: only the substring pattern below can speak.
+	}
+	// `file:` URLs carry no host, and non-URL values still need the old reach.
+	return LOCAL_VALUE_PATTERN.test(value);
+}
 /** TODO-OWNER: exit code for a refused run. 1 chosen so a pipeline stops. */
 const REFUSAL_EXIT_CODE = 1;
 
@@ -124,12 +174,12 @@ if (push.size === 0) {
 // Fences 2 and 3: refuse, never warn. Key names only — never a value.
 const refusals: string[] = [];
 const localKeys = [...push.entries()]
-	.filter(([, value]) => LOCAL_VALUE_PATTERN.test(value))
+	.filter(([, value]) => isLocalValue(value))
 	.map(([key]) => key)
 	.sort();
 if (localKeys.length > 0) {
 	refusals.push(
-		`local-only value(s) — localhost, 127.0.0.1, 0.0.0.0 or file: — in ${localKeys.join(", ")}. A deployed environment cannot reach those.`,
+		`local-only value(s) — a loopback host (localhost, 127.0.0.0/8, ::1, 0.0.0.0) or file: — in ${localKeys.join(", ")}. A deployed environment cannot reach those.`,
 	);
 }
 if (environment === "production") {

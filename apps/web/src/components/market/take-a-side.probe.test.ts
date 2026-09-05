@@ -7,7 +7,7 @@
  */
 import { beforeAll, describe, expect, test } from "bun:test";
 import { deferred, mount } from "@/test/hook-runner";
-import { calls, HASH, replies, resetTradeMocks, storage, WALLET } from "@/test/trade-mocks";
+import { calls, replies, resetTradeMocks, storage, WALLET } from "@/test/trade-mocks";
 import type { PrepareResult, QuoteRaw, TicketQuoteView, TradePanelContext } from "@/lib/trade/types";
 import type { Ticket } from "@/lib/display-types";
 

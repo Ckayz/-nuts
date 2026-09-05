@@ -25,6 +25,7 @@ import {
 	getOptionImplementationInfo,
 } from "@thetanuts-finance/thetanuts-client";
 import type { RiskKind } from "@nuts/thetanuts";
+import { measuredTakerSide } from "@/lib/market/taker-side";
 import { createHash } from "node:crypto";
 
 /** Base mainnet; the only chain this product trades on (CLAUDE.md, PRD 11). */
@@ -46,10 +47,14 @@ export interface PositionInstrument {
 	readonly asset: string | null;
 	readonly isCall: boolean;
 	/**
-	 * The TAKER's side of this fill. `rawApiData.isLong` is the MAKER's side —
-	 * SDK `normalizeOdetteOrder` comments "isLong=true means maker sells, so taker
-	 * buys" — which is exactly what `takerSide()` in `@nuts/thetanuts/side.ts`
-	 * encodes. "buy" is long the structure; "sell" is short it and posts collateral.
+	 * The TAKER's side of this fill. `rawApiData.isLong` is the MAKER's long flag,
+	 * so the taker takes the other side: `isLong === false` -> the maker sells ->
+	 * the taker BUYS and pays premium; `isLong === true` -> the taker SELLS and
+	 * posts collateral. Measured from chain bytes (`packages/thetanuts/src/side.ts`,
+	 * `lib/market/taker-side.ts`); the SDK's own comment states the inverse and is
+	 * wrong. Until 2026-09-05 this file kept its own copy of the mapping and had
+	 * it backwards, so every position page named the wrong side. "buy" is long
+	 * the structure; "sell" is short it and posts collateral.
 	 */
 	readonly takerSide: "buy" | "sell";
 	/** Strikes as 8-decimal base-unit integer strings, in the book's own order —
@@ -195,8 +200,8 @@ export function positionInstrument(snapshot: OrderSnapshotLike): PositionInstrum
 	return {
 		asset: buildPriceFeedSymbolMap(CHAIN_ID)[priceFeed.toLowerCase()] ?? null,
 		isCall,
-		// SDK `normalizeOdetteOrder`: raw `isLong` is the maker's side.
-		takerSide: isLong ? "buy" : "sell",
+		// The one measured rule; never a local copy of it (see the field's doc).
+		takerSide: measuredTakerSide(isLong),
 		strikesUsd8: feedOrder.map((strike) => strike.toString()),
 		ascendingStrikesUsd8: ascending.map((strike) => strike.toString()),
 		expiryAt: new Date(Number(expiry) * 1000).toISOString(),

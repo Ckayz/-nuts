@@ -73,8 +73,9 @@ const FILL_EVENT = encodeFillEventSnapshot({
 
 /**
  * Synthetic maker order for tests only; not a real signed order. `rawApiData`
- * carries the fields `positionInstrument` reads: a taker-BUY (maker `isLong`)
- * 78,000 BTC put collateralised in aBasUSDC.
+ * carries the fields `positionInstrument` reads: a taker-BUY (the maker's
+ * `isLong` is false: the maker sells, the taker buys) 78,000 BTC put
+ * collateralised in aBasUSDC.
  */
 const ORDER_SNAPSHOT = orderSnapshotV1Schema.parse({
 	version: 1,
@@ -82,7 +83,7 @@ const ORDER_SNAPSHOT = orderSnapshotV1Schema.parse({
 		maker: "0xmaker",
 		taker: "0xtaker",
 		option: "0xoption",
-		isBuyer: false,
+		isBuyer: true,
 		numContracts: "10000",
 		price: "1",
 		expiry: EXPIRY_SECONDS,
@@ -97,7 +98,7 @@ const ORDER_SNAPSHOT = orderSnapshotV1Schema.parse({
 		implementation: PUT_IMPL,
 		strikes: ["7800000000000"],
 		isCall: false,
-		isLong: true,
+		isLong: false,
 		orderExpiryTimestamp: 1789113600,
 		extraOptionData: "0x",
 		maxCollateralUsable: "1000000",

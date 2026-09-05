@@ -57,8 +57,9 @@ function snapshot(overrides: Record<string, unknown> = {}): OrderSnapshotLike {
 			// 78,000 USD at 8 decimals = 78000 * 1e8 = 7_800_000_000_000
 			strikes: ["7800000000000"],
 			isCall: false,
-			// The MAKER's side. `isLong: true` means the maker sells, so the taker buys.
-			isLong: true,
+			// The MAKER's long flag. `isLong: false` means the maker sells, so the
+			// taker BUYS (chain-measured; packages/thetanuts/src/side.ts).
+			isLong: false,
 			orderExpiryTimestamp: 1789113600,
 			extraOptionData: "0x",
 			maxCollateralUsable: "1000000",
@@ -80,8 +81,8 @@ describe("positionInstrument", () => {
 		expect(instrument?.expiryAt).toBe("2026-09-11T08:00:00.000Z");
 	});
 
-	test("isLong false is the maker BUYING, so the taker sells", () => {
-		expect(positionInstrument(snapshot({ isLong: false }))?.takerSide).toBe("sell");
+	test("isLong true is the maker BUYING, so the taker sells", () => {
+		expect(positionInstrument(snapshot({ isLong: true }))?.takerSide).toBe("sell");
 	});
 
 	test("keeps the book's strike order for identity and sorts a copy for the risk model", () => {
@@ -563,7 +564,7 @@ describe("positionPage", () => {
 
 	test("the seller's card locks collateral instead of paying a premium", () => {
 		const page = positionPage({
-			detail: detail({ instrument: positionInstrument(snapshot({ isLong: false })) }),
+			detail: detail({ instrument: positionInstrument(snapshot({ isLong: true })) }),
 			spotUsd8: SPOT_74K,
 			collateralUsdPrice8: "100000000",
 			asOf,

@@ -125,6 +125,7 @@ em{font-style:normal}
 .stack{display:flex;flex-direction:column;gap:14px}
 .stack.lg{gap:18px}
 .sticky{position:sticky;top:126px}
+.cols > *{min-width:0}
 
 /* ---------- cards ---------- */
 .card{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-card)}
@@ -411,9 +412,12 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 .tx:hover{color:var(--accent-lift)}
 /* ---------- responsive ---------- */
 @media (max-width:1180px){
-  .cols.feed,.cols.page{grid-template-columns:264px minmax(0,1fr)}
-  .cols.feed.no-left,.cols.page.no-left{grid-template-columns:minmax(0,1fr)}
-  .col-right{display:none}
+  .cols.feed,.cols.page,.cols.feed.no-left,.cols.page.no-left,
+  .cols.feed.no-right,.cols.page.no-right{grid-template-columns:minmax(0,1fr)}
+  .col-right{display:block;min-width:0}
+  .cols .sticky{position:static}
+  /* The left rail is secondary on a stacked page: it goes last, never above the header (measured 2026-09-05: it pushed the market header down 330px at 901–1180px). */
+  .col-left{order:9}
 }
 @media (max-width:900px){
   .cols.feed,.cols.page,.cols.feed.no-left,.cols.page.no-left{grid-template-columns:minmax(0,1fr)}

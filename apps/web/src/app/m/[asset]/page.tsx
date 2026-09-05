@@ -122,7 +122,9 @@ export default async function MarketPage({
 
 	return (
 		<PageFrame
+			ticketFirst
 			left={<FeedRail posts={rail} />}
+			// TODO-OWNER: a bottom-sheet ticket remains a later option.
 			right={
 				<>
 				{trade === null ? (
@@ -183,12 +185,7 @@ export default async function MarketPage({
 
 				<YourPositionsRail asset={market.asset} />
 
-				{/* TODO-OWNER: the mockup hides the whole right column below 1180px
-				    (`index.css`, `@media (max-width:1180px) .col-right`), so on a
-				    phone this page shows the book but not the ticket and the market
-				    cannot be traded from a phone at all. That is the mockup's own
-				    rule; whether mobile should be able to trade is the owner's call,
-				    not this round's. */}
+
 
 				{summaries.length > 0 ? (
 					<section className="card">

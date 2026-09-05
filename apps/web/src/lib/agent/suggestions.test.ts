@@ -211,6 +211,29 @@ describe("splitSuggestionTrailer", () => {
 		expect(chips.every((c) => c.label.length <= MAX_SUGGESTION_LENGTH)).toBe(true);
 	});
 
+	test("recovers the trailer a real model left unclosed", () => {
+		// Captured verbatim from a local run against `minimax/minimax-m3:free`
+		// (2026-09-06, `finishReason: "stop"`, 888 characters): three complete
+		// strings, no closing bracket. Every item is well-formed JSON; only the
+		// array is not, so the items are read out rather than guessed at.
+		const text =
+			'That is what a put is.\n\nSUGGEST: ["Show me a put on ETH for under $10","Show me a put on BTC for under $10","What is the maximum loss on a put?"';
+		const { body, chips } = splitSuggestionTrailer(text, false);
+		expect(chips.map((c) => c.label)).toEqual([
+			"Show me a put on ETH for under $10",
+			"Show me a put on BTC for under $10",
+			"What is the maximum loss on a put?",
+		]);
+		expect(body).toBe("That is what a put is.");
+	});
+
+	test("half a string is still dropped", () => {
+		// The recovery reads COMPLETE literals only: an unterminated one is not a
+		// suggestion, it is a stream that stopped mid-word.
+		const { chips } = splitSuggestionTrailer('A.\nSUGGEST: ["Show me a put on ETH","What is the max', false);
+		expect(chips.map((c) => c.label)).toEqual(["Show me a put on ETH"]);
+	});
+
 	test("a reply with no trailer is returned untouched", () => {
 		const text = "Plain answer with **markdown** and a [link](/m/eth).";
 		expect(splitSuggestionTrailer(text, false)).toEqual({ body: text, chips: [] });

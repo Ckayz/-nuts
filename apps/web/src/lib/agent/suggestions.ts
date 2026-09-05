@@ -320,11 +320,30 @@ function parseArray(rest: string): unknown[] | null {
 			const parsed: unknown = JSON.parse(match[0]);
 			if (Array.isArray(parsed)) return parsed;
 		} catch {
-			// Try the other shape, then give up: a malformed trailer is a missing
-			// trailer, and the caller falls back.
+			// Try the other shape, then the recovery below.
 		}
 	}
-	return null;
+
+	/**
+	 * MEASURED, not defensive: `minimax/minimax-m3:free` ended a real reply with
+	 *
+	 *   SUGGEST: ["Show me a put on ETH for under $10","Show me a put on BTC for
+	 *   under $10","What is the maximum loss on a put?"
+	 *
+	 * — three complete strings and no closing bracket (`finishReason: "stop"`,
+	 * 888 characters, local run 2026-09-06). Every ITEM is well-formed JSON; only
+	 * the array around them is not. Reading the complete string literals out is
+	 * not guessing at what the model meant, and half a string is still dropped:
+	 * an unterminated literal matches nothing here.
+	 */
+	const items = [...tail.matchAll(/"(?:[^"\\]|\\.)*"/g)].map((match) => {
+		try {
+			return JSON.parse(match[0]) as unknown;
+		} catch {
+			return null;
+		}
+	});
+	return items.length === 0 ? null : items;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { Bar } from "@/components/primitives";
-import type { SideStats } from "@/types";
+import type { SideStats } from "@/lib/display-types";
 
 export function SharePanel({
 	url,

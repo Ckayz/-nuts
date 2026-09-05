@@ -11,7 +11,7 @@ import { SpotChart } from "@/components/thesis/spot-chart";
 import { TakeASide } from "@/components/thesis/take-a-side";
 import { ThesisTabs } from "@/components/thesis/thesis-tabs";
 import { signedUsd, usd } from "@/lib/format";
-import { thesisDetails, thesisDetailBySlug } from "@/mock/data";
+import { thesisDetails, thesisDetailBySlug } from "@/lib/view-data";
 
 export function generateStaticParams() {
 	return thesisDetails.map((d) => ({ slug: d.thesis.slug }));

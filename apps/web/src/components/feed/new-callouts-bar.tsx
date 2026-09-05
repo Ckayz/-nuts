@@ -1,5 +1,5 @@
 import { Avatar } from "@/components/primitives";
-import { newCallouts } from "@/mock/data";
+import { newCallouts } from "@/lib/view-data";
 
 export function NewCalloutsBar() {
 	return (

@@ -1,5 +1,5 @@
 import { SearchIcon } from "@/components/icons";
-import { wallet } from "@/mock/data";
+import { wallet } from "@/lib/view-data";
 
 export function AppHeader() {
 	return (

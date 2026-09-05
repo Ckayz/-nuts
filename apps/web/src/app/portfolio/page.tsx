@@ -1,7 +1,7 @@
 import { PositionList } from "@/components/feed/thesis-list";
 import { ParticipantsTable } from "@/components/thesis/participants-table";
-import { currentUser, yourPositions, yourSettledPositions } from "@/mock/data";
-import type { Participant, Position } from "@/types";
+import { currentUser, yourPositions, yourSettledPositions } from "@/lib/view-data";
+import type { Participant, Position } from "@/lib/display-types";
 
 /** The connected wallet's own rows, in the shape the positions table takes. */
 function toRows(positions: Position[]): Participant[] {
@@ -19,7 +19,7 @@ function toRows(positions: Position[]): Participant[] {
 
 export default function PortfolioPage() {
 	return (
-		<div className="work" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>
+		<div className="work single">
 			<main className="col">
 				<div className="sec">
 					<div className="sec-h">

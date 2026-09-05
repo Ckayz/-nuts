@@ -1,6 +1,6 @@
 import { Avatar } from "@/components/primitives";
 import { pnlClass, signedUsd, usd } from "@/lib/format";
-import type { Creator } from "@/types";
+import type { Creator } from "@/lib/display-types";
 
 export function CreatorStats({ creator }: { creator: Creator }) {
 	return (
@@ -13,8 +13,7 @@ export function CreatorStats({ creator }: { creator: Creator }) {
 			</div>
 			<div className="lb">
 				<div
-					className="row"
-					style={{ gridTemplateColumns: "36px 1fr", padding: "4px 0" }}
+					className="row creator-row"
 				>
 					<Avatar initials={creator.initials} size="lg" />
 					<span className="who">
@@ -51,7 +50,7 @@ export function CreatorStats({ creator }: { creator: Creator }) {
 				{creator.followers !== undefined ? (
 					<>
 						<dt>Followers</dt>
-						<dd>{creator.followers.toLocaleString("en-US")}</dd>
+						<dd>{creator.followers}</dd>
 					</>
 				) : null}
 				{creator.creatorPayoutsUsd !== undefined ? (

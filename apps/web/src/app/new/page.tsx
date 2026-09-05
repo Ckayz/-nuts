@@ -1,7 +1,7 @@
 import { Textarea } from "@nuts/ui/components/textarea";
 import { Pill, TodoOwner } from "@/components/primitives";
 import { signedUsd, usd, usd2 } from "@/lib/format";
-import { btcNfpDetail } from "@/mock/data";
+import { btcNfpDetail } from "@/lib/view-data";
 
 /**
  * "Launch a thesis" composer.
@@ -18,7 +18,7 @@ export default function NewThesisPage() {
 	const ticket = btcNfpDetail.ticket;
 
 	return (
-		<div className="work" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>
+		<div className="work single">
 			<main className="col">
 				<div className="panel" style={{ maxWidth: "320px" }}>
 					<h3>Launch a thesis</h3>
@@ -40,12 +40,12 @@ export default function NewThesisPage() {
 						<span className="lbl">Your max loss</span>
 						<div className="inp">
 							<span>$</span>
-							<span>{ticket.maxLossUsd}</span>
+							<span>{ticket.maxLossUsd.raw}</span>
 							<span className="u">{ticket.collateralSymbol}</span>
 						</div>
 						<div className="presets">
 							{ticket.presetsUsd.map((v) => (
-								<button type="button" key={v}>
+								<button type="button" key={v.raw}>
 									{usd(v)}
 								</button>
 							))}
@@ -58,7 +58,7 @@ export default function NewThesisPage() {
 						<dt>Order</dt>
 						<dd>{ticket.orderLabel}</dd>
 						<dt>Contracts</dt>
-						<dd>{ticket.contracts.toFixed(4)}</dd>
+						<dd>{ticket.contracts}</dd>
 						<dt>Max loss</dt>
 						<dd className="bear">{usd2(ticket.maxLossUsd)}</dd>
 						<dt>Max payout</dt>

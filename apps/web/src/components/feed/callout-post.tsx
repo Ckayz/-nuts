@@ -8,7 +8,7 @@ import {
 } from "@/components/icons";
 import { Avatar, StatusChip } from "@/components/primitives";
 import { usd } from "@/lib/format";
-import type { Thesis } from "@/types";
+import type { Thesis } from "@/lib/display-types";
 
 export function CalloutPost({ thesis }: { thesis: Thesis }) {
 	const settled = thesis.status === "settled";
@@ -30,11 +30,11 @@ export function CalloutPost({ thesis }: { thesis: Thesis }) {
 				{thesis.note ? <p className="t">{thesis.note}</p> : null}
 				<PositionCard thesis={thesis} />
 				<div className="acts">
-					<button type="button">
+					<button type="button" aria-label={`Like, ${thesis.likes}`}>
 						<HeartIcon />
 						{thesis.likes}
 					</button>
-					<button type="button">
+					<button type="button" aria-label={`Comments, ${thesis.commentCount}`}>
 						<CommentIcon />
 						{thesis.commentCount}
 					</button>

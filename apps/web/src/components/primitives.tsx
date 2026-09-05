@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { ThesisStatus } from "@/types";
+import type { ThesisStatus } from "@/lib/display-types";
 
 export function Avatar({
 	initials,

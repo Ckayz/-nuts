@@ -1,5 +1,5 @@
 import { Avatar } from "@/components/primitives";
-import type { ActivityItem } from "@/types";
+import type { ActivityItem } from "@/lib/display-types";
 
 export function ActivityList({
 	items,
@@ -19,9 +19,8 @@ export function ActivityList({
 			<div className="lb">
 				{items.map((a) => (
 					<div
-						className="row"
+						className="row activity-row"
 						key={a.tx.label}
-						style={{ gridTemplateColumns: "28px 1fr auto" }}
 					>
 						<Avatar initials={a.creator.initials} size="s" />
 						<span className="who">

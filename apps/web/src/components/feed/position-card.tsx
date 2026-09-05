@@ -1,6 +1,6 @@
 import { SplitBar } from "@/components/primitives";
 import { pnlClass, signedUsd, usd } from "@/lib/format";
-import type { Thesis } from "@/types";
+import type { Thesis } from "@/lib/display-types";
 
 export function PositionCard({ thesis }: { thesis: Thesis }) {
 	const settled = thesis.status === "settled";

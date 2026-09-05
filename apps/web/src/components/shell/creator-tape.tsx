@@ -1,6 +1,6 @@
 import { Avatar } from "@/components/primitives";
 import { pnlClass, signedUsd } from "@/lib/format";
-import { topCreators } from "@/mock/data";
+import { topCreators } from "@/lib/view-data";
 
 export function CreatorTape() {
 	return (
@@ -10,8 +10,8 @@ export function CreatorTape() {
 				<span className="t" key={c.handle}>
 					<Avatar initials={c.initials} size="s" />
 					<b>@{c.handle}</b>
-					<span className={`num ${pnlClass(c.netPnlUsd ?? 0)}`}>
-						{signedUsd(c.netPnlUsd ?? 0)}
+					<span className={`num ${pnlClass(c.netPnlUsd)}`}>
+						{signedUsd(c.netPnlUsd)}
 					</span>
 				</span>
 			))}

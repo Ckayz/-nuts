@@ -1,5 +1,5 @@
 import { Avatar } from "@/components/primitives";
-import type { Comment } from "@/types";
+import type { Comment } from "@/lib/display-types";
 
 export function CommentsList({ comments }: { comments: Comment[] }) {
 	return (

@@ -1,6 +1,6 @@
 import { Avatar } from "@/components/primitives";
 import { pnlClass, signedUsd } from "@/lib/format";
-import type { Creator } from "@/types";
+import type { Creator } from "@/lib/display-types";
 
 export function Leaderboard({ creators }: { creators: Creator[] }) {
 	return (
@@ -17,8 +17,8 @@ export function Leaderboard({ creators }: { creators: Creator[] }) {
 							{i === 0 ? " theses" : ""}
 						</span>
 					</span>
-					<span className={`num ${pnlClass(c.netPnlUsd ?? 0)}`}>
-						{signedUsd(c.netPnlUsd ?? 0)}
+					<span className={`num ${pnlClass(c.netPnlUsd)}`}>
+						{signedUsd(c.netPnlUsd)}
 					</span>
 				</div>
 			))}

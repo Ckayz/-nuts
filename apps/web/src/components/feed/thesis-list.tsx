@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Bar } from "@/components/primitives";
 import { pnlClass, signedUsd, usd } from "@/lib/format";
-import type { Position, TrendingItem } from "@/types";
+import type { Position, TrendingItem } from "@/lib/display-types";
 
 function Thumb({ asset }: { asset: string }) {
 	return <span className={`thumb ${asset.toLowerCase()}`}>{asset}</span>;

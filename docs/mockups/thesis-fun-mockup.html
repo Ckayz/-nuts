@@ -409,7 +409,7 @@
         <div class="chartbox">
           <div class="hh"><span class="lbl">Payoff at expiry · per $1,000</span><span class="v">max <span class="bull">+$4,612</span></span></div>
           <svg class="payoff" id="payoff" viewBox="0 0 400 220" role="img" aria-label="Payoff diagram of the put spread at expiry"></svg>
-          <div class="legend"><span><i style="background:var(--bull)"></i>Bull · long spread</span><span><i style="background:var(--bear)"></i>Bear · short spread</span><span class="dim">break-even $76,120</span></div>
+          <div class="legend"><span><i style="background:var(--bull)"></i>Bull · long spread</span><span><i style="background:var(--bear)"></i>Bear · short spread</span><span class="dim">break-even $77,287</span></div>
         </div>
       </div>
 
@@ -528,7 +528,8 @@
     var xlo=70000,xhi=84000,ylo=-4800,yhi=4800;
     function X(v){return padL+(W-padL-padR)*(v-xlo)/(xhi-xlo)}
     function Y(v){return padT+(H-padT-padB)*(1-(v-ylo)/(yhi-ylo))}
-    var prem=1000,maxp=4612,K1=78000,K2=74000,be=76120;
+    var prem=1000,maxp=4612,K1=78000,K2=74000;
+    var be=K1-prem*(K1-K2)/(maxp+prem);
     function bull(s){if(s>=K1)return -prem;if(s<=K2)return maxp;return -prem+(K1-s)/(K1-K2)*(maxp+prem)}
     var el='';
     function ln(x1,y1,x2,y2,c,d,wd){return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+c+'" stroke-width="'+(wd||1)+'"'+(d?' stroke-dasharray="3 4"':'')+'/>'}

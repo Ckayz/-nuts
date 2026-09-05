@@ -10,7 +10,7 @@ import {
 	theses,
 	trending,
 	yourPositions,
-} from "@/mock/data";
+} from "@/lib/view-data";
 
 export default function DiscoverPage() {
 	return (

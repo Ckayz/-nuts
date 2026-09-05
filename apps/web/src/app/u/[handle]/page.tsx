@@ -9,7 +9,7 @@ import {
 	creatorByHandle,
 	participantsByCreator,
 	thesesByCreator,
-} from "@/mock/data";
+} from "@/lib/view-data";
 
 export function generateStaticParams() {
 	return allCreators.map((c) => ({ handle: c.handle }));
@@ -29,7 +29,7 @@ export default async function CreatorPage({
 	const positions = participantsByCreator(handle);
 
 	return (
-		<div className="work" style={{ gridTemplateColumns: "300px minmax(0,1fr)" }}>
+		<div className="work profile">
 			<aside className="col l">
 				<CreatorStats creator={creator} />
 				<ActivityList items={activity} count={activity.length} />

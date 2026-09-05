@@ -20,7 +20,7 @@ const prem = 1000;
 const maxp = 4612;
 const K1 = 78000;
 const K2 = 74000;
-const be = 76120;
+const be = K1 - prem * (K1 - K2) / (maxp + prem);
 const SPOT = 79607;
 
 const X = (v: number) => padL + ((W - padL - padR) * (v - xlo)) / (xhi - xlo);

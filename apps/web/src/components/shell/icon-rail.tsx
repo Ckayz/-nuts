@@ -10,7 +10,7 @@ import {
 	PortfolioIcon,
 	TapeIcon,
 } from "@/components/icons";
-import { CURRENT_USER_HANDLE, currentUser } from "@/mock/data";
+import { CURRENT_USER_HANDLE, currentUser } from "@/lib/view-data";
 
 export function IconRail() {
 	const pathname = usePathname();
@@ -28,10 +28,10 @@ export function IconRail() {
 			>
 				<HomeIcon />
 			</Link>
-			<button type="button" title="Explore theses">
+			<button type="button" aria-label="Explore theses" title="Explore theses">
 				<ExploreIcon />
 			</button>
-			<button type="button" title="Live tape">
+			<button type="button" aria-label="Live tape" title="Live tape">
 				<TapeIcon />
 			</button>
 			<Link
@@ -42,7 +42,7 @@ export function IconRail() {
 			>
 				<PortfolioIcon />
 			</Link>
-			<button type="button" title="Leaderboard">
+			<button type="button" aria-label="Leaderboard" title="Leaderboard">
 				<LeaderboardIcon />
 			</button>
 			<Link className="navbtn create" href="/new" title="Launch a thesis">

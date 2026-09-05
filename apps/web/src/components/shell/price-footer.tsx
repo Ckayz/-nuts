@@ -1,4 +1,4 @@
-import { footerSource, marketPrices, marketsSource } from "@/mock/data";
+import { footerSource, marketPrices, marketsSource } from "@/lib/view-data";
 
 export function PriceFooter() {
 	return (

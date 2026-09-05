@@ -1,6 +1,6 @@
 import { Avatar } from "@/components/primitives";
 import { pnlClass, signedUsd, usd } from "@/lib/format";
-import type { Participant } from "@/types";
+import type { Participant } from "@/lib/display-types";
 
 export function ParticipantsTable({ rows }: { rows: Participant[] }) {
 	return (
@@ -49,7 +49,7 @@ export function ParticipantsTable({ rows }: { rows: Participant[] }) {
 							</td>
 							<td className="num">{usd(r.riskedUsd)}</td>
 							<td className="num">
-								{r.contracts === undefined ? "—" : r.contracts.toFixed(4)}
+								{r.contracts === undefined ? "—" : r.contracts}
 							</td>
 							<td className="num">
 								{r.entryUsd === undefined ? "—" : usd(r.entryUsd)}

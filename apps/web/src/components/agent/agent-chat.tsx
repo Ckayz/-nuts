@@ -1,7 +1,12 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { useState } from "react";
+import {
+	DefaultChatTransport,
+	lastAssistantMessageIsCompleteWithApprovalResponses,
+} from "ai";
+import { useEffect, useRef, useState } from "react";
+import { useAccount } from "wagmi";
 
 import { Button } from "@nuts/ui/components/button";
 import {
@@ -12,6 +17,8 @@ import {
 } from "@nuts/ui/components/input-group";
 
 import { ToolActivity } from "./tool-activity";
+import { TradeApproval } from "./trade-approval";
+import { TradeExecution, type PreparedTrade } from "./trade-execution";
 
 const STARTERS = [
 	"What can I trade right now?",
@@ -22,7 +29,34 @@ const STARTERS = [
 
 export function AgentChat() {
 	const [input, setInput] = useState("");
-	const { messages, sendMessage, status, error } = useChat();
+	const { address } = useAccount();
+
+	// Read through a ref so the transport, created once, always sees the current
+	// wallet. A transport rebuilt on every address change would drop the stream.
+	const addressRef = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		addressRef.current = address;
+	}, [address]);
+
+	const [transport] = useState(
+		() =>
+			new DefaultChatTransport({
+				api: "/api/agent/chat",
+				// Attaches the connected wallet to every request, including the turn the
+				// runtime resumes automatically after an approval. The server binds it
+				// into the write tool, so the model can never name a different address.
+				prepareSendMessagesRequest: ({ messages, body }) => ({
+					body: { ...body, messages, walletAddress: addressRef.current },
+				}),
+			}),
+	);
+
+	const { messages, sendMessage, status, error, addToolApprovalResponse } = useChat({
+		transport,
+		// Once the user answers an approval, resume the agent loop automatically
+		// rather than making them send another message.
+		sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+	});
 
 	const busy = status === "submitted" || status === "streaming";
 
@@ -77,6 +111,33 @@ export function AgentChat() {
 									</p>
 								);
 							}
+							// The runtime suspended a write tool and is waiting for the user.
+							if (part.type === "tool-approval-request") {
+								const req = part as unknown as {
+									approvalId: string;
+									toolCall?: { input?: { instrumentKey?: unknown; budget?: unknown } };
+								};
+								return (
+									<TradeApproval
+										key={i}
+										input={req.toolCall?.input}
+										pending={busy}
+										onRespond={(approved) =>
+											addToolApprovalResponse({ id: req.approvalId, approved })
+										}
+									/>
+								);
+							}
+
+							// A prepared trade carries unsigned calldata for the user's wallet.
+							if (part.type === "tool-requestOptionBookExecution") {
+								const out = (part as { output?: unknown }).output as
+									| (PreparedTrade & { prepared?: boolean })
+									| undefined;
+								if (out?.prepared === true) return <TradeExecution key={i} trade={out} />;
+								return <ToolActivity key={i} part={part} />;
+							}
+
 							if (part.type.startsWith("tool-")) {
 								return <ToolActivity key={i} part={part} />;
 							}

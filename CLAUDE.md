@@ -57,7 +57,7 @@ Owner's order: **UI first, then Thetanuts core logic, then DB and socials.** Con
 4. **Foundation + socials**: Drizzle schema (users, theses, positions, follows, comments, activity), sign-in with wallet, follow, comment, activity, leaderboard, trending, creator payouts.
 5. **Polish and ship**: Open Graph share cards, verified badges, Vercel.
 
-Parallel track (teammate): AI track per `docs/PRD.md` v2.0 (`/agent` workspace, `apps/web/src/lib/thetanuts/*`, `packages/db/src/schema/agent.ts`, migration `0006_agent_tables`). See the unresolved scope conflict above.
+Parallel track (teammate): AI track per `docs/PRD.md` v2.0 (`/agent` workspace, `apps/web/src/lib/thetanuts/*`, `packages/db/src/schema/agent.ts`, migration `0000_agent_tables`). Scope ruling above.
 
 Shared contract with the teammate: `docs/PRD.md` §10.2 defines `ThesisAiContext`; the core side (us) builds and validates it and provides a fixture plus server function. Neither side changes it without telling the other and updating the PRD (PRD §15).
 

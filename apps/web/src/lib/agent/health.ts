@@ -62,12 +62,25 @@ export interface HealthInput {
 	readonly now?: Date;
 }
 
-/** The window's cached probe, if any. Module state: one per server instance. */
+/** The window's finished probe, if any. Module state: one per server instance. */
 let cached: { at: number; body: HealthBody } | null = null;
+
+/**
+ * The probe currently in flight, if any.
+ *
+ * Two requests arriving together must make ONE round of calls, and the second
+ * must be told the truth rather than a placeholder. An earlier version reserved
+ * the cache slot with a hand-made "everything failed" body before the calls
+ * started, which met the first requirement by breaking the second: a concurrent
+ * reader was told `ok: false` about a model that was answering fine. Sharing the
+ * promise meets both.
+ */
+let inflight: { at: number; promise: Promise<{ agent: ModelHealth; gate: ModelHealth }> } | null = null;
 
 /** Tests only: forget the window so a case starts from a known state. */
 export function resetProbeCache(): void {
 	cached = null;
+	inflight = null;
 }
 
 async function probeOne(
@@ -147,26 +160,42 @@ export async function agentHealth(input: HealthInput): Promise<{ status: number;
 		return { status: body.models.agent.ok === true && body.models.gate.ok === true ? 200 : 503, body };
 	}
 
-	// Reserved BEFORE the calls: two requests arriving together must not both
-	// reach the provider. Overwritten with the real answer below.
-	const pending: HealthBody = {
+	// The in-flight round is claimed BEFORE the calls start, so two requests
+	// arriving together share one round instead of each spending credit.
+	const shared =
+		inflight !== null && at - inflight.at < PROBE_CACHE_MS
+			? inflight
+			: {
+					at,
+					promise: (async () => {
+						const caller = input.probeCaller as ProbeCaller;
+						const [agent, gate] = await Promise.all([
+							probeOne("agent", input.agent, caller),
+							probeOne("gate", input.gate, caller),
+						]);
+						return { agent, gate };
+					})(),
+				};
+	const joined = inflight === shared;
+	inflight = shared;
+
+	let models: { agent: ModelHealth; gate: ModelHealth };
+	try {
+		models = await shared.promise;
+	} finally {
+		// Only the request that STARTED the round clears it, so a late joiner
+		// cannot drop the slot out from under another one.
+		if (!joined && inflight === shared) inflight = null;
+	}
+
+	const body: HealthBody = {
 		provider: providerName(input.usingGateway),
 		checkedAt: now.toISOString(),
 		probed: true,
-		cached: false,
+		cached: joined,
 		config: { ok: true, problem: null },
-		models: {
-			agent: { id: input.agent.id, probed: true, ok: false, errorClass: "unknown" },
-			gate: { id: input.gate.id, probed: true, ok: false, errorClass: "unknown" },
-		},
+		models,
 	};
-	cached = { at, body: pending };
-
-	const [agent, gate] = await Promise.all([
-		probeOne("agent", input.agent, input.probeCaller),
-		probeOne("gate", input.gate, input.probeCaller),
-	]);
-	const body: HealthBody = { ...pending, models: { agent, gate } };
-	cached = { at, body };
-	return { status: agent.ok === true && gate.ok === true ? 200 : 503, body };
+	if (!joined) cached = { at, body };
+	return { status: models.agent.ok === true && models.gate.ok === true ? 200 : 503, body };
 }

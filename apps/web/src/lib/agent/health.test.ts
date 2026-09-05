@@ -184,14 +184,43 @@ describe("the probe cannot be used to burn quota", () => {
 		expect(calls.length).toBe(2);
 	});
 
-	test("two simultaneous probes still make one round of calls", async () => {
-		const { caller, calls } = counting();
+	/**
+	 * The regression guard for a bug this file caught before it shipped: the
+	 * first version reserved the cache slot with a hand-made "everything failed"
+	 * body before the calls started, so a request arriving during the round was
+	 * told `ok: false` about models that were answering perfectly well. One round
+	 * of calls is necessary; lying to the second caller is not.
+	 */
+	test("two simultaneous probes make one round of calls AND both get the truth", async () => {
+		const calls: string[] = [];
+		let release: (() => void) | null = null;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const caller: ProbeCaller = async (model) => {
+			calls.push(`${model.role}:${model.id}`);
+			await gate;
+		};
 		const now = new Date("2026-09-06T00:00:00.000Z");
-		await Promise.all([
+		const both = Promise.all([
 			agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeCaller: caller, now }),
 			agentHealth({ usingGateway: false, agent: AGENT, gate: GATE, probe: true, probeCaller: caller, now }),
 		]);
+		// Both requests are now inside the window with nothing finished.
+		await Promise.resolve();
+		(release as unknown as () => void)();
+		const [first, second] = await both;
 		expect(calls.length).toBe(2);
+		// The starter reports a fresh answer; the joiner reports a reused one, so
+		// `cached` keeps meaning "this cost nothing".
+		expect([first.body.cached, second.body.cached]).toEqual([false, true]);
+		for (const answer of [first, second]) {
+			expect({ status: answer.status, agent: answer.body.models.agent.ok, gate: answer.body.models.gate.ok }).toEqual({
+				status: 200,
+				agent: true,
+				gate: true,
+			});
+		}
 	});
 
 	test("after the window it probes again", async () => {

@@ -1,6 +1,6 @@
 import "server-only";
 import { env } from "@nuts/env/server";
-import { createReadClient, fetchLiveOrders, deriveMarkets, takerSide, quoteFill, quoteSellFill, ThetanutsLogicError, type Market, type SellQuoteClient } from "@nuts/thetanuts";
+import { createReadClient, sellContractSizeDecimals, deriveMarkets, takerSide, quoteFill, quoteSellFill, ThetanutsLogicError, type Market, type SellQuoteClient } from "@nuts/thetanuts";
 import type { OrderSnapshot, TradeableOrder } from "./types";
 
 export const readClient = createReadClient({ rpcUrl: env.BASE_RPC_URL, referrer: env.THESIS_REFERRER });
@@ -36,22 +36,53 @@ export function toTradeable(market: Market): TradeableOrder {
  };
 }
 
+/** SDK 0.3.0 runtime methods (dist/index.js:2588,3346), private in its declarations.
+ * Keep this compatibility boundary local; upgrading the SDK requires rechecking it.
+ */
+export const rawOrderApi = readClient.api as unknown as {
+ request(path: string): Promise<{ data?: { orders?: unknown }; orders?: unknown }>;
+ normalizeOdetteOrder(row: unknown): Market["order"];
+};
+
 async function fetchSnapshot(): Promise<OrderSnapshot> {
- const [orders, data] = await Promise.all([fetchLiveOrders(readClient), readClient.api.getMarketData()]);
- return { orders: deriveMarkets(orders).map(toTradeable), fetchedAt: new Date(),
+ const [response, data] = await Promise.all([rawOrderApi.request("/"), readClient.api.getMarketData()]);
+ const rows = response.data?.orders ?? response.orders ?? [];
+ if (!Array.isArray(rows)) throw new Error("Order feed orders must be an array");
+ const orders: TradeableOrder[] = [];
+ let droppedEntries = 0;
+ for (const row of rows) {
+  try {
+   const normalized = rawOrderApi.normalizeOdetteOrder(row);
+   orders.push(...deriveMarkets([normalized]).map(toTradeable));
+  } catch {
+   droppedEntries++;
+  }
+ }
+ return { orders, fetchedAt: new Date(),
   marketData: Object.fromEntries(Object.entries(data.prices).filter(([, price]) => Number.isFinite(price) && price > 0)),
-  // SDK fetchOrders normalizes the whole response; it does not expose a drop count.
-  droppedEntries: 0 };
+  droppedEntries };
+}
+
+function liveSnapshot(snapshot: OrderSnapshot): OrderSnapshot {
+ const now = Date.now();
+ const orders = snapshot.orders.filter(order =>
+  order.sdkOrder.rawApiData!.orderExpiryTimestamp * 1000 > now &&
+  Number(order.sdkOrder.order.expiry) * 1000 > now);
+ return orders.length === snapshot.orders.length ? snapshot : { ...snapshot, orders };
 }
 
 export async function getOrderSnapshot(force = false): Promise<OrderSnapshot> {
-	if (!force && cached && cached.expiresAt > Date.now()) return cached.snapshot;
-	if (!force && inFlight) return inFlight;
+	if (!force && cached && cached.expiresAt > Date.now()) return liveSnapshot(cached.snapshot);
+	if (!force && inFlight) return liveSnapshot(await inFlight);
 
 	const request = fetchSnapshot()
 		.then((snapshot) => {
-			cached = { snapshot, expiresAt: Date.now() + CACHE_TTL_MS };
-			return snapshot;
+			cached = { snapshot, expiresAt: Math.min(
+                snapshot.fetchedAt.getTime() + CACHE_TTL_MS,
+                ...snapshot.orders.map(order => Date.parse(order.orderExpiresAt)),
+                ...snapshot.orders.map(order => Date.parse(order.expiryAt)),
+            ) };
+			return liveSnapshot(snapshot);
 		})
 		.finally(() => {
 			if (inFlight === request) inFlight = null;
@@ -125,10 +156,25 @@ export function sizeFill(order: TradeableOrder, budgetAmount: string, client: Se
   const collateral = "collateralRequired" in quote ? quote.collateralRequired : null;
   // Same observed premium-percentage estimate as sell quote; notional branch UNVERIFIED.
   const fee = "feeEstimate" in quote ? quote.feeEstimate : premium * 1250n / 10000n;
+  const collateralDecimals = "collateralDecimals" in quote ? quote.collateralDecimals : token.decimals;
+  // Buy quotes currently omit contractSizeDecimals. The package documents token-scaled
+  // units outside single-strike calls; those calls remain unknown until core exposes units.
+  const contractSizeDecimals = "contractSizeDecimals" in quote ? quote.contractSizeDecimals
+   : quote.isCall && quote.strikes.length === 1 ? null : sellContractSizeDecimals(token.decimals);
+  const amount = (value: bigint) => ({
+   amount: decimalString(value, 10n ** BigInt(collateralDecimals)),
+   token: token.symbol, decimals: collateralDecimals,
+  });
+  // Core exposes its verification gate via success/throw, not a verification field.
+  // Do not duplicate VERIFIED_SELL_PAIRS here or enable the unverified override.
   return { found: true as const, executable: true as const, verification: "verified" as const,
-   side, premium: decimalString(premium, scale), collateralRequired: collateral === null ? null : decimalString(collateral, scale),
-   feeEstimate: decimalString(fee, scale), maxLoss: decimalString(collateral ?? premium, scale),
-   contracts: quote.numContracts.toString(), // raw integer; non-USDC contract-size decimals remain UNVERIFIED
+   side, premium: amount(premium), collateralRequired: collateral === null ? null : amount(collateral),
+   feeEstimate: amount(fee), maxLoss: amount(collateral ?? premium),
+   contracts: contractSizeDecimals === null ? null : decimalString(quote.numContracts, 10n ** BigInt(contractSizeDecimals)),
+   contractsUnit: "contracts" as const, contractSizeDecimals,
+   raw: { numContracts: quote.numContracts.toString(), premium: premium.toString(),
+    collateralRequired: collateral?.toString() ?? null, feeEstimate: fee.toString(),
+    collateralDecimals, contractSizeDecimals },
    collateralToken: token, capped: quote.capped };
  } catch (error) {
   return { found: true as const, executable: false as const, verification: "unverified" as const,

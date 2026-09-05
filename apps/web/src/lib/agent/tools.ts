@@ -45,8 +45,10 @@ function describe(order: TradeableOrder) {
 		direction: order.isCall ? "call" : "put",
 		strikesUsd: order.strikesUsd,
 		expiryAt: order.expiryAt,
-		premiumPerContract: order.pricePerContractUsd,
-		makerCollateralBudget: order.makerBudgetUsd,
+        orderExpiresAt: order.orderExpiresAt,
+        secondsUntilOrderExpiry: Math.max(0, Math.floor((Date.parse(order.orderExpiresAt) - Date.now()) / 1000)),
+		premiumPerContract: { amount: order.pricePerContractUsd, token: order.collateralToken.symbol, decimals: order.collateralToken.decimals, unit: "token per contract" },
+		makerCollateralBudget: { amount: order.makerBudgetUsd, token: order.collateralToken.symbol, decimals: order.collateralToken.decimals },
 	};
 }
 
@@ -54,7 +56,7 @@ export const searchOptionBookOrders = tool({
 	description:
 		"Search live Thetanuts OptionBook liquidity on Base mainnet. Returns buy and sell orders, labelled by taker side and collateral token. " +
 		"Use this before discussing any specific trade: never describe an option that is not in these results. " +
-		"Product kinds: 'binary' is a simple yes/no bet on a price level by a date and is the easiest to explain; " +
+		"Binary filtering is unavailable because SDK 0.3.0 exposes no binary discriminator. Product kinds: " +
 		"'vanilla' is a single call or put; 'multi_leg' is a spread or butterfly.",
 	inputSchema: z.object({
 		side: z.enum(["buy", "sell"]).optional().describe("Taker side: buy pays premium; sell locks collateral and receives premium minus fee."),
@@ -67,9 +69,9 @@ export const searchOptionBookOrders = tool({
 			.optional()
 			.describe("Call or put structure; payoff also depends on taker side and implementation. Omit for both."),
 		kind: z
-			.enum(["binary", "vanilla", "multi_leg"])
+			.enum(["vanilla", "multi_leg"])
 			.optional()
-			.describe("Filter by product shape. Prefer 'binary' for beginners."),
+			.describe("Filter by product shape. Binary filtering is unavailable."),
 		maxDaysToExpiry: z
 			.number()
 			.int()
@@ -158,20 +160,20 @@ export const previewOptionBookTrade = tool({
         // Never treat a collateral amount as USD or assume a wrapper's exchange rate.
         // TODO-OWNER: supply a verified collateral/USD valuation source for tokens absent here.
         const tokenUsd = snapshot.marketData[fill.collateralToken.symbol];
-        const valuation = usdRisk(fill.maxLoss, tokenUsd, MAX_LOSS_USD);
+        const valuation = usdRisk(fill.maxLoss.amount, tokenUsd, MAX_LOSS_USD);
         const maxLossUsd = valuation?.amount ?? null;
         const executable = valuation?.withinLimit ?? false;
         const token = fill.collateralToken.symbol;
         return {
             ...fill, executable, asOf: snapshot.fetchedAt.toISOString(), instrument: describe(order),
             reason: executable ? undefined : maxLossUsd === null ? "Collateral USD valuation unavailable; cannot verify the 10 USD risk limit." : "Maximum loss exceeds the 10 USD agent risk limit.",
-            budget,
+            budget: { amount: budget, token, decimals: fill.collateralToken.decimals },
             risk: {
                 maxLossUsd: maxLossUsd === null ? null : String(maxLossUsd),
                 maxLoss: fill.maxLoss,
                 explanation: fill.side === "buy"
                     ? `You BUY this option. You pay the premium up front in ${token}. The most you can lose is that premium.`
-                    : `You SELL this option. You receive the premium minus the protocol fee and must LOCK ${fill.collateralRequired} in ${token} as collateral. You can lose up to that collateral.`,
+                    : `You SELL this option. You receive the premium minus the protocol fee and must LOCK ${fill.collateralRequired?.amount} in ${token} as collateral. You can lose up to that collateral.`,
                 maxPayoutUsd: null, breakEvenUsd: null,
                 unavailable: "Maximum payout and break-even are not computed yet and must not be estimated. Say they are unavailable if asked.",
             },

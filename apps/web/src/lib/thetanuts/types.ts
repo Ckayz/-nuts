@@ -12,10 +12,10 @@ export interface TradeableOrder {
 	/** Underlying symbol, e.g. "ETH". Null when it cannot be resolved. */
 	asset: string | null;
 	/**
-	 * "vanilla" for single-strike calls and puts, "binary" for the up/down
-	 * products, "multi_leg" for spreads, butterflies and condors.
+	 * "vanilla" for single-strike calls and puts; "multi_leg" for spreads,
+	 * butterflies and condors. SDK 0.3.0 has no binary discriminator.
 	 */
-	kind: "vanilla" | "binary" | "multi_leg" | null;
+	kind: "vanilla" | "multi_leg" | null;
 	/** SDK implementation name; null when unknown. */
 	productType: string | null;
 	isCall: boolean;

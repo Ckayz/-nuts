@@ -12,8 +12,13 @@ import type { Side, Ticket } from "@/lib/display-types";
 import { prepareTrade, quoteTicket, recordTrade } from "@/lib/trade/actions";
 import { FillDialog } from "@/components/market/fill-dialog";
 import { clearHeldFill, readHeldFill, sessionFillStore, writeHeldFill } from "@/lib/trade/held-fill";
+// C-R2 / C-R3: the same two helpers the agent's execution card uses, so the
+// manual ticket and the agent card are fenced by ONE implementation.
+import { approvalMatches, APPROVAL_RECEIPT_TIMEOUT_MS, fillIsStale } from "@/lib/trade/approval";
+import { formatBaseUnits } from "@/lib/market/units";
 import type {
 	FillCard,
+	PrepareFill,
 	QuoteRaw,
 	RecordResult,
 	RecordSuccess,
@@ -252,6 +257,37 @@ export function sameRequest(a: TicketRequest | null, b: TicketRequest | null): b
 export const TICKET_CHANGED_MESSAGE =
 	"The ticket changed while this was being prepared, so nothing was sent. Check the figures and press Trade again.";
 
+/**
+ * C-R2 (lane C confirming pass, confirming round, MAJOR). PRD 14, verbatim:
+ * "calldata must be built and broadcast within 30 seconds of the fetch that
+ * produced it." The ticket never checked (`rg preparedAt|fillIsStale` had no
+ * matches) and the reviewer measured 31-second-old calldata broadcast:
+ *   MARKET_STALE {"sends":[{"to":"0x1bdff855…","data":"0xSTALE"}],"prepares":1}
+ *
+ * The 30 seconds and the `fillIsStale` implementation are the PRD's and
+ * `lib/trade/approval.ts`'s; nothing here chooses a number.
+ *
+ * TODO-OWNER: wording.
+ */
+/**
+ * M5. What the ticket says when it stops waiting for an approval to be mined.
+ * It must NOT claim the approval failed — it may still land — and it must say
+ * that pressing again is safe. TODO-OWNER: wording.
+ */
+export const APPROVAL_NOT_CONFIRMED_MESSAGE =
+	"Your approval has not confirmed on Base yet, so nothing was filled. Nothing else was sent. Press Trade again once it confirms.";
+
+export const TOO_OLD_TO_SEND_MESSAGE =
+	"This trade could not be refreshed inside the 30 seconds a fill has to reach Base, so nothing was sent. Press Trade again.";
+
+/**
+ * C-R3. The allowance the ticket is about to ask for, read out of the approval
+ * calldata itself rather than reported alongside it. TODO-OWNER: wording.
+ */
+export function approvalAllowsSentence(amount: string, decimals: number, symbol: string): string {
+	return `This approval allows ${formatBaseUnits(BigInt(amount), decimals)} ${symbol}.`;
+}
+
 export function recordingSettled(result: RecordResult): result is RecordSuccess {
 	return result.ok;
 }
@@ -371,12 +407,19 @@ export function TakeASide({
 	const sideNote = trade === undefined ? ticket.sideNote : (view?.sideNote ?? ticket.sideNote);
 
 	const requote = useCallback(
-		(nextSide: Side, nextBudget: string) => {
+		/**
+		 * `note` survives the requote. Every requote clears the panel's message,
+		 * which silently swallowed the C5 "the price moved" sentence: the branch
+		 * set the message and then called this, so the user was shown nothing at
+		 * all for a send that had been refused. Callers that have something to say
+		 * pass it here instead.
+		 */
+		(nextSide: Side, nextBudget: string, note: string | null = null) => {
 			if (trade === undefined) return;
 			const seq = requoteSeq.current + 1;
 			requoteSeq.current = seq;
 			setPhase("quoting");
-			setMessage(null);
+			setMessage(note);
 			// C5. A new quote invalidates whatever the user had acknowledged.
 			setAcknowledged(null);
 			startTransition(async () => {
@@ -530,6 +573,39 @@ export function TakeASide({
 				setPhase("idle");
 				setMessage(TICKET_CHANGED_MESSAGE);
 			};
+			/**
+			 * C5, moved here by C-R3 (confirming round, MAJOR). Do the figures the
+			 * panel is SHOWING equal the figures the server just quoted?
+			 *
+			 * It used to run only at the fill stage, after the approval had already
+			 * been signed. `prepare.ts:155-185` issues an approval for EXACTLY the
+			 * fresh quote's debit (`fill.ts:38` encodes that same premium), so when
+			 * liquidity moved between the panel's quote and the preparation the user
+			 * was asked to allow the fresh amount while the panel still said the old
+			 * one — measured on a $5.00 panel:
+			 *   APPROVE_BEFORE_COMPARE {"sends":1,"sentAllowance":"20000000"}
+			 *
+			 * Returns false after refreshing the panel from the server, so the next
+			 * click signs for figures the user has actually seen.
+			 */
+			const economicsAgree = (expected: QuoteRaw): boolean => {
+				const shownRaw = acknowledged ?? quote?.raw ?? null;
+				if (sameEconomics(expected, shownRaw)) return true;
+				const moved = changedEconomics(expected, shownRaw);
+				setAcknowledged(expected);
+				setPhase("idle");
+				// Refresh the printed figures from the server so the panel shows what
+				// the next click will sign for — carrying the sentence through, because
+				// a requote clears the message it would otherwise wipe.
+				requote(
+					side,
+					budgetInput,
+					shownRaw === null
+						? "The panel has no quote to compare against. Check the figures and press Trade again."
+						: `The price moved while this was prepared (${moved.join(", ")}). The panel has been refreshed — check it and press Trade again to sign for the new figures.`,
+				);
+				return false;
+			};
 			try {
 				setPhase("preparing");
 				const first = await prepareTrade({
@@ -550,8 +626,34 @@ export function TakeASide({
 					// to THIS ticket. If the panel moved while the server was preparing,
 					// nothing is sent.
 					if (!stillMine()) return abandon();
+					// C-R3. Nothing is signed — not even an allowance — until the
+					// figures on screen are the figures being signed for.
+					if (!economicsAgree(ready.expected)) return;
+					// C-R3 / C#5. What the bytes about to be signed ACTUALLY allow,
+					// decoded from those bytes and compared with the amount the
+					// server said it issued. Same check the agent's card runs.
+					// PRD 10.2: "Allowances must be exact for the approved transaction."
+					const exact = approvalMatches({
+						data: ready.approve.data,
+						expectedSpender: ready.allowance.spender,
+						expectedAmount: ready.allowance.amount,
+					});
+					if (!exact.ok) {
+						setPhase("failed");
+						// TODO-OWNER: wording.
+						setMessage(`${exact.reason} Nothing was sent.`);
+						return;
+					}
 					setPhase("approving");
-					setMessage(ready.note);
+					// C-R3. The note now carries the decoded allowance, so the sentence
+					// beside the wallet prompt states the number in the transaction.
+					setMessage(
+						`${ready.note} ${approvalAllowsSentence(
+							ready.allowance.amount,
+							ready.allowance.tokenDecimals,
+							ready.allowance.tokenSymbol,
+						)}`.trim(),
+					);
 					// C4. `chainId` and `account` are pinned on every send: without
 					// them wagmi asserts NEITHER, so a wallet that moved chains (or
 					// accounts) between the guard above and this line would still be
@@ -567,10 +669,26 @@ export function TakeASide({
 					// simulated. Preparation used to continue on the approval HASH,
 					// which is only a broadcast: the refetch below then read an
 					// allowance that did not exist yet.
-					const approvalReceipt = await waitForTransactionReceipt(config, {
-						hash: approvalHash,
-						chainId: trade.chainId,
-					});
+					//
+					// M5. Bounded, and its failure has its own branch: an approval
+					// that never mines used to leave this button reading "Approving…",
+					// disabled, with no sentence at all. Any failure of the WAIT — a
+					// timeout, an unreachable RPC — means the same thing to the user
+					// (we do not know whether the allowance landed), so they are all
+					// answered the same way. Nothing is sent here; the next press
+					// re-prepares against the allowance that is actually on chain.
+					let approvalReceipt: { status: string };
+					try {
+						approvalReceipt = await waitForTransactionReceipt(config, {
+							hash: approvalHash,
+							chainId: trade.chainId,
+							timeout: APPROVAL_RECEIPT_TIMEOUT_MS,
+						});
+					} catch {
+						setPhase("failed");
+						setMessage(APPROVAL_NOT_CONFIRMED_MESSAGE);
+						return;
+					}
 					if (approvalReceipt.status !== "success") {
 						setPhase("failed");
 						setMessage("The approval did not succeed on Base, so nothing was filled.");
@@ -601,35 +719,68 @@ export function TakeASide({
 					return;
 				}
 
+				/**
+				 * C-R2 (confirming round, MAJOR). PRD 14 bounds fetch-to-broadcast at
+				 * 30 seconds, and the ticket checked nothing: the reviewer's probe
+				 * broadcast 31-second-old calldata with the maker signature still
+				 * valid (`MARKET_STALE {"sends":[{"data":"0xSTALE"}],"prepares":1}`).
+				 * The maker's expiry is a longer, different clock.
+				 *
+				 * The APPROVE stage is not checked here because `PrepareApprove`
+				 * carries no `preparedAt` (`lib/trade/types.ts`): an `approve(spender,
+				 * amount)` is not built from a book fetch and has no maker signature,
+				 * and the fill that follows it is prepared fresh and checked below.
+				 * The agent's card does exactly the same.
+				 */
+				let filling: PrepareFill = ready;
+				if (fillIsStale(filling.preparedAt, Date.now())) {
+					setPhase("preparing");
+					const fresh = await prepareTrade({
+						structureId: trade.structureId,
+						side,
+						budgetInput,
+						thesisId: trade.thesis?.id ?? null,
+					});
+					if (!fresh.ok) {
+						setPhase("failed");
+						setMessage(fresh.reason);
+						return;
+					}
+					if (fresh.stage !== "fill") {
+						setPhase("failed");
+						setMessage("The approval has not landed yet. Try again in a moment.");
+						return;
+					}
+					// C#1. A refresh is another round trip; the panel may have moved.
+					if (!stillMine()) return abandon();
+					filling = fresh;
+				}
+
 				// C5. The calldata about to be signed was built from a FRESH server
 				// quote that the browser has never shown. Nothing may be signed until
 				// the figures on screen are the figures being signed for.
-				const shownRaw = acknowledged ?? quote?.raw ?? null;
-				if (!sameEconomics(ready.expected, shownRaw)) {
-					const moved = changedEconomics(ready.expected, shownRaw);
-					setAcknowledged(ready.expected);
-					setPhase("idle");
-					setMessage(
-						shownRaw === null
-							? "The panel has no quote to compare against. Check the figures and press Trade again."
-							: `The price moved while this was prepared (${moved.join(", ")}). The panel has been refreshed — check it and press Trade again to sign for the new figures.`,
-					);
-					// Refresh the printed figures from the server so the panel shows
-					// what the next click will sign for.
-					requote(side, budgetInput);
-					return;
-				}
+				if (!economicsAgree(filling.expected)) return;
 
 				// C#1. The last check before the money moves. `sameEconomics` above
 				// compares NUMBERS; this compares WHICH TRADE, which is the thing that
 				// changed in the reviewer's probe while the numbers stayed self-
 				// consistent.
 				if (!stillMine()) return abandon();
+
+				// C-R2. The last age check before the money moves. A refresh that is
+				// itself already past the window means the round trip cannot finish
+				// inside PRD 14's bound, so nothing is broadcast.
+				if (fillIsStale(filling.preparedAt, Date.now())) {
+					setPhase("failed");
+					setMessage(TOO_OLD_TO_SEND_MESSAGE);
+					return;
+				}
+
 				setPhase("filling");
-				setMessage(ready.note);
+				setMessage(filling.note);
 				const hash = await sendTransactionAsync({
-					to: ready.fill.to,
-					data: ready.fill.data,
+					to: filling.fill.to,
+					data: filling.fill.data,
 					value: 0n,
 					// C4: same pinning as the approval.
 					chainId: trade.chainId,
@@ -639,7 +790,7 @@ export function TakeASide({
 				// C6-r2. Held BEFORE the recording is attempted: everything after
 				// this line can fail, and none of those failures may put a second
 				// fill in front of the user.
-				const fill: SentFill = { token: ready.token, txHash: hash };
+				const fill: SentFill = { token: filling.token, txHash: hash };
 				holdSent(fill);
 				await finishRecording(fill);
 			} catch (error) {

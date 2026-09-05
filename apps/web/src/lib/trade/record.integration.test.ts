@@ -895,6 +895,73 @@ describeLive("money-path fences (C1 receipt binding, C2 hash squatting, C3 ticke
 		await dropPosition(result.positionId);
 	}, 60_000);
 
+	/**
+	 * CL-2 (Claude's own leg, confirming round). The confirming UPDATE's
+	 * `status = 'pending'` predicate was pinned by nothing: dropping
+	 * `eq(positions.status, "pending")` from `record.ts` left this file at
+	 * 32 pass / 0 fail (measured on a fresh 0008 throwaway).
+	 *
+	 * That predicate is what C3 rests on — a row that has already reached a
+	 * TERMINAL state must never regress to `confirmed`, and the loser of two
+	 * concurrent confirmations must write no second `activity` row. The
+	 * `ChainReader` seam is the injection point: the reader flips the row while
+	 * `recordTradeFor` is awaiting the receipt, which is exactly the window a
+	 * concurrent writer occupies.
+	 */
+	test("C3: a row that turned terminal mid-recording never regresses to confirmed", async () => {
+		const { fill, user, ticket, input, txHash } = await buyFixture();
+		let flipped = 0;
+		const racingReader: ChainReader = {
+			waitForTransactionReceipt: async () => {
+				// The pending row exists by now (`claimPending` inserted it). Turn it
+				// terminal, as a concurrent confirmation or a revert-marking would.
+				flipped += (
+					await db
+						.update(positions)
+						.set({ status: "failed", failureReason: "transaction_reverted" })
+						.where(and(eq(positions.chainId, 8453), eq(positions.txHash, txHash), eq(positions.status, "pending")))
+						.returning()
+				).length;
+				return { status: "success", logs: fill.logs };
+			},
+			getTransaction: async () => ({ to: "0x1bDff855d6811728acaDC00989e79143a2bdfDed", input }),
+		};
+
+		const result = await recordTradeFor(
+			{ userId: user.id, walletAddress: fill.taker },
+			{ token: encodeTradeTicket(ticket), txHash },
+			racingReader,
+		);
+
+		const rows = await db.select().from(positions).where(eq(positions.txHash, txHash));
+		const row = rows[0];
+		const events = row === undefined ? [] : await db.select().from(activity).where(eq(activity.positionId, row.id));
+		expect({
+			flipped,
+			rows: rows.length,
+			status: row?.status,
+			failureReason: row?.failureReason,
+			confirmedAt: row?.confirmedAt,
+			// Nothing economic was written over the terminal row.
+			optionAddress: row?.optionAddress,
+			// The confirming UPDATE and its activity insert share one transaction:
+			// no row means no event.
+			events: events.length,
+			// The caller is handed the row that actually exists, not an invented one.
+			resultStatus: result.ok ? result.status : `refused:${result.code}`,
+		}).toEqual({
+			flipped: 1,
+			rows: 1,
+			status: "failed",
+			failureReason: "transaction_reverted",
+			confirmedAt: null,
+			optionAddress: null,
+			events: 0,
+			resultStatus: "failed",
+		});
+		for (const stale of rows) await dropPosition(stale.id);
+	}, 60_000);
+
 	test("C3: two concurrent confirmations write ONE row and ONE activity entry", async () => {
 		const { fill, user, ticket, input, txHash } = await buyFixture();
 		const token = encodeTradeTicket(ticket);

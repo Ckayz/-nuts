@@ -40,27 +40,76 @@ export const USD_DECIMALS = 8;
 export type PnlBasis = "settled" | "estimate" | "derived" | "unavailable";
 
 /**
- * C#9 (lane C confirming pass, finding 9). The `failure_reason` that means the
- * fill IS on chain.
+ * C#9, widened by C-R4 (lane C confirming pass, confirming round). The
+ * `failure_reason` values that mean the fill IS on chain.
  *
- * `lib/trade/record.ts` writes it when a transaction carries a matched
- * OptionBook fill for this wallet but does not expose the `fillOrder` call, so
- * the contract count cannot be proven (a batched smart-wallet execution, an
- * ERC-4337 UserOperation). The guard stays closed — nothing is recorded from
- * the browser's own figure — but the money DID move, and the reviewer measured
- * the page telling that holder "This transaction failed, so there is no
- * position." (`record.ts:266` -> `pnl.ts:268`).
+ * `positions.status = 'failed'` covers two different worlds, and the row's
+ * reason is the only thing that separates them.
+ *
+ * `lib/trade/record.ts` writes every reason below AFTER a SUCCESSFUL receipt
+ * and, for the first three, after `matchFillEvent` has already bound the
+ * OptionBook, the maker, the nonce and this wallet as the taker
+ * (`record.ts:266`, `:274`, `:288`). The money left the wallet in all three;
+ * what failed is OUR ability to reproduce the trade's economics, so the guard
+ * stays closed and nothing is recorded. Round 2 mapped only the quantity case,
+ * and the reviewer measured the other two telling the holder of a real position
+ * "This transaction failed, so there is no position.":
+ *
+ *   fill_quantity_unproven             -> Your fill is on chain, …
+ *   filled_order_differs_from_prepared -> This transaction failed, …
+ *   debit_differs_from_prepared        -> This transaction failed, …
+ *
+ * NOT in the set, and why:
+ *  - `transaction_reverted` (`record.ts:234`) — the receipt itself is a revert.
+ *  - `no_matching_order_filled` (`record.ts:243`) — the receipt succeeded but
+ *    carries no OptionBook fill of the prepared order for THIS wallet, so
+ *    nothing proves this holder's money moved.
+ *  - `superseded_by_onchain_taker` (`record.ts:590`) — this row belongs to a
+ *    wallet that merely CLAIMED the hash and was then proven, by the same
+ *    `matchFillEvent` binding, not to be its taker. Only one address can be the
+ *    taker of a fill, so the superseded holder's own money did not move here.
+ *    TODO-OWNER: that row still reads "This transaction failed", which is not
+ *    what happened to it either; a third sentence for "someone else's fill" is
+ *    a product decision and is NOT made here.
  *
  * No new `position_status` value and no migration: the row already carries the
- * reason, and it is the reason that distinguishes the two outcomes.
+ * reason, and it is the reason that distinguishes the outcomes.
  */
 export const FILL_ON_CHAIN_UNPROVEN = "fill_quantity_unproven";
 
-/** C#9. Is this `failed` row a REVERTED transaction, or a proof failure? */
+/**
+ * C-R4. Every refusal `record.ts` writes AFTER proving this wallet is the taker
+ * of a successful fill. Frozen as a set so `resolvePnl`, `positionStatusDisplay`
+ * and every card, row, OG image and portfolio list read the SAME rule.
+ */
+export const ON_CHAIN_REFUSAL_REASONS = [
+	FILL_ON_CHAIN_UNPROVEN,
+	"filled_order_differs_from_prepared",
+	"debit_differs_from_prepared",
+] as const;
+
+export type OnChainRefusalReason = (typeof ON_CHAIN_REFUSAL_REASONS)[number];
+
+/** C#9 / C-R4. Is this `failed` row a REVERTED transaction, or a refusal over a fill that IS on chain? */
 export function failedButOnChain(status: PositionStatus, failureReason: string | null | undefined): boolean {
-	return status === "failed" && failureReason === FILL_ON_CHAIN_UNPROVEN;
+	if (status !== "failed") return false;
+	if (typeof failureReason !== "string") return false;
+	return (ON_CHAIN_REFUSAL_REASONS as readonly string[]).includes(failureReason);
 }
 
+/**
+ * C-R4. The one honest sentence for each on-chain refusal.
+ *
+ * Same family, different cause. TODO-OWNER: both sentences. The first is the
+ * one round 2 shipped; the second is provisional and covers the two refusals
+ * where the fill is on chain but its economics could not be reproduced from it.
+ */
+export function onChainRefusalDetail(failureReason: string): string {
+	if (failureReason === FILL_ON_CHAIN_UNPROVEN) {
+		return "Your fill is on chain, but the contract count could not be proven from this transaction, so the position is not tracked yet.";
+	}
+	return "Your fill is on chain, but it does not match the trade that was prepared, so the position is not tracked yet.";
+}
 
 export interface PnlInputs {
 	readonly status: PositionStatus;
@@ -153,16 +202,15 @@ export function resolvePnl(inputs: PnlInputs): PnlResolution {
 	const settlementPrice = decimalOrNull(inputs.settlementPriceUsd);
 
 	if (inputs.status === "failed") {
-		// C#9. A quantity-unproven fill is NOT a reverted transaction: the money
-		// left the wallet and the option exists. Saying otherwise is a false
-		// statement about a real position.
+		// C#9 / C-R4. A refusal written after a proven fill is NOT a reverted
+		// transaction: the money left the wallet and the option exists. Saying
+		// otherwise is a false statement about a real position.
 		if (failedButOnChain(inputs.status, inputs.failureReason)) {
 			return {
 				pnlUsd: null,
 				basis: "unavailable",
-				// TODO-OWNER: wording.
-				detail:
-					"Your fill is on chain, but the contract count could not be proven from this transaction, so the position is not tracked yet.",
+				// TODO-OWNER: wording, in `onChainRefusalDetail`.
+				detail: onChainRefusalDetail(inputs.failureReason as string),
 			};
 		}
 		return { pnlUsd: null, basis: "unavailable", detail: "This transaction failed, so there is no position." };

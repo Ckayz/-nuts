@@ -6,7 +6,7 @@
  */
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mount, type Mounted } from "@/test/hook-runner";
-import { calls, HASH, replies, resetTradeMocks, USDC, WALLET } from "@/test/trade-mocks";
+import { calls, HASH, neverLandingReceipt, replies, resetTradeMocks, USDC, WALLET } from "@/test/trade-mocks";
 import type { QuoteRaw } from "@/lib/trade/types";
 import type { PreparedTrade } from "./trade-execution";
 
@@ -340,5 +340,167 @@ describe("C#8: fill calldata is never broadcast past PRD 14's 30-second window",
 			prepares: 0,
 			sends: ["0xFILL"],
 		});
+	});
+});
+
+/**
+ * C-R1 (confirming round, MAJOR). `agent-chat.tsx:300` renders one
+ * `TradeExecution` per prepared tool result, so a transcript holds SEVERAL
+ * mounted cards. Each read the wallet's hold once at mount and then checked
+ * only its own `sent`:
+ *
+ *   AFTER_FIRST  {"sends":1,"held":1,"a":"Record the fill","b":"Sign in wallet"}
+ *   AFTER_SECOND {"sends":2,"prepares":0,"records":2}
+ *   NO_STORAGE_REMOUNT {"sends":2,"records":2}
+ */
+describe("C-R1: a second mounted card must not send a second fill", () => {
+	/**
+	 * `prepareTradeFor`'s own rule, modelled: while the wallet holds a `pending`
+	 * row (written by `recordTrade`), preparation is refused with
+	 * `UNRECORDED_FILL` (`lib/trade/prepare.ts:84`).
+	 */
+	function serverWithUnrecordedFence(): void {
+		replies.agentPrepare = async () => {
+			if (calls.records.length > 0) {
+				return { ok: false, code: "UNRECORDED_FILL", reason: "Your last fill is not recorded yet." };
+			}
+			return {
+				ok: true,
+				stage: "fill",
+				fill: { to: BOOK as `0x${string}`, data: "0xFRESH" as const, value: "0" as const },
+				token: "tok2",
+				thesisId: null,
+				expected: RAW,
+				signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+				preparedAt: new Date().toISOString(),
+				note: "",
+			};
+		};
+	}
+
+	test("AFTER_SECOND — two mounted cards, the first fill unrecorded", async () => {
+		reset();
+		replies.record = async () => ({ ok: false, code: "LOST", reason: "The server did not answer." });
+		const a = mount(TradeExecution, { trade: fillTrade() });
+		const b = mount(TradeExecution, { trade: fillTrade() });
+
+		press(a);
+		await a.settle();
+		const afterFirst = { sends: calls.sends.length, records: calls.records.length, a: primary(a).text };
+
+		press(b);
+		await b.settle();
+
+		expect({
+			afterFirst,
+			afterSecond: { sends: calls.sends.length, prepares: calls.agentPrepares, records: calls.records.length },
+			// The second card now offers to RECORD the first card's fill.
+			bLabel: primary(b).text,
+			bSaysHeld: b.text().includes("is not recorded yet"),
+		}).toEqual({
+			afterFirst: { sends: 1, records: 1, a: "Record the fill" },
+			afterSecond: { sends: 1, prepares: 0, records: 1 },
+			bLabel: "Record the fill",
+			bSaysHeld: true,
+		});
+
+		// Pressing the adopted card RECORDS the first card's fill; it never sends.
+		press(b);
+		await b.settle();
+		expect({ sends: calls.sends.length, records: calls.records.length }).toEqual({ sends: 1, records: 2 });
+		expect(calls.records.every((r) => r.txHash === HASH)).toBe(true);
+	});
+
+	test("an APPROVAL is refused too while a fill is held", async () => {
+		reset();
+		replies.record = async () => ({ ok: false, code: "LOST", reason: "The server did not answer." });
+		// Mounted BEFORE the fill, so its mount-time restore finds nothing: only
+		// the pre-send re-read can stop it.
+		const b = mount(TradeExecution, { trade: approveTrade() });
+		const a = mount(TradeExecution, { trade: fillTrade() });
+		press(a);
+		await a.settle();
+		expect(calls.sends.length).toBe(1);
+
+		press(b);
+		await b.settle();
+		expect({ sends: calls.sends.length, label: primary(b).text }).toEqual({ sends: 1, label: "Record the fill" });
+	});
+
+	test("NO_STORAGE_REMOUNT — with no store, the SERVER fence stops the second fill", async () => {
+		reset();
+		serverWithUnrecordedFence();
+		replies.record = async () => ({ ok: false, code: "LOST", reason: "The server did not answer." });
+		const real = (globalThis as { sessionStorage?: unknown }).sessionStorage;
+		(globalThis as { sessionStorage?: unknown }).sessionStorage = undefined;
+		try {
+			const first = mount(TradeExecution, { trade: fillTrade() });
+			press(first);
+			await first.settle();
+			// The card had to re-prepare before sending, because nothing local can
+			// see another surface's fill when there is no store.
+			const afterFirst = { sends: calls.sends.map((s) => s.data), prepares: calls.agentPrepares };
+
+			first.unmount();
+			const second = mount(TradeExecution, { trade: fillTrade() });
+			press(second);
+			await second.settle();
+
+			expect({
+				afterFirst,
+				afterSecond: { sends: calls.sends.length, prepares: calls.agentPrepares },
+				refused: second.text().includes("not recorded yet"),
+			}).toEqual({
+				afterFirst: { sends: ["0xFRESH"], prepares: 1 },
+				afterSecond: { sends: 1, prepares: 2 },
+				refused: true,
+			});
+		} finally {
+			(globalThis as { sessionStorage?: unknown }).sessionStorage = real;
+		}
+	});
+
+	test("with a working store a fresh card still sends without an extra round trip", async () => {
+		reset();
+		const h = mount(TradeExecution, { trade: fillTrade() });
+		press(h);
+		await h.settle();
+		expect({ prepares: calls.agentPrepares, sends: calls.sends.map((s) => s.data) }).toEqual({
+			prepares: 0,
+			sends: ["0xFILL"],
+		});
+	});
+});
+
+/**
+ * M5. The agent card carried the same unbounded approval wait as the market
+ * ticket. Reproduced with the same harness:
+ *   AGENT_STUCK {"label":"Confirm approval\u2026","disabled":true}
+ */
+describe("M5: the agent card stops waiting for an approval and says so", () => {
+	test("a receipt that never arrives ends in a usable card with one sentence", async () => {
+		reset();
+		neverLandingReceipt();
+		const h = mount(TradeExecution, { trade: approveTrade() });
+		press(h);
+		await h.settle();
+		const button = primary(h);
+		expect({
+			disabled: button.props.disabled === true,
+			sends: calls.sends.length,
+			prepares: calls.agentPrepares,
+			says: h.text().includes("has not confirmed on Base yet"),
+			claimsFailure: h.text().includes("did not succeed"),
+		}).toEqual({ disabled: false, sends: 1, prepares: 0, says: true, claimsFailure: false });
+	});
+
+	test("a REVERTED approval still reads as a failure", async () => {
+		reset();
+		replies.receiptStatus = "reverted";
+		const h = mount(TradeExecution, { trade: approveTrade() });
+		press(h);
+		await h.settle();
+		expect(h.text()).toContain("The approval did not succeed on Base");
+		expect(calls.sends.length).toBe(1);
 	});
 });

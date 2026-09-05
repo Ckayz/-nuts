@@ -225,10 +225,10 @@ export const POSITION_STATUS_DISPLAY: Record<Domain.PositionStatus, { label: str
  * C#9. The chip for a position, given WHY a failed row failed.
  *
  * `failed` covers two different things. A reverted transaction is "Failed":
- * nothing happened, nothing is owed. A `fill_quantity_unproven` row is a fill
- * that IS on chain whose contract count could not be proven from the
- * transaction (`lib/trade/record.ts`), so styling it as a revert tells the
- * holder of a real position that their money did nothing.
+ * nothing happened, nothing is owed. Every reason in `ON_CHAIN_REFUSAL_REASONS`
+ * (`lib/position/lifecycle.ts`) is a fill that IS on chain and whose economics
+ * this app then refused to reproduce (`lib/trade/record.ts`), so styling one as
+ * a revert tells the holder of a real position that their money did nothing.
  *
  * The tone stays inside the mockup's three (`live`/`ending`/`settled`); the
  * word is the shortest honest one. TODO-OWNER: the label.

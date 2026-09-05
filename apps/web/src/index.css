@@ -91,6 +91,16 @@ em{font-style:normal}
   transition:border-color .16s var(--ease)}
 .wallet:hover{border-color:#33333f}
 .wallet .dot{width:7px;height:7px;border-radius:50%;background:var(--gain);flex:none}
+/* The dot was hard-coded green, so it read "connected and fine" while the wallet
+   was disconnected or on the wrong chain. It now reports what is true. */
+.wallet .dot.off{background:var(--muted)}
+.wallet .dot.warn{background:var(--loss)}
+/* Before the session resolves the chip reserves its own width, so the header
+   does not jump when it does. Matches the truncated-address states. */
+.wallet.mut{width:132px}
+/* Wallet rows in the connect dialog: the connector's own icon, then its name. */
+.wallet-choice{justify-content:flex-start;gap:10px}
+.wallet-choice img{border-radius:6px;flex:none}
 
 /* ---------- nav ---------- */
 .nav{display:flex;align-items:center;gap:26px;padding:0 24px;height:46px;

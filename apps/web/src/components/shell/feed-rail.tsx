@@ -26,7 +26,14 @@ export function FeedRail({ posts, limit = 5 }: { posts: Thesis[]; limit?: number
 						<Avatar seed={post.creator.avatarSeed} initials={post.creator.initials} size={30} />
 						<div className="t">
 							<div className="n">
-								{post.creator.handleLabel}
+								{/* The NAME, not the handle: the mockup's rail row prints the
+								    bare `.p-name` string (`#tpl-rail`, lines 436/442/448/454/460 —
+								    "merkle_mike", "tailbet", …), and every handle in that file
+								    carries a leading "@" (lines 539, 574, 592, 829, 1066, 1178).
+								    The feed byline already prints `displayName`; the rail printed
+								    `handleLabel`, so one page spoke two vocabularies about the
+								    same person (demo-seed report D4). */}
+								{post.creator.displayName}
 								{/* `postedLabel` carries the byline's leading "· "; the rail
 								    shows the bare time. */}
 								<span>{post.postedLabel.replace(/^·\s*/, "")}</span>

@@ -1,4 +1,4 @@
-import { Avatar } from "@/components/primitives";
+import { Avatar, Chip } from "@/components/primitives";
 import type { TextToken, TradeCard as TradeCardView } from "@/lib/display-types";
 
 /**
@@ -11,32 +11,44 @@ import type { TextToken, TradeCard as TradeCardView } from "@/lib/display-types"
  *
  * `tokens` is absent for a post built by a producer that predates this round —
  * the plain `text` is then rendered unchanged.
+ *
+ * `as` exists because the mockup's post body is ONE paragraph whose second
+ * block is the rationale (`.p-body .second`), and a `<p>` inside a `<p>` is not
+ * parseable HTML. The default stays `p` for `/t/[slug]` and the composer.
  */
 export function PostText({
 	text,
 	tokens,
 	className = "t",
+	as: As = "p",
 }: {
 	text: string;
 	tokens: readonly TextToken[] | undefined;
 	className?: string;
+	as?: "p" | "span";
 }) {
-	if (tokens === undefined) return <p className={className}>{text}</p>;
+	if (tokens === undefined) return <As className={className}>{text}</As>;
 	return (
-		<p className={className}>
+		<As className={className}>
 			{tokens.map((token, index) =>
 				// Tokens are positional slices of one immutable string rebuilt
 				// deterministically on every render, so the index is a stable key.
 				token.kind === "text" ? (
 					<span key={index}>{token.value}</span>
 				) : (
-					<a key={index} href={token.href} className="mono">
+					<a key={index} href={token.href}>
 						{token.label}
 					</a>
 				),
 			)}
-		</p>
+		</As>
 	);
+}
+
+/** The coloured arrow beside a percent; the number itself stays neutral. */
+export function PnlArrow({ pnlClass }: { pnlClass: string }) {
+	if (pnlClass === "") return null;
+	return <em className={pnlClass}>{pnlClass === "bear" ? "▼" : "▲"}</em>;
 }
 
 /**
@@ -44,88 +56,50 @@ export function PostText({
  * link stays in the text and the position it points at renders as a clickable
  * card underneath (owner 2026-09-05).
  *
- * Layout follows the share card the owner sent (`.demo/fomo-share-card.png`):
- * owner + status, the instrument, one big signed P&L with a percent, and three
- * stat tiles. No chart and no price line — Thetanuts publishes no price history
- * and the owner removed the charts.
+ * Shape is the mockup's `.tcard` (docs/mockups/thesis-fun-mockup.html): asset
+ * avatar, instrument, status chip and date on top; one sub-line; the big signed
+ * P&L with its percent; three stat tiles. No chart and no price line —
+ * Thetanuts publishes no price history and the owner removed the charts.
  *
- * WHY `<a>` AND NOT `<Link>`: `typedRoutes` is on and `/p/[id]` is built by
- * another worker this round, so `<Link href={`/p/${id}`}>` does not type-check
- * here — measured: "Type '`/p/${string}`' is not assignable to type
- * 'UrlObject | RouteImpl<`/p/${string}`>'". Once that route lands this becomes a
- * one-word swap to `<Link>` for client-side navigation.
- *
- * WHY INLINE STYLES: `src/index.css` belongs to another worker's fence this
- * round. Every value below is an existing design token, and the card surface
- * repeats the mockup's `.poscard` surface exactly (background `--tn-s`, border
- * `--tn-l`, radius 12px, padding 12px 14px). Neutral labels, colour only on
- * numbers — the house colour rule.
+ * DIVERGENCE, reported: the mockup's top-right slot is the expiry date, and
+ * `View.TradeCard` carries no date. It shows the position's OWNER instead,
+ * which the shape does carry and which matters here — a post can link somebody
+ * else's position.
  */
 export function TradeCard({ card }: { card: TradeCardView }) {
 	return (
 		<a
+			className="tcard"
 			href={card.href}
 			aria-label={`Position by ${card.owner.displayName}: ${card.instrumentLabel}, ${card.pnlLabel} ${card.pnlUsd.signed}`}
-			style={{
-				display: "block",
-				background: "var(--tn-s)",
-				border: "1px solid var(--tn-l)",
-				borderRadius: "12px",
-				padding: "12px 14px",
-				color: "inherit",
-			}}
 		>
-			<div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-				<Avatar initials={card.owner.initials} size="s" />
-				<b style={{ fontWeight: 600 }}>{card.owner.displayName}</b>
-				<span className="mono mut" style={{ fontSize: "12px" }}>
-					@{card.owner.handle}
-				</span>
-				<span className="tag" style={{ marginLeft: "auto" }}>
-					{card.sideLabel}
-				</span>
-				<span className="tag">{card.statusLabel}</span>
+			<div className="tc-top">
+				{/* The owner, not the asset: `View.TradeCard`'s instrument label IS
+				    the ticker, so an asset avatar beside it would print it twice —
+				    and an unfurled link can point at somebody else's position. */}
+				<Avatar initials={card.owner.initials} size={26} />
+				<span className="tc-inst">{card.instrumentLabel}</span>
+				<Chip flat={card.settled}>{card.statusLabel}</Chip>
+				<span className="tc-date">@{card.owner.handle}</span>
 			</div>
-
-			<div className="lbl" style={{ marginTop: "10px" }}>
-				{card.instrumentLabel}
+			<div className="tc-sub">
+				{card.sideLabel} · {card.pnlLabel}
 			</div>
-
-			<div style={{ display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap" }}>
-				<span
-					className={`mono ${card.pnlUsd.pnlClass}`}
-					style={{ fontSize: "26px", fontWeight: 600, letterSpacing: "-.01em" }}
-				>
-					{card.pnlUsd.signed}
-				</span>
+			<div className="tc-pnl">
+				<b className={`num ${card.pnlUsd.pnlClass}`}>{card.pnlUsd.signed}</b>
 				{card.pnlPct === null ? null : (
-					<span className="mono" style={{ fontSize: "12px" }}>
-						<span className={card.pnlUsd.pnlClass}>{card.pnlPct.value}</span>
-						<span className="mut"> {card.pnlPct.basis}</span>
+					<span className="num">
+						<PnlArrow pnlClass={card.pnlUsd.pnlClass} /> {card.pnlPct.value}{" "}
+						<span className="mut">{card.pnlPct.basis}</span>
 					</span>
 				)}
-				<span className="mut" style={{ fontSize: "12px", marginLeft: "auto" }}>
-					{card.pnlLabel}
-				</span>
 			</div>
-
-			<div
-				style={{
-					display: "grid",
-					gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-					gap: "10px",
-					marginTop: "10px",
-					paddingTop: "10px",
-					borderTop: "1px solid var(--tn-l)",
-				}}
-			>
+			<div className="tiles">
 				{card.stats.map((stat) => (
-					<div key={stat.label} style={{ display: "flex", flexDirection: "column", gap: "3px", minWidth: 0 }}>
-						<span className="lbl">{stat.label}</span>
-						<span className="mono" style={{ fontSize: "14px", fontWeight: 600 }}>
-							{stat.value}
-						</span>
-					</div>
+					<span className="tile" key={stat.label}>
+						<i>{stat.label}</i>
+						<b className="num">{stat.value}</b>
+					</span>
 				))}
 			</div>
 		</a>
@@ -136,10 +110,10 @@ export function TradeCard({ card }: { card: TradeCardView }) {
 export function TradeCards({ cards }: { cards: readonly TradeCardView[] | undefined }) {
 	if (cards === undefined || cards.length === 0) return null;
 	return (
-		<div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+		<>
 			{cards.map((card) => (
 				<TradeCard key={card.positionId} card={card} />
 			))}
-		</div>
+		</>
 	);
 }

@@ -1,31 +1,36 @@
 import Link from "next/link";
-import { Bar } from "@/components/primitives";
+import type { ReactNode } from "react";
+import { Avatar } from "@/components/primitives";
 import { pnlClass, signedUsd, usd } from "@/lib/format";
-import type { Position, TrendingItem } from "@/lib/display-types";
+import type { MarketSummary, Position, TrendingItem } from "@/lib/display-types";
 
-function Thumb({ asset }: { asset: string }) {
-	return <span className={`thumb ${asset.toLowerCase()}`}>{asset}</span>;
-}
-
-export function TrendingList({ items }: { items: TrendingItem[] }) {
+/**
+ * The mockup's `.row`: asset avatar, two lines of neutral text, one figure on
+ * the right in money colour (docs/mockups/thesis-fun-mockup.html). Nothing here
+ * draws a bar — the round-1 design puts colour on numbers only.
+ */
+export function TrendingList({ items, note }: { items: TrendingItem[]; note?: ReactNode }) {
 	return (
-		<div className="tl">
-			{items.map((it) => (
-				<Link className="it" href={`/t/${it.slug}`} key={it.slug}>
-					<Thumb asset={it.asset} />
-					<div className="b">
-						<span className="n">{it.headline}</span>
-						<span className="d">
-							<span>{it.creatorHandle}</span>
-							<span>{it.timeLabel}</span>
-							<span className={pnlClass(it.pnlUsd) || undefined}>
-								{signedUsd(it.pnlUsd)}
-							</span>
+		<div className="card">
+			<div className="card-b">
+				{items.map((it) => (
+					<Link className="row" href={`/t/${it.slug}`} key={it.slug}>
+						<Avatar initials={it.asset === "" ? "—" : it.asset} tone="asset" size={30} />
+						<span className="t">
+							<b>{it.headline}</b>
+							<i>
+								{[it.creatorHandle, it.timeLabel, `${it.bullPct}% bull`]
+									.filter(Boolean)
+									.join(" · ")}
+							</i>
 						</span>
-						<Bar pct={it.bullPct} />
-					</div>
-				</Link>
-			))}
+						<span className="v">
+							<b className={`num ${pnlClass(it.pnlUsd)}`}>{signedUsd(it.pnlUsd)}</b>
+						</span>
+					</Link>
+				))}
+			</div>
+			{note === undefined ? null : <div className="card-f">{note}</div>}
 		</div>
 	);
 }
@@ -38,33 +43,50 @@ export function TrendingList({ items }: { items: TrendingItem[] }) {
  */
 export function PositionRow({ position }: { position: Position }) {
 	return (
-		<Link className="it" href={`/p/${position.id}`}>
-			<Thumb asset={position.asset} />
-			<div className="b">
-				<span className="n">
-					{position.thesisHeadline ?? `${position.asset} position`}
-				</span>
-				<span className="d">
-					<span className={position.side}>
-						{position.side === "bull" ? "Bull" : "Bear"}
-					</span>
-					<span>{usd(position.riskedUsd)}</span>
-					<span className={pnlClass(position.livePnlUsd) || undefined}>
-						{signedUsd(position.livePnlUsd)}
-					</span>
-				</span>
-			</div>
+		<Link className="row" href={`/p/${position.id}`}>
+			<Avatar initials={position.asset === "" ? "—" : position.asset} tone="asset" size={30} />
+			<span className="t">
+				<b>{position.thesisHeadline ?? `${position.asset} position`}</b>
+				<i>
+					{position.side === "bull" ? "Bull" : "Bear"} · {usd(position.riskedUsd)} risked
+					{position.settled ? " · settled" : ""}
+				</i>
+			</span>
+			<span className="v">
+				<b className={`num ${pnlClass(position.livePnlUsd)}`}>{signedUsd(position.livePnlUsd)}</b>
+			</span>
 		</Link>
 	);
 }
 
 export function PositionList({ positions }: { positions: Position[] }) {
 	return (
-		<div className="tl">
+		<div className="card-b">
 			{positions.map((p) => (
 				// Keyed by the position's own id: two fills on one post, or two
 				// standalone fills, are different rows and must not collide.
 				<PositionRow key={p.id} position={p} />
+			))}
+		</div>
+	);
+}
+
+/** The feed's right-hand Markets panel rows. */
+export function MarketList({ markets }: { markets: MarketSummary[] }) {
+	return (
+		<div className="card-b">
+			{markets.map((market) => (
+				<Link className="row" href={`/m/${market.slug}`} key={market.slug}>
+					<Avatar initials={market.asset} tone="asset" size={30} />
+					<span className="t">
+						<b>{market.name}</b>
+						<i>{market.asset} · Base</i>
+					</span>
+					<span className="v">
+						<b className="num">{market.spotUsd.usd2}</b>
+						<i className={`num ${market.changeClass}`}>{market.changeLabel}</i>
+					</span>
+				</Link>
 			))}
 		</div>
 	);

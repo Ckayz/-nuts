@@ -10,7 +10,7 @@ export function LikeButton({ thesisId, likes, liked, signedIn = false, databaseM
 	const [pending, startTransition] = useTransition();
 	const [state, optimistic] = useOptimistic(databaseMode ? { liked, likes } : local);
 	const disabled = pending || (databaseMode && !signedIn);
-	return <button type="button" className={state.liked ? "liked" : undefined}
+	return <button type="button" className={state.liked ? "act on" : "act"}
 		aria-pressed={state.liked} aria-label={`Like, ${state.likes}`} disabled={disabled}
 		title={databaseMode && !signedIn ? "Sign in using the wallet control" : undefined}
 		onClick={() => {
@@ -21,5 +21,5 @@ export function LikeButton({ thesisId, likes, liked, signedIn = false, databaseM
 				optimistic(next);
 				try { await toggleLike(thesisId, next.liked); } catch { /* Roll back to server props. */ }
 			});
-		}}><HeartIcon filled={state.liked} />{state.likes}</button>;
+		}}><HeartIcon filled={state.liked} /><span className="num">{state.likes}</span></button>;
 }

@@ -371,3 +371,81 @@ test("T-1: approving a card carries no decline reason", () => {
 	resetTradeMocks();
 	signedOut();
 });
+
+/* ------------------------------------------------------------------ *
+ * D-6: the same chip twice in one row
+ * ------------------------------------------------------------------ */
+
+test("D-6: a chip that two sources both propose is rendered once", () => {
+	// `agent-chat.tsx` concatenates `postFillSuggestions(...)` with
+	// `chipsForTurn(...)`, and BOTH contain "Show my positions" — the first as a
+	// deterministic post-fill chip, the second from the signed-in fallback pool.
+	// `SuggestionRow` keys on the label, so the row rendered two identical
+	// buttons under one duplicated React key.
+	const positions = { label: "Show my positions", send: "Show my positions." };
+	const html = renderToStaticMarkup(
+		<SuggestionRow
+			chips={[
+				{ label: "Write a post about it", href: "/new?link=/p/1111" },
+				positions,
+				{ label: "What can I trade right now?", send: "What can I trade right now?" },
+				// The duplicate, as the fallback pool supplies it — same label,
+				// different text to send.
+				{ label: "Show my positions", send: "Show me my open positions." },
+			]}
+			onSend={() => {}}
+		/>,
+	);
+	console.log("D6_ROW", JSON.stringify(pills(html)));
+	expect(pills(html)).toEqual(["Write a post about it", "Show my positions", "What can I trade right now?"]);
+	// The FIRST of the two survives: the deterministic chip leads for a reason.
+	expect(html).toContain("Show my positions</button>");
+});
+
+test("D-6: two chips that differ only in what they SEND are still one row entry", () => {
+	const html = renderToStaticMarkup(
+		<SuggestionRow
+			chips={[
+				{ label: "Same", send: "one" },
+				{ label: "Same", send: "two" },
+				{ label: "Other", send: "three" },
+			]}
+			onSend={() => {}}
+		/>,
+	);
+	expect(pills(html)).toEqual(["Same", "Other"]);
+});
+
+/* ------------------------------------------------------------------ *
+ * D-7: the cutter runs on replies, never on the person's own message
+ * ------------------------------------------------------------------ */
+
+test("D-7: a user who types a line starting SUGGEST: sees their whole message", () => {
+	// The trailer is a convention the MODEL is asked to follow. Applying the
+	// cutter to `role === "user"` truncated a person's own words with no trace:
+	// the reviewer measured 'What does this mean?' rendered for a message that
+	// also said 'SUGGEST: buy low sell high'.
+	const typed = "What does this mean?\nSUGGEST: buy low sell high";
+	const html = render([
+		{ id: "u1", role: "user", parts: [{ type: "text", text: typed, state: "done" }] },
+		answer("Here is what it means."),
+	]);
+	console.log("D7_USER", JSON.stringify(html.match(/<div class="agent-user">[\s\S]*?<\/div>/)?.[0] ?? ""));
+	expect(html).toContain("What does this mean?");
+	expect(html).toContain("buy low sell high");
+	// The reply is still cut: this is a change to WHOSE text is treated, not to
+	// the rule.
+	const reply = render([answer('Answer.\nSUGGEST: ["a","b"]')]);
+	expect(reply).toContain("Answer.");
+	expect(reply).not.toContain("SUGGEST");
+	expect(pills(reply)).toEqual(["a", "b"]);
+});
+
+test("D-7: a user message that IS only a marker line survives", () => {
+	const html = render([
+		{ id: "u1", role: "user", parts: [{ type: "text", text: "SUGGEST: what should I do?", state: "done" }] },
+		answer("It depends."),
+	]);
+	console.log("D7_ONLY_MARKER", JSON.stringify(pills(html)));
+	expect(html).toContain("what should I do?");
+});

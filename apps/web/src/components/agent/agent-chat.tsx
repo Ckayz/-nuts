@@ -193,16 +193,41 @@ export function SuggestionRow({
 	readonly chips: readonly Chip[];
 	readonly onSend: (text: string) => void;
 }) {
-	if (chips.length === 0) return null;
+	/**
+	 * D-6. The row is built from three independent sources — the post-fill
+	 * chips, the post-RFQ chips and `chipsForTurn` — and two of them can name the
+	 * same thing: `postFillSuggestions` always contains "Show my positions" and
+	 * so does the signed-in fallback pool (`lib/agent/suggestions.ts`
+	 * `walletChips`). Measured on the rotation, turn 5 rendered that button
+	 * twice, under one duplicated React key.
+	 *
+	 * The FIRST of a repeated label wins: the deterministic chips lead the list
+	 * because a fill is worth more than a follow-up question, and deduping here
+	 * rather than at the call site keeps the rule true for every caller.
+	 */
+	const seen = new Set<string>();
+	const unique = chips.filter((chip) => {
+		if (seen.has(chip.label)) return false;
+		seen.add(chip.label);
+		return true;
+	});
+	if (unique.length === 0) return null;
 	return (
 		<div className="pills agent-suggest">
-			{chips.map((chip) =>
+			{unique.map((chip, index) =>
 				isLinkChip(chip) ? (
-					<a key={chip.label} className="pill" href={chip.href}>
+					// Keyed on the position as well as the label: the label is unique
+					// after the filter above, and the index says so at a glance.
+					<a key={`${index}.${chip.label}`} className="pill" href={chip.href}>
 						{chip.label}
 					</a>
 				) : (
-					<button type="button" key={chip.label} className="pill" onClick={() => onSend(chip.send)}>
+					<button
+						type="button"
+						key={`${index}.${chip.label}`}
+						className="pill"
+						onClick={() => onSend(chip.send)}
+					>
 						{chip.label}
 					</button>
 				),
@@ -439,18 +464,26 @@ export function AgentChat({
 								// "streaming" | "done"); it is treated as streaming while this
 								// message is the one being written, because a part that never
 								// carries the field would otherwise flash half a JSON array.
-								const streaming =
-									part.state === "streaming" || (busy && message.id === messages[messages.length - 1]?.id);
-								const { body } = splitSuggestionTrailer(part.text, streaming);
 								// The person's own words sit in a panel so the page reads as
 								// turns; the reply keeps the page background.
+								//
+								// D-7 (lane D). The trailer is a convention the MODEL is asked
+								// to follow, and the cutter used to run on every text part —
+								// including the user's. A message that merely CONTAINED a line
+								// beginning `SUGGEST:` was silently truncated on screen:
+								// measured, "What does this mean?\nSUGGEST: buy low sell high"
+								// rendered as "What does this mean?". Nothing a person typed is
+								// rewritten here.
 								if (message.role === "user") {
 									return (
 										<div key={i} className="agent-user">
-											<AgentMarkdown text={body} />
+											<AgentMarkdown text={part.text} />
 										</div>
 									);
 								}
+								const streaming =
+									part.state === "streaming" || (busy && message.id === messages[messages.length - 1]?.id);
+								const { body } = splitSuggestionTrailer(part.text, streaming);
 								return <AgentMarkdown key={i} text={body} />;
 							}
 							// The runtime suspended a write tool and is waiting for the user.

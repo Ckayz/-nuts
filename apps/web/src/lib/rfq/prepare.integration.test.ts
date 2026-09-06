@@ -419,7 +419,8 @@ describeLive("the rfq_requests store's own conditions", () => {
 			createTx: TX("7"),
 			at: new Date(),
 		});
-		expect(first?.quotationId).toBe(bound);
+		expect(first.kind).toBe("bound");
+		expect(first.kind === "bound" ? first.row.quotationId : null).toBe(bound);
 		const second = await store().bindQuotation({
 			id: row.id,
 			wallet,
@@ -427,8 +428,65 @@ describeLive("the rfq_requests store's own conditions", () => {
 			createTx: TX("8"),
 			at: new Date(),
 		});
-		expect(second).toBeNull();
+		expect(second.kind).toBe("already_bound");
 		expect((await store().findOwn(row.id, wallet))?.quotationId).toBe(bound);
+	});
+
+	/**
+	 * C-3, against the real partial unique index. One quotation belongs to
+	 * exactly one row of one factory, so a second row asking for it is REPORTED
+	 * rather than allowed to raise out of the server action.
+	 *
+	 * Mutant: drop the catch in `bindQuotation` and the call throws instead.
+	 */
+	test("bindQuotation reports a quotation another row already owns", async () => {
+		const wallet = newWallet();
+		const mine = await seed(wallet);
+		const other = await seed(wallet);
+		const shared = quotationId();
+
+		const first = await store().bindQuotation({ id: mine.id, wallet, quotationId: shared, createTx: TX("d"), at: new Date() });
+		expect(first.kind).toBe("bound");
+
+		const clash = await store().bindQuotation({ id: other.id, wallet, quotationId: shared, createTx: TX("e"), at: new Date() });
+		expect(clash.kind).toBe("quotation_taken");
+
+		// The loser is untouched: still pending, still unbound, still bindable.
+		const row = await store().findOwn(other.id, wallet);
+		expect(row?.status).toBe("pending_create");
+		expect(row?.quotationId).toBeNull();
+		expect(row?.failureReason).toBeNull();
+	});
+
+	/**
+	 * C-2. `WHERE status = 'pending_create' AND quotation_id IS NULL`. Mutant:
+	 * drop either clause and a late "that transaction reverted" can write
+	 * `failed` -- and its "nothing was escrowed" sentence -- over a row that
+	 * names a real, escrowed quotation.
+	 */
+	test("markFailed writes only on a row that is still unbound and pending", async () => {
+		const wallet = newWallet();
+		const row = await seed(wallet);
+
+		const failed = await store().markFailed({ id: row.id, wallet, reason: "transaction_reverted", at: new Date() });
+		expect(failed?.status).toBe("failed");
+
+		// A failed row is not `pending_create`, so it cannot be re-failed...
+		expect(await store().markFailed({ id: row.id, wallet, reason: "again", at: new Date() })).toBeNull();
+		expect((await store().findOwn(row.id, wallet))?.failureReason).toBe("transaction_reverted");
+
+		// ...but it IS still bindable, which is how a retry with the right hash
+		// recovers a row a wrong hash wrote off.
+		const bound = quotationId();
+		const rebound = await store().bindQuotation({ id: row.id, wallet, quotationId: bound, createTx: TX("f"), at: new Date() });
+		expect(rebound.kind).toBe("bound");
+		expect((await store().findOwn(row.id, wallet))?.status).toBe("active");
+
+		// And once bound, a reverted recording can no longer paint over it.
+		expect(await store().markFailed({ id: row.id, wallet, reason: "transaction_reverted", at: new Date() })).toBeNull();
+		const after = await store().findOwn(row.id, wallet);
+		expect(after?.status).toBe("active");
+		expect(after?.quotationId).toBe(bound);
 	});
 
 	/**
@@ -474,10 +532,11 @@ describeLive("the rfq_requests store's own conditions", () => {
 		const row = await seed(wallet);
 		expect(await store().findOwn(row.id, stranger)).toBeNull();
 		expect(
-			await store().bindQuotation({ id: row.id, wallet: stranger, quotationId: quotationId(), createTx: TX("d"), at: new Date() }),
-		).toBeNull();
-		await store().markFailed({ id: row.id, wallet: stranger, reason: "not_yours", at: new Date() });
+			(await store().bindQuotation({ id: row.id, wallet: stranger, quotationId: quotationId(), createTx: TX("d"), at: new Date() })).kind,
+		).toBe("already_bound");
+		expect(await store().markFailed({ id: row.id, wallet: stranger, reason: "not_yours", at: new Date() })).toBeNull();
 		expect((await store().findOwn(row.id, wallet))?.status).toBe("pending_create");
+		expect((await store().findOwn(row.id, wallet))?.quotationId).toBeNull();
 	});
 
 	/** A malformed id is answered, not sent to Postgres as a broken `uuid` cast. */

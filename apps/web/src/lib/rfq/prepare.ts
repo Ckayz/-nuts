@@ -767,8 +767,22 @@ async function verifyForRecord(
 	return { ticket, row, txHash: txHash as `0x${string}` };
 }
 
-async function markFailed(deps: RfqDeps, id: string, wallet: string, reason: string): Promise<void> {
-	await deps.store.markFailed({ id, wallet, reason, at: deps.now() });
+/**
+ * Writes `failed` ONLY on a row that is still an unbound `pending_create` one.
+ *
+ * Returns the row it wrote, or null when someone else had already resolved it —
+ * the caller then reports what the row really says rather than the failure it
+ * was about to record (C-2).
+ */
+async function markFailed(deps: RfqDeps, id: string, wallet: string, reason: string): Promise<RfqRequest | null> {
+	return await deps.store.markFailed({ id, wallet, reason, at: deps.now() });
+}
+
+/** The row as it stands now, for the paths where a conditional write found nothing to do. */
+async function currentRow(deps: RfqDeps, wallet: string, id: string): Promise<RfqRequest> {
+	const current = await loadOwnRow({ walletAddress: wallet }, id, deps);
+	if (current === null) throw new Error(`rfq_requests ${id} vanished while confirming`);
+	return current;
 }
 
 /**
@@ -811,7 +825,24 @@ export async function recordRfqCreateFor(
 		// A DURABLE record of the failure, returned as `ok` with `status: "failed"`.
 		// The browser must be able to let go of its held transaction: a refusal
 		// would leave the card holding a reverted hash and retrying forever.
-		await markFailed(deps, row.id, ticket.wallet, "transaction_reverted");
+		//
+		// The write is conditional on the row still being an unbound
+		// `pending_create` one (C-2). If another recording bound it in the window
+		// between the read above and this write, that row now names a real,
+		// escrowed quotation and must NOT be overwritten with "nothing was
+		// escrowed"; what the row actually says is returned instead.
+		const failed = await markFailed(deps, row.id, ticket.wallet, "transaction_reverted");
+		if (failed === null) {
+			const current = await currentRow(deps, ticket.wallet, row.id);
+			return {
+				ok: true,
+				rfqRequestId: current.id,
+				quotationId: current.quotationId,
+				status: current.status,
+				// TODO-OWNER: wording.
+				note: `That transaction reverted, but this request has since been recorded from another transaction. Transaction ${txHash}.`,
+			};
+		}
 		return {
 			ok: true,
 			rfqRequestId: row.id,
@@ -856,19 +887,30 @@ export async function recordRfqCreateFor(
 	const quotationId = decoded.quotationId.toString();
 	// Conditional on the row still being unbound (`./store.ts`), so two concurrent
 	// recordings of the same hash cannot both write it.
-	const updated = await deps.store.bindQuotation({
+	const bind = await deps.store.bindQuotation({
 		id: row.id,
 		wallet: ticket.wallet,
 		quotationId,
 		createTx: txHash,
 		at: deps.now(),
 	});
-	if (updated === null) {
-		const current = await loadOwnRow({ walletAddress: ticket.wallet }, row.id, deps);
-		if (current === null) throw new Error(`rfq_requests ${row.id} vanished while confirming`);
+	if (bind.kind === "already_bound") {
+		const current = await currentRow(deps, ticket.wallet, row.id);
 		return { ok: true, rfqRequestId: current.id, quotationId: current.quotationId, status: current.status };
 	}
-	return { ok: true, rfqRequestId: updated.id, quotationId, status: updated.status };
+	if (bind.kind === "quotation_taken") {
+		// One quotation belongs to exactly one row
+		// (`rfq_requests_factory_quotation_key`), so this receipt is a create
+		// ALREADY recorded against a different request of this wallet — a
+		// mispaired ticket and hash, not a failure of this request. Nothing is
+		// written and the row is left `pending_create`, still waiting for its own
+		// transaction (C-3). TODO-OWNER: wording.
+		return fail(
+			"RECEIPT_MISMATCH",
+			`That transaction created request ${quotationId}, which is already recorded on another of your requests, so nothing was recorded here. Transaction ${txHash}.`,
+		);
+	}
+	return { ok: true, rfqRequestId: bind.row.id, quotationId, status: bind.row.status };
 }
 
 /** The quotation id a `cancelQuotation`/`settleQuotation` transaction actually names. */
@@ -964,8 +1006,7 @@ async function recordIdCall(
 		at: deps.now(),
 	});
 	if (updated === null) {
-		const current = await loadOwnRow({ walletAddress: ticket.wallet }, row.id, deps);
-		if (current === null) throw new Error(`rfq_requests ${row.id} vanished while recording`);
+		const current = await currentRow(deps, ticket.wallet, row.id);
 		return { ok: true, rfqRequestId: current.id, quotationId: current.quotationId, status: current.status, optionAddress: current.optionAddress };
 	}
 	return { ok: true, rfqRequestId: updated.id, quotationId: updated.quotationId, status: updated.status, optionAddress: updated.optionAddress };

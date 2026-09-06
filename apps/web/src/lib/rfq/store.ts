@@ -9,13 +9,21 @@ import "server-only";
  * database standing by. Drizzle's builder chain cannot be faked structurally,
  * so the six operations are named here instead and a test supplies its own.
  *
- * Both writes that move a row to a terminal state are CONDITIONAL, and both
- * conditions are the point rather than an optimisation:
+ * EVERY write that moves a row out of `pending_create` is CONDITIONAL, and each
+ * condition is the point rather than an optimisation:
  *
  *  - `bindQuotation` requires `quotation_id IS NULL`, so two concurrent
  *    recordings of the same create cannot both write the row.
  *  - `markTerminal` requires `status = 'active'`, so a cancel cannot overwrite a
  *    settlement (or the reverse), and a replayed recording cannot regress a row.
+ *  - `markFailed` requires `status = 'pending_create'` AND `quotation_id IS
+ *    NULL`, so a recording that lost a race cannot write `failed` over a row
+ *    that has meanwhile been bound to a real, escrowed quotation (C-2).
+ *
+ * `bindQuotation` also answers a THIRD case rather than throwing: the partial
+ * unique index `rfq_requests_factory_quotation_key` means one quotation belongs
+ * to exactly one row, so a receipt naming a quotation another row already owns
+ * is the wrong receipt for this one and is reported, not recorded (C-3).
  *
  * Every method is scoped by WALLET as well as by id. The wallet always comes
  * from the server session, so a row can only ever be read or written by the
@@ -31,14 +39,13 @@ export interface RfqRowStore {
 	/** The row, only if this wallet owns it. Null otherwise — the two cases are one answer. */
 	findOwn(id: string, wallet: string): Promise<RfqRequest | null>;
 	listForWallet(wallet: string, limit: number): Promise<RfqRequest[]>;
-	/** Null when the row was already bound by someone else's concurrent recording. */
 	bindQuotation(input: {
 		id: string;
 		wallet: string;
 		quotationId: string;
 		createTx: string;
 		at: Date;
-	}): Promise<RfqRequest | null>;
+	}): Promise<BindQuotationResult>;
 	/** Null when the row was no longer `active`. */
 	markTerminal(input: {
 		id: string;
@@ -49,7 +56,39 @@ export interface RfqRowStore {
 		optionAddress?: string | null;
 		at: Date;
 	}): Promise<RfqRequest | null>;
-	markFailed(input: { id: string; wallet: string; reason: string; at: Date }): Promise<void>;
+	/** Null when the row was no longer an unbound `pending_create` one. */
+	markFailed(input: { id: string; wallet: string; reason: string; at: Date }): Promise<RfqRequest | null>;
+}
+
+export type BindQuotationResult =
+	/** The row now carries this quotation id. */
+	| { readonly kind: "bound"; readonly row: RfqRequest }
+	/** A concurrent recording of the same create bound the row first. */
+	| { readonly kind: "already_bound" }
+	/** `(factory_address, quotation_id)` already belongs to a DIFFERENT row. */
+	| { readonly kind: "quotation_taken" };
+
+/** The partial unique index migration `0010` creates over (factory_address, quotation_id). */
+const QUOTATION_UNIQUE_INDEX = "rfq_requests_factory_quotation_key";
+
+/**
+ * Is this Postgres' unique-violation on the quotation index?
+ *
+ * MEASURED against the real database 2026-09-06: drizzle wraps the driver error,
+ * so the `23505` and the constraint name live on `error.cause`, not on the error
+ * itself. The chain is walked rather than assumed, and anything that is not that
+ * violation is re-thrown untouched.
+ */
+function isQuotationTaken(error: unknown): boolean {
+	let current: unknown = error;
+	for (let depth = 0; depth < 4 && current !== null && typeof current === "object"; depth += 1) {
+		const candidate = current as { code?: unknown; constraint?: unknown; cause?: unknown };
+		if (candidate.code === "23505" && (candidate.constraint === undefined || candidate.constraint === QUOTATION_UNIQUE_INDEX)) {
+			return true;
+		}
+		current = candidate.cause;
+	}
+	return false;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -81,18 +120,23 @@ export function drizzleRfqStore(database: Database = defaultDb): RfqRowStore {
 				.limit(limit);
 		},
 		async bindQuotation({ id, wallet, quotationId, createTx, at }) {
-			const [row] = await database
-				.update(rfqRequests)
-				.set({ status: "active", quotationId, createTx, failureReason: null, updatedAt: at })
-				.where(
-					and(
-						eq(rfqRequests.id, id),
-						eq(rfqRequests.walletAddress, wallet),
-						isNull(rfqRequests.quotationId),
-					),
-				)
-				.returning();
-			return row ?? null;
+			try {
+				const [row] = await database
+					.update(rfqRequests)
+					.set({ status: "active", quotationId, createTx, failureReason: null, updatedAt: at })
+					.where(
+						and(
+							eq(rfqRequests.id, id),
+							eq(rfqRequests.walletAddress, wallet),
+							isNull(rfqRequests.quotationId),
+						),
+					)
+					.returning();
+				return row === undefined ? { kind: "already_bound" } : { kind: "bound", row };
+			} catch (error) {
+				if (isQuotationTaken(error)) return { kind: "quotation_taken" };
+				throw error;
+			}
 		},
 		async markTerminal({ id, wallet, status, cancelTx, settleTx, optionAddress, at }) {
 			const [row] = await database
@@ -115,10 +159,19 @@ export function drizzleRfqStore(database: Database = defaultDb): RfqRowStore {
 			return row ?? null;
 		},
 		async markFailed({ id, wallet, reason, at }) {
-			await database
+			const [row] = await database
 				.update(rfqRequests)
 				.set({ status: "failed", failureReason: reason, updatedAt: at })
-				.where(and(eq(rfqRequests.id, id), eq(rfqRequests.walletAddress, wallet)));
+				.where(
+					and(
+						eq(rfqRequests.id, id),
+						eq(rfqRequests.walletAddress, wallet),
+						eq(rfqRequests.status, "pending_create"),
+						isNull(rfqRequests.quotationId),
+					),
+				)
+				.returning();
+			return row ?? null;
 		},
 	};
 }

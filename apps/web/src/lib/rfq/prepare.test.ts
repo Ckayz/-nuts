@@ -114,12 +114,26 @@ function memoryStore(state: Recorded): RfqRowStore {
 		async listForWallet(wallet, limit) {
 			return [...state.rows.values()].filter((row) => row.walletAddress === wallet).slice(0, limit);
 		},
+		/**
+		 * The real store's three answers, including the partial unique index over
+		 * (factory_address, quotation_id) that migration 0010 creates: one
+		 * quotation belongs to exactly one row, whichever wallet owns it.
+		 */
 		async bindQuotation({ id, wallet, quotationId, createTx, at }) {
 			const row = state.rows.get(id);
-			if (!row || row.walletAddress !== wallet || row.quotationId !== null) return null;
+			if (!row || row.walletAddress !== wallet || row.quotationId !== null) {
+				return { kind: "already_bound" as const };
+			}
+			const taken = [...state.rows.values()].some(
+				(other) =>
+					other.id !== id &&
+					other.quotationId === quotationId &&
+					other.factoryAddress.toLowerCase() === row.factoryAddress.toLowerCase(),
+			);
+			if (taken) return { kind: "quotation_taken" as const };
 			const updated = { ...row, status: "active" as const, quotationId, createTx, failureReason: null, updatedAt: at };
 			state.rows.set(id, updated);
-			return updated;
+			return { kind: "bound" as const, row: updated };
 		},
 		async markTerminal({ id, wallet, status, cancelTx, settleTx, optionAddress, at }) {
 			const row = state.rows.get(id);
@@ -135,10 +149,14 @@ function memoryStore(state: Recorded): RfqRowStore {
 			state.rows.set(id, updated);
 			return updated;
 		},
+		/** Conditional exactly as the SQL is: an unbound `pending_create` row only. */
 		async markFailed({ id, wallet, reason, at }) {
 			const row = state.rows.get(id);
-			if (!row || row.walletAddress !== wallet) return;
-			state.rows.set(id, { ...row, status: "failed" as const, failureReason: reason, updatedAt: at });
+			if (!row || row.walletAddress !== wallet) return null;
+			if (row.status !== "pending_create" || row.quotationId !== null) return null;
+			const updated = { ...row, status: "failed" as const, failureReason: reason, updatedAt: at };
+			state.rows.set(id, updated);
+			return updated;
 		},
 	};
 }
@@ -618,6 +636,86 @@ describe("recordRfqCreateFor", () => {
 		expect(result.ok).toBe(false);
 		if (result.ok) throw new Error("unreachable");
 		expect(result.code).toBe("BAD_TX_HASH");
+	});
+
+	/**
+	 * C-2. `markFailed` is conditional on an unbound `pending_create` row. Here a
+	 * concurrent recording binds the row in the window between this call's read
+	 * and its write; the reverted branch must not paint "nothing was escrowed"
+	 * over a row that now names a real, escrowed quotation.
+	 *
+	 * Mutant: drop `status = 'pending_create'` / `quotation_id IS NULL` from the
+	 * store's `markFailed`.
+	 */
+	test("a reverted receipt never overwrites a row another recording has bound", async () => {
+		const { deps, state, token, rowId } = await preparedCreate({ receipt: { status: "reverted", logs: [] } });
+		// THE INTERLEAVE, in the only window that matters: the row is read as
+		// `pending_create` (so the idempotent early return does not fire) and a
+		// concurrent recording binds it before this call reaches its write.
+		let reads = 0;
+		const racing: RfqDeps = {
+			...deps,
+			store: {
+				...deps.store,
+				async findOwn(id, wallet) {
+					const row = await deps.store.findOwn(id, wallet);
+					reads += 1;
+					if (reads === 1 && row !== null) {
+						state.rows.set(id, { ...row, status: "active", quotationId: "555", createTx: TX });
+					}
+					return row;
+				},
+			},
+		};
+
+		const result = await recordRfqCreateFor(SESSION, { token, txHash: TX }, racing);
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("unreachable");
+		expect(result.status).toBe("active");
+		expect(result.quotationId).toBe("555");
+		expect(String(result.note)).not.toContain("nothing was escrowed");
+		const row = state.rows.get(rowId);
+		expect(row?.status).toBe("active");
+		expect(row?.quotationId).toBe("555");
+	});
+
+	/**
+	 * C-3. One quotation belongs to exactly one row — the partial unique index
+	 * `rfq_requests_factory_quotation_key` (migration 0010) says so. A ticket for
+	 * row A handed the transaction that created row B's quotation must be
+	 * REPORTED, not recorded: binding it would show A the deposit and strikes of
+	 * a request that is really B's, and would leave B unable to ever bind its own.
+	 *
+	 * Mutant: let `bindQuotation` bind a quotation another row already owns.
+	 */
+	test("a receipt whose quotation another of my requests already owns records nothing", async () => {
+		const { deps, state } = makeDeps({
+			allowance: 500_000n,
+			receipt: {
+				status: "success",
+				logs: [requestedLog({ factory: FACTORY, id: 8888n, requester: WALLET })],
+			},
+		});
+		const first = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		if (!first.ok || first.stage !== "create") throw new Error("fixture: expected a create stage");
+		const second = await prepareRfqCreateFor(SESSION, createInput({ strikesUsd: ["1800"] }), deps);
+		if (!second.ok || second.stage !== "create") throw new Error("fixture: expected a create stage");
+
+		expect((await recordRfqCreateFor(SESSION, { token: first.token, txHash: TX }, deps)).ok).toBe(true);
+
+		const replay = await recordRfqCreateFor(SESSION, { token: second.token, txHash: TX }, deps);
+		expect(replay.ok).toBe(false);
+		if (replay.ok) throw new Error("unreachable");
+		expect(replay.code).toBe("RECEIPT_MISMATCH");
+		expect(replay.reason).toContain("already recorded on another");
+
+		// The first row keeps the quotation; the second is untouched and still
+		// able to bind its own create later.
+		expect(state.rows.get(first.rfqRequestId)?.quotationId).toBe("8888");
+		const other = state.rows.get(second.rfqRequestId);
+		expect(other?.quotationId).toBeNull();
+		expect(other?.status).toBe("pending_create");
+		expect(other?.failureReason).toBeNull();
 	});
 
 	test("a second recording of the same create returns the stored row rather than a second bind", async () => {

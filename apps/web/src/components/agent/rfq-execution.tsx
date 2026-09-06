@@ -142,6 +142,13 @@ const COPY = {
 	transactionFailed: "Transaction failed.",
 	/** TODO-OWNER: shown when no wallet is connected. */
 	connectFirst: "Connect a wallet first.",
+	/**
+	 * TODO-OWNER: D-5 — the tool built this output with no signed-in session, so
+	 * the calldata is bound to no wallet and there is nothing to check the
+	 * connected one against.
+	 */
+	notSignedIn:
+		"This was prepared without a signed-in wallet, so nothing was sent. Sign in and ask the agent to prepare it again.",
 	/** TODO-OWNER: the request is live and this card is waiting on it. */
 	watchingTitle: "Your request is live",
 	/** TODO-OWNER: label above the factory's own id for this request. */
@@ -223,7 +230,7 @@ const BUSY: ReadonlySet<Phase> = new Set<Phase>([
  * every time, and a changing identity would rebuild every callback below on
  * every render.
  */
-function useRfqSend(boundAccount: string | undefined, boundChainId: 8453 | undefined) {
+function useRfqSend(boundAccount: string | null | undefined, boundChainId: 8453 | undefined) {
 	const { address, isConnected, chainId: walletChainId } = useConnection();
 	const { switchChain } = useSwitchChain();
 	const { mutateAsync: sendTransactionAsync } = useSendTransaction();
@@ -278,6 +285,13 @@ function useRfqSend(boundAccount: string | undefined, boundChainId: 8453 | undef
 
 	/** The whole precondition ladder the market ticket uses, in one place. */
 	const ready = useCallback((): { ok: true; account: `0x${string}` } | { ok: false; message: string } => {
+		// D-5. `!== undefined` admitted `null` — the value the tool's own envelope
+		// carries when there is no session (`rfq-tools.ts`
+		// `{ account: session?.walletAddress ?? null }`) — and the next line
+		// called `.toLowerCase()` on it, crashing a money card on press. A null
+		// binding is refused outright: calldata bound to no wallet cannot be
+		// checked against the connected one.
+		if (boundAccount === null) return { ok: false, message: COPY.notSignedIn };
 		if (boundAccount !== undefined && address !== undefined && boundAccount.toLowerCase() !== address.toLowerCase()) {
 			return { ok: false, message: COPY.walletChanged };
 		}

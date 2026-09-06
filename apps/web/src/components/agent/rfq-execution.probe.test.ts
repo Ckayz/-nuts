@@ -532,6 +532,39 @@ describe("C#3: a sent request is never forgotten and never re-sent", () => {
 		second.unmount();
 	});
 
+	test("D-3: two cards mounted AT THE SAME TIME cannot both send", async () => {
+		// The test above unmounts the first card, so it exercises the mount-time
+		// `restored` effect. The case the fence exists for is several cards alive
+		// in ONE transcript: each card's own `held` says nothing about the others,
+		// which is why `anotherIsHeld()` re-reads the store immediately before
+		// every send. Without it a second escrow leaves the wallet.
+		reset();
+		rfq.recordCreate = async () => ({ ok: false, code: "LOST", reason: "The server did not answer." });
+		const first = mount(RfqExecution, { rfq: createStage() });
+		const second = mount(RfqExecution, { rfq: createStage() });
+		await first.settle();
+		await second.settle();
+
+		press(first);
+		await first.settle();
+		console.log("TWO_CARDS_A", JSON.stringify({ sends: calls.sends.length, label: controls(first)[0]?.text }));
+		expect(calls.sends.length).toBe(1);
+
+		press(second);
+		await second.settle();
+		console.log(
+			"TWO_CARDS_B",
+			JSON.stringify({ sends: calls.sends.length, label: controls(second)[0]?.text, text: second.text().slice(-140) }),
+		);
+		// One transaction, and the second card ADOPTED the first one's rather than
+		// sending its own.
+		expect(calls.sends.length).toBe(1);
+		expect(controls(second)[0]?.text).toBe("Record the request");
+		expect(second.text()).toContain("not recorded yet");
+		first.unmount();
+		second.unmount();
+	});
+
 	test("a reverted receipt is not called a live request", async () => {
 		reset();
 		rfq.recordCreate = async () => ({ ok: true, rfqRequestId: "row-1", status: "failed" });
@@ -652,6 +685,49 @@ describe("the card refuses what it cannot check", () => {
 		h.unmount();
 	});
 
+	test("D-5: a tool output bound to NO wallet sends nothing, and does not throw", async () => {
+		// `lib/agent/rfq-tools.ts` builds the envelope with
+		// `{ account: session?.walletAddress ?? null }`, so `null` is in the
+		// PRODUCER's type. `ready()` tested `!== undefined`, which admits null,
+		// and then called `.toLowerCase()` on it — a money card that crashes on
+		// press. `signedInAccount` refuses first today, so this is latent, and one
+		// refactor of that guard is all it would take.
+		reset();
+		const h = mount(RfqExecution, { rfq: createStage({ account: null } as never) });
+		await h.settle();
+		press(h);
+		await h.settle();
+		console.log("ACCOUNT_NULL", JSON.stringify({ sends: calls.sends.length, prepares: rfq.prepares.length, text: h.text().slice(-160) }));
+		expect(calls.sends.length).toBe(0);
+		expect(rfq.prepares.length).toBe(0);
+		expect(h.text()).toContain("signed-in wallet");
+		h.unmount();
+	});
+
+	test("D-5: the action card refuses the same way", async () => {
+		reset();
+		const h = mount(RfqActionExecution, {
+			action: {
+				prepared: true,
+				kind: "rfq_cancel",
+				rfqRequestId: "row-1",
+				quotationId: "125",
+				token: "cancel-tok",
+				account: null,
+				chainId: 8453,
+				cancel: { to: FACTORY, data: "0xDEAD01", value: "0" },
+			} as never,
+		});
+		await h.settle();
+		press(h);
+		await h.settle();
+		console.log("ACTION_ACCOUNT_NULL", JSON.stringify({ sends: calls.sends.length, cancels: rfq.cancels.length }));
+		expect(calls.sends.length).toBe(0);
+		expect(rfq.cancels.length).toBe(0);
+		expect(h.text()).toContain("signed-in wallet");
+		h.unmount();
+	});
+
 	test("a wallet that changed since the preparation sends nothing", async () => {
 		reset();
 		replies.connection = { address: "0x00000000000000000000000000000000000000b2", isConnected: true, chainId: 8453 };
@@ -753,6 +829,28 @@ describe("the agent-prepared cancel card", () => {
 		expect(calls.sends.length).toBe(0);
 		expect(h.text()).toContain("30 seconds");
 		h.unmount();
+	});
+
+	test("D-3: two ACTION cards mounted at the same time cannot both send", async () => {
+		// The mirror of the create-card case, for the small cancel/settle card.
+		reset();
+		rfq.recordAction = async () => ({ ok: false, code: "LOST", reason: "The server did not answer." });
+		const first = mount(RfqActionExecution, { action: action("rfq_cancel") });
+		const second = mount(RfqActionExecution, { action: action("rfq_cancel") });
+		await first.settle();
+		await second.settle();
+
+		press(first);
+		await first.settle();
+		expect(calls.sends.length).toBe(1);
+
+		press(second);
+		await second.settle();
+		console.log("TWO_ACTIONS", JSON.stringify({ sends: calls.sends.length, label: controls(second)[0]?.text }));
+		expect(calls.sends.length).toBe(1);
+		expect(controls(second)[0]?.text).toBe("Record the request");
+		first.unmount();
+		second.unmount();
 	});
 
 	test("a recording failure keeps the button recording, not re-sending", async () => {

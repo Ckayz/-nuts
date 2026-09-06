@@ -110,7 +110,13 @@ export interface RfqCreateRequest {
 export type PreparedRfqCreate = (RfqPrepareApprove | RfqPrepareCreate) & {
 	readonly prepared: true;
 	readonly kind: "rfq_create";
-	readonly account?: string;
+	/**
+	 * D-5. NULLABLE, because the producer's own type is: `lib/agent/rfq-tools.ts`
+	 * builds this envelope with `{ account: session?.walletAddress ?? null }`.
+	 * Declaring it `string | undefined` here hid a `null` the card then called
+	 * `.toLowerCase()` on.
+	 */
+	readonly account?: string | null;
 	readonly chainId?: 8453;
 	readonly label?: string;
 	readonly instruction?: string;
@@ -131,7 +137,8 @@ export interface PreparedRfqAction {
 	readonly rfqRequestId: string;
 	readonly quotationId?: string;
 	readonly token: string;
-	readonly account?: string;
+	/** D-5: nullable for the same reason as `PreparedRfqCreate.account`. */
+	readonly account?: string | null;
 	readonly chainId?: 8453;
 	readonly label?: string;
 	readonly instruction?: string;

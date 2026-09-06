@@ -715,18 +715,38 @@ import { farcasterRail } from "./casts";
  * the run.
  */
 test("no Neynar key means the order book is never read", async () => {
-	// The premise of this test: this process really has no key, so the branch
-	// under test is the one the real `env` takes.
-	expect(env.NEYNAR_API_KEY ?? "").toBe("");
-	let reads = 0;
-	const state = await farcasterRail(5, {
-		readAssets: async () => {
-			reads += 1;
-			return ["BTC"];
-		},
-	});
-	expect(state.status).toBe("unconfigured");
-	expect(reads).toBe(0);
+	/**
+	 * B-1 (one-shot review of the RFQ build). The premise is MADE, not assumed.
+	 *
+	 * This used to assert `env.NEYNAR_API_KEY ?? "" === ""` and so passed only on
+	 * a checkout whose env file happened to carry no key; on one that does — this
+	 * worktree, and the deployment-parity configuration — it failed, and took
+	 * `bun run verify --offline` red with it.
+	 *
+	 * `process.env` cannot be used for this: `@nuts/env/server` snapshots
+	 * `process.env` once at import (measured 2026-09-06), and by the time this
+	 * file's body runs in a full-directory run the module is already loaded. The
+	 * value is set on the `env` object itself and restored afterwards, so nothing
+	 * leaks into the other files sharing this process.
+	 */
+	const mutable = env as unknown as Record<string, unknown>;
+	const before = mutable.NEYNAR_API_KEY;
+	mutable.NEYNAR_API_KEY = "";
+	try {
+		expect(env.NEYNAR_API_KEY ?? "").toBe("");
+		let reads = 0;
+		const state = await farcasterRail(5, {
+			readAssets: async () => {
+				reads += 1;
+				return ["BTC"];
+			},
+		});
+		expect(state.status).toBe("unconfigured");
+		expect(reads).toBe(0);
+	} finally {
+		if (before === undefined) delete mutable.NEYNAR_API_KEY;
+		else mutable.NEYNAR_API_KEY = before;
+	}
 });
 
 /**

@@ -18,10 +18,18 @@
  * Pure: no env, no `server-only`, no I/O.
  */
 
-/** One configured model: which variable holds it, and what it is set to. */
+/**
+ * One configured model: which variable holds it, and what it is set to.
+ *
+ * `id` is typed as possibly absent because it really is: `@nuts/env/server`
+ * hands back raw `process.env` whenever validation is skipped, and a zod
+ * `.default()` only exists when zod parses. B-1 — the type used to say `string`,
+ * so nothing forced the callers to consider the case that crashed the health
+ * endpoint.
+ */
 export interface ConfiguredModel {
 	readonly variable: string;
-	readonly id: string;
+	readonly id: string | undefined;
 }
 
 export interface ProviderConfig {
@@ -46,8 +54,32 @@ export interface ProviderConfig {
  * enforced.
  */
 export function providerModelProblem(config: ProviderConfig): string | null {
-	if (!config.usingGateway) return null;
+	// B-1 (one-shot review of the RFQ build, MAJOR). A MISSING id is checked
+	// first, and independently of the provider.
+	//
+	// `model.id` used to be dereferenced straight away. `env.AGENT_MODEL` carries
+	// a zod `.default()`, and a default only exists when zod actually parses — so
+	// whenever validation is skipped (`packages/db/src/test-fence.ts` sets
+	// `SKIP_ENV_VALIDATION` in every `bun test` preload, and `scripts/verify.ts`
+	// sets it for the offline lane) the id is `undefined` and
+	// `model.id.includes(":free")` threw:
+	//
+	//   TypeError: undefined is not an object (evaluating 'model.id.includes')
+	//     at providerModelProblem (model-config.ts:51)
+	//     at agentHealth (health.ts:173)
+	//     at GET (app/api/agent/health/route.ts:61)
+	//
+	// So the one endpoint whose job is to say why the agent is down answered 500
+	// instead of naming the problem. An unset model id IS the configuration
+	// problem this module reports; it is not an exception.
 	for (const model of config.models) {
+		if (typeof model.id !== "string" || model.id.trim() === "") {
+			return (
+				`${model.variable} is not set. The agent has no model to call, so every turn would fail. ` +
+				`Fix: set ${model.variable} in the environment (see apps/web/.env.example).`
+			);
+		}
+		if (!config.usingGateway) continue;
 		if (model.id.includes(":free")) {
 			return (
 				`${model.variable}=${model.id} is an OpenRouter model id (the ":free" suffix), ` +

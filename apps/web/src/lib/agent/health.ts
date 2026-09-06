@@ -149,14 +149,14 @@ async function probeOne(
 ): Promise<ModelHealth> {
 	try {
 		await caller({ ...model, role });
-		return { id: model.id, probed: true, ok: true, errorClass: "ok" };
+		return { id: model.id ?? "", probed: true, ok: true, errorClass: "ok" };
 	} catch (error) {
 		// The class, and only the class. The provider's own message never appears
 		// in this response: an unauthenticated endpoint is the last place to echo
 		// one back.
 		const errorClass = classifyAgentError(error);
 		console.error(`[agent/health] ${role} probe failed [${errorClass}] model=${model.id}:`, error);
-		return { id: model.id, probed: true, ok: false, errorClass };
+		return { id: model.id ?? "", probed: true, ok: false, errorClass };
 	}
 }
 
@@ -176,8 +176,11 @@ export async function agentHealth(input: HealthInput): Promise<{ status: number;
 	});
 	const configOk = problem === null;
 
+	// B-1. An id that was never configured is reported as an empty string rather
+	// than dropped from the JSON: `ModelHealth.id` is a string, and an absent key
+	// would make the body's shape depend on the failure.
 	const unprobed = (model: ConfiguredModel): ModelHealth => ({
-		id: model.id,
+		id: model.id ?? "",
 		probed: false,
 		ok: null,
 		errorClass: null,

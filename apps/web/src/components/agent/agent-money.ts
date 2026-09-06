@@ -32,9 +32,25 @@
  * `cbBTC`, `WETH` and `aBasUSDC` are collateral tokens the order book actually
  * quotes (`packages/thetanuts`); `USD` appears because the agent's own cap is
  * stated in USD (PRD 10.2).
+ *
+ * D-8 (lane D). A run may not BEGIN part-way through a token. Group 1 is the
+ * character before the figure and is not part of the run: it must not be a
+ * digit, a letter, `_`, `.` or `,`, which is what left
+ * `1e8 units, 1_000_000 USDC` rendering as `1_000_`+**`000 USDC`** — a number
+ * split in half on screen. A capture group rather than a lookbehind on purpose:
+ * lookbehind is a 2023 addition to Safari, and a SyntaxError in a module the
+ * chat imports takes the whole page down.
+ *
+ * WHAT THIS DOES NOT DECIDE, stated because the reviewer raised it: a bare
+ * integer followed by a ticker — "Block 12345678 ETH" — is still read as money.
+ * Nothing in the string distinguishes it from an amount, and the rule that
+ * would (a cap on the digits, or on the decimals) was measured to reject
+ * figures the agent really prints: `9.999995 USDC` is a premium it quoted in a
+ * captured turn. A false positive there costs emphasis on a number; a false
+ * negative costs the colour on real money.
  */
 const MONEY =
-	/\$\s?\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s?(?:aBasUSDC|USDC|USD|cbBTC|WETH|ETH|BTC)\b/g;
+	/(^|[^0-9A-Za-z_.,])(\$\s?\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s?(?:aBasUSDC|USDC|USD|cbBTC|WETH|ETH|BTC)\b)/g;
 
 /** The same grammar, NOT global: for one-off "is there a figure in here" asks. */
 const MONEY_ONE = new RegExp(MONEY.source);
@@ -210,11 +226,13 @@ export function moneyParts(text: string, label?: string | null): MoneyPart[] {
 	let at = 0;
 	MONEY.lastIndex = 0;
 	for (let match = MONEY.exec(text); match !== null; match = MONEY.exec(text)) {
-		const start = match.index;
+		// D-8: group 1 is the boundary character, which belongs to the prose.
+		const run = match[2] ?? "";
+		const start = match.index + (match[1]?.length ?? 0);
 		if (start > at) parts.push({ text: text.slice(at, start), kind: "text" });
-		const end = start + match[0].length;
+		const end = start + run.length;
 		const kind = moneyKind(`${label ?? ""}\n${text.slice(0, start)}`) ?? trailingMoneyKind(text.slice(end));
-		parts.push({ text: match[0], kind: kind ?? "neutral" });
+		parts.push({ text: run, kind: kind ?? "neutral" });
 		at = end;
 	}
 	if (parts.length === 0) return [{ text, kind: "text" }];

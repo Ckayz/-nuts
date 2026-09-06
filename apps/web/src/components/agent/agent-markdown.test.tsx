@@ -99,7 +99,12 @@ test("D-n1: a destination that DOES match stays a link", () => {
 
 test("D-n1: the anchored matcher is the same grammar the text scanner uses", () => {
 	expect(isMarketPath("/m/btc")).toBe(true);
-	expect(isMarketPath("/m/BTC")).toBe(true);
+	// D-9: `/m/BTC` is NOT one of ours. Next's static segment `m` is
+	// case-sensitive and the tool writes the lowercase ticker
+	// (`market-link.ts`'s own comment), so an uppercase path is a route this app
+	// does not serve — a live anchor to a 404.
+	expect(isMarketPath("/m/BTC")).toBe(false);
+	expect(isMarketPath("/M/btc")).toBe(false);
 	expect(isMarketPath("/m/btc?thesis=9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01")).toBe(true);
 	expect(isMarketPath(" /m/btc")).toBe(false);
 	expect(isMarketPath("/m/btc ")).toBe(false);
@@ -139,4 +144,28 @@ test("D-minor: no heading level a model writes reaches the document outline", ()
 
 test("D-minor: a market path inside a heading is still linked", () => {
 	expect(render("## Sub /m/btc")).toContain('<a class="agent-md-link" href="/m/btc">/m/btc</a>');
+});
+
+test("D-9: an uppercase path stays text, in prose and as a markdown destination", () => {
+	// Measured by the reviewer: `/M/BTC` rendered as
+	// `<a class="agent-md-link" href="/M/BTC">/M/BTC</a>`.
+	const prose = render("see /M/BTC now");
+	console.log("D9_PROSE", prose);
+	expect(prose).not.toContain("<a");
+	expect(prose).toContain("/M/BTC");
+
+	const authored = render("[Trade](/M/BTC)");
+	console.log("D9_AUTHORED", authored);
+	expect(authored).not.toContain("<a");
+
+	// The uuid is lowercase hex by construction too.
+	const upperUuid = render("open /p/9F1C7A52-0B64-4D19-9C3A-2B7E5D1A4F01");
+	console.log("D9_UUID", upperUuid);
+	expect(upperUuid).not.toContain("<a");
+
+	// And the shapes the tool actually writes are untouched.
+	expect(render("see /m/btc now")).toContain('<a class="agent-md-link" href="/m/btc">/m/btc</a>');
+	expect(render("open /p/9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01")).toContain(
+		'href="/p/9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01"',
+	);
 });

@@ -229,3 +229,45 @@ test("T-3: what did NOT change", () => {
 	expect(kinds["$2,540"]).toBe("neutral");
 	expect(kinds["9.99 USDC"]).toBe("loss");
 });
+
+/* ------------------------------------------------------------------ *
+ * D-8: where a money run may START
+ * ------------------------------------------------------------------ */
+
+test("D-8: a run never begins in the middle of a token", () => {
+	// The reviewer's own measurement: `1_000_**000 USDC**` — the emphasis split
+	// a number in half, which is a rendering defect a reader sees.
+	const parts = moneyParts("1e8 units, 1_000_000 USDC base units");
+	console.log("D8_UNDERSCORE", JSON.stringify(parts));
+	expect(parts.every((p) => p.kind === "text")).toBe(true);
+	expect(parts.map((p) => p.text).join("")).toBe("1e8 units, 1_000_000 USDC base units");
+});
+
+test("D-8: a hex or decimal tail is not the start of an amount either", () => {
+	for (const text of [
+		"tx 0x1111111111 ETH",
+		"version 2.10.99 USDC",
+		"ids 12,34.5678 USDC",
+	]) {
+		const parts = moneyParts(text);
+		const money = parts.filter((p) => p.kind !== "text").map((p) => p.text);
+		console.log("D8_TAIL", text, JSON.stringify(money));
+		// Whatever is matched, it never begins part-way through a run of digits.
+		for (const run of money) expect(text.includes(` ${run}`) || text.startsWith(run), `${text} -> ${run}`).toBe(true);
+	}
+});
+
+test("D-8: real amounts still match, at any precision", () => {
+	// The precision matters: the agent prints premiums like `9.999995 USDC`, so a
+	// rule capping decimals would drop a real figure off a money surface.
+	for (const [text, expected] of [
+		["You pay 9.999995 USDC for it.", "9.999995 USDC"],
+		["It costs $2,540.10 today.", "$2,540.10"],
+		["(9.99 USDC)", "9.99 USDC"],
+		["escrow of 0.4 USDC", "0.4 USDC"],
+	] as const) {
+		const money = moneyParts(text).filter((p) => p.kind !== "text").map((p) => p.text);
+		console.log("D8_REAL", text, JSON.stringify(money));
+		expect(money, text).toContain(expected);
+	}
+});

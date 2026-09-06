@@ -136,16 +136,32 @@ const COPY = {
 	fallbackRiskLabel: "What is the maximum loss?",
 	// PRD 10.7, verbatim (the same sentence is what pressing it sends).
 	fallbackRiskSend: "What is the maximum loss?",
+	// PRD 10.7, verbatim. Answered by `whatIfAtExpiry`.
+	prdExpiry: "What happens at expiry?",
+	// PRD 10.7, verbatim. Answered by `previewOptionBookTrade` + `whatIfAtExpiry`.
+	prdProfit: "What needs to happen for this position to profit?",
+	// PRD 10.7, verbatim.
+	prdStrikes: "Explain the strikes in simple terms.",
+
+	// --- Signed in only. `getUserPositions` refuses a guest by design, so a
+	//     chip offering it to one leads straight to "connect your wallet". ---
+
+	// TODO-OWNER: the positions chip. Offered after a fill, and on any turn
+	// where the reader is signed in.
+	positionsLabel: "Show my positions",
+	// TODO-OWNER: sent by the positions chip.
+	positionsSend: "Show my positions and how they are doing.",
+	// TODO-OWNER: the exposure chip. Different question from the one above: it
+	// asks what is at stake, which `getUserPositions` answers per row.
+	riskingLabel: "What am I risking right now?",
+	// TODO-OWNER: sent by the exposure chip.
+	riskingSend: "What am I risking right now across the positions I hold?",
 
 	// --- After a confirmed fill. Deterministic: no model turn produced it. ---
 
 	// TODO-OWNER: the post-fill share chip. Same destination as the market
 	// ticket's own post-fill dialog (`lib/trade/record.ts` composePath).
 	postFillPostLabel: "Write a post about it",
-	// TODO-OWNER: the post-fill positions chip.
-	postFillPositionsLabel: "Show my positions",
-	// TODO-OWNER: sent by the post-fill positions chip.
-	postFillPositionsSend: "Show my positions and how they are doing.",
 
 	// --- After an RFQ the wallet confirmed. Deterministic for the same reason. ---
 
@@ -194,69 +210,224 @@ function assetOf(output: Record<string, unknown>): string | null {
 	return null;
 }
 
+/* ------------------------------------------------------------------ *
+ * Rotation and state
+ * ------------------------------------------------------------------ */
+
+/**
+ * What the deterministic layers know about the conversation they sit under.
+ *
+ * Owner 2026-09-06 12:4x, verbatim: "the suggested msg is always the same here
+ * it need to be diff everytime depends on the output and like it shud have also
+ * like help user trade, show active position etc that are related".
+ *
+ * Two separate problems, and this type is the second one's answer. The chips are
+ * MODEL-WRITTEN on a normal turn (the `SUGGEST:` trailer), so they already vary;
+ * what did not vary was the deterministic row under them, which is the row a
+ * reader sees whenever the model skips the trailer — the same three sentences
+ * every single time. `turn` rotates a POOL so two turns running never show the
+ * same row, and `signedIn` decides whether a wallet-only chip may be offered at
+ * all.
+ */
+export interface ChipState {
+	/** How many assistant messages exist. Any integer; only its remainder matters. */
+	readonly turn?: number;
+	/**
+	 * Is there a wallet the position tools would accept?
+	 *
+	 * `getUserPositions` answers `signedIn: false` to a guest by design, so a
+	 * chip offering it to one is a chip that leads to "connect your wallet".
+	 */
+	readonly signedIn?: boolean;
+	/** The market this conversation is about, if any. */
+	readonly asset?: string | null;
+}
+
+/** The pool, read from `turn`, wrapping. A non-finite turn reads as 0. */
+function rotate<T>(pool: readonly T[], turn: number | undefined): T[] {
+	if (pool.length === 0) return [];
+	const n = typeof turn === "number" && Number.isFinite(turn) ? Math.trunc(turn) : 0;
+	const at = ((n % pool.length) + pool.length) % pool.length;
+	return [...pool.slice(at), ...pool.slice(0, at)];
+}
+
+/**
+ * `MAX_SUGGESTIONS` entries from a pool, rotated by the turn.
+ *
+ * `required` is the one chip a stage must always offer whatever the rotation
+ * says — after a priced trade that is "Prepare this trade", because the owner's
+ * ask was for chips that MOVE THE TRADE FORWARD, and a rotation that hid the
+ * commitment two turns out of three would defeat the point. It takes the last
+ * slot when the rotation has pushed it out.
+ */
+function pick(pool: readonly Suggestion[], turn: number | undefined, required?: Suggestion): Suggestion[] {
+	const chosen = rotate(pool, turn).slice(0, MAX_SUGGESTIONS);
+	if (required === undefined || chosen.some((chip) => chip.label === required.label)) return chosen;
+	if (chosen.length < MAX_SUGGESTIONS) return [...chosen, required];
+	return [...chosen.slice(0, -1), required];
+}
+
+/**
+ * The same chip, pinned to one asset.
+ *
+ * Composed from COPY rather than worded here — the label gains the ticker in
+ * brackets and the message gains it as a prefix, which is what this file has
+ * always done for a search that proved exactly one asset is quoted. Written
+ * with shorthand properties so the fence in `copy.test.ts` — no chip property
+ * takes a string literal outside the COPY block — still means what it says.
+ */
+function forAsset(chip: Suggestion, asset: string): Suggestion {
+	const label = `${chip.label} (${asset})`;
+	const send = `${asset}: ${chip.send}`;
+	return { label, send };
+}
+
+/** The chips that only make sense once a wallet is attached. */
+function walletChips(state: ChipState): Suggestion[] {
+	if (state.signedIn !== true) return [];
+	return [
+		{ label: COPY.positionsLabel, send: COPY.positionsSend },
+		{ label: COPY.riskingLabel, send: COPY.riskingSend },
+	];
+}
+
+/**
+ * The RFQ entry, where the factory actually prices one.
+ *
+ * Same gate as `starterSuggestions`: ETH and BTC only (owner 2026-09-06 10:1x).
+ */
+function rfqChips(asset: string | null): Suggestion[] {
+	if (asset === null || !RFQ_UNDERLYINGS.has(asset)) return [];
+	return [{ label: COPY.startRfqLabel(asset), send: COPY.startRfqSend(asset) }];
+}
+
 /**
  * Chips for one assistant message, newest tool result first.
  *
  * Returns nothing rather than guessing when a message carried no usable tool
  * result: a chip that leads nowhere is worse than no chip.
+ *
+ * `state` is optional so every existing caller and test reads as before — with
+ * no turn the rotation sits at offset 0, which is the order these chips have
+ * always had.
  */
-export function suggestionsFor(parts: readonly ToolPart[]): Suggestion[] {
+export function suggestionsFor(parts: readonly ToolPart[], state: ChipState = {}): Suggestion[] {
 	const suggestions: Suggestion[] = [];
 	const seen = new Set<string>();
+	const wallet = walletChips(state);
 
-	const add = (label: string, send: string) => {
-		if (seen.has(label) || suggestions.length >= MAX_SUGGESTIONS) return;
-		seen.add(label);
-		suggestions.push({ label, send });
+	const add = (chip: Suggestion) => {
+		if (seen.has(chip.label) || suggestions.length >= MAX_SUGGESTIONS) return;
+		seen.add(chip.label);
+		suggestions.push(chip);
 	};
+
+	const maxLoss: Suggestion = { label: COPY.maxLossLabel, send: COPY.maxLossSend };
+	const prepare: Suggestion = { label: COPY.prepareLabel, send: COPY.prepareSend };
+	const cheaper: Suggestion = { label: COPY.cheaperLabel, send: COPY.cheaperSend };
+	const explain: Suggestion = { label: COPY.explainLabel, send: COPY.explainSend };
+	const cheapest: Suggestion = { label: COPY.cheapestLabel, send: COPY.cheapestSend };
+	const up: Suggestion = { label: COPY.upLabel, send: COPY.upSend };
+	const down: Suggestion = { label: COPY.downLabel, send: COPY.downSend };
+	const expiry: Suggestion = { label: COPY.prdExpiry, send: COPY.prdExpiry };
+	const profit: Suggestion = { label: COPY.prdProfit, send: COPY.prdProfit };
+	const strikes: Suggestion = { label: COPY.prdStrikes, send: COPY.prdStrikes };
+	const education: Suggestion = { label: COPY.fallbackEducationLabel, send: COPY.fallbackEducationSend };
 
 	// Later results describe where the conversation actually is, so they lead.
 	for (const part of [...parts].reverse()) {
 		const output = outputOf(part);
 		if (output === null) continue;
 
-		if (part.type === "tool-previewOptionBookTrade" && output.executable === true) {
-			// A trade was priced: the next questions are about risk and commitment.
-			add(COPY.maxLossLabel, COPY.maxLossSend);
-			add(COPY.prepareLabel, COPY.prepareSend);
-			add(COPY.cheaperLabel, COPY.cheaperSend);
-			add(COPY.explainLabel, COPY.explainSend);
+		if (part.type === "tool-previewOptionBookTrade") {
+			if (output.executable === true) {
+				// A trade was priced: the row must carry the risk AND the commitment,
+				// and the rest rotates so a second priced trade does not repeat it.
+				for (const chip of pick(
+					[maxLoss, prepare, cheaper, explain, expiry, profit, strikes, ...wallet],
+					state.turn,
+					prepare,
+				)) {
+					add(chip);
+				}
+			} else {
+				// The tool says it cannot be filled, so "Prepare this trade" would send
+				// the reader into a refusal. Everything else still applies.
+				for (const chip of pick([explain, cheaper, cheapest, strikes, expiry, education], state.turn)) {
+					add(chip);
+				}
+			}
 			continue;
 		}
 
 		if (part.type === "tool-searchOptionBookOrders") {
 			const matched = output.totalMatched;
 			if (matched === 0) {
-				add(COPY.widenLabel, COPY.widenSend);
+				// Exactly one chip, and no rotation: a search that matched nothing has
+				// exactly one useful next step, and offering a second would be filler.
+				add({ label: COPY.widenLabel, send: COPY.widenSend });
 				continue;
 			}
 			const asset = assetOf(output);
 			// Naming the asset is the one place a chip gets specific, because the
 			// tool result proved that asset is quoted.
-			add(COPY.explainLabel, COPY.explainSend);
-			add(COPY.cheapestLabel, COPY.cheapestSend);
-			if (asset !== null) {
-				add(`${COPY.upLabel} (${asset})`, `${asset}: ${COPY.upSend}`);
-				add(`${COPY.downLabel} (${asset})`, `${asset}: ${COPY.downSend}`);
+			const directional: Suggestion[] =
+				asset === null ? [up, down] : [forAsset(up, asset), forAsset(down, asset)];
+			for (const chip of pick(
+				[explain, cheapest, ...directional, ...rfqChips(asset), education, strikes, ...wallet],
+				state.turn,
+			)) {
+				add(chip);
 			}
 			continue;
 		}
 
 		if (part.type === "tool-getMarketData") {
-			add(COPY.cheapestLabel, COPY.cheapestSend);
-			add(COPY.upLabel, COPY.upSend);
-			add(COPY.downLabel, COPY.downSend);
+			for (const chip of pick([cheapest, up, down, explain, education, expiry, ...wallet], state.turn)) {
+				add(chip);
+			}
+			continue;
+		}
+
+		if (part.type === "tool-getUserPositions" && output.signedIn === true) {
+			// The one stage the owner named directly: after a positions list, one
+			// chip is per position and one offers protection.
+			const held = tickerOf(firstPositionAsset(output));
+			const perPosition: Suggestion[] =
+				held === null
+					? []
+					: [
+							{ label: COPY.startHedgeLabel(held), send: COPY.startHedgeSend(held) },
+							{ label: COPY.fallbackAssetLabel(held), send: COPY.fallbackAssetSend(held) },
+						];
+			for (const chip of pick(
+				[...wallet, ...perPosition, expiry, profit, explain, education],
+				state.turn,
+			)) {
+				add(chip);
+			}
 			continue;
 		}
 
 		if (part.type === "tool-getThesisContext" && output.found === true) {
-			add(COPY.explainLabel, COPY.explainSend);
-			add(COPY.upLabel, COPY.upSend);
-			add(COPY.downLabel, COPY.downSend);
+			for (const chip of pick([explain, up, down, cheapest, education, strikes, ...wallet], state.turn)) {
+				add(chip);
+			}
 		}
 	}
 
 	return suggestions;
+}
+
+/** The asset of the first position a `getUserPositions` result listed, or null. */
+function firstPositionAsset(output: Record<string, unknown>): string | null {
+	const positions = output.positions;
+	if (!Array.isArray(positions)) return null;
+	for (const row of positions) {
+		const asset = (row as { asset?: unknown }).asset;
+		if (typeof asset === "string" && asset !== "") return asset;
+	}
+	return null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -497,17 +668,34 @@ export function starterSuggestions(input: { readonly asset?: string | null } = {
  * about what comes next (an out-of-scope redirect, a plain explanation, a
  * failure to follow the trailer format).
  */
-export function fallbackSuggestions(input: { readonly asset?: string | null } = {}): Suggestion[] {
+export function fallbackSuggestions(input: ChipState = {}): Suggestion[] {
 	const asset = tickerOf(input.asset);
-	const first: Suggestion =
+	/**
+	 * The ANCHOR never rotates. It is the one chip that names the market on
+	 * screen (or, with no market, the way into the book), so dropping it on
+	 * every third turn would make the row worse, not more varied. Everything
+	 * after it does rotate, which is what stops two consecutive turns showing
+	 * the identical row — the thing the owner actually complained about.
+	 */
+	const anchor: Suggestion =
 		asset === null
 			? { label: COPY.fallbackTradeableLabel, send: COPY.fallbackTradeableSend }
 			: { label: COPY.fallbackAssetLabel(asset), send: COPY.fallbackAssetSend(asset) };
-	return [
-		first,
+	const pool: Suggestion[] = [
 		{ label: COPY.fallbackEducationLabel, send: COPY.fallbackEducationSend },
 		{ label: COPY.fallbackRiskLabel, send: COPY.fallbackRiskSend },
+		{ label: COPY.cheapestLabel, send: COPY.cheapestSend },
+		{ label: COPY.explainLabel, send: COPY.explainSend },
+		{ label: COPY.prdExpiry, send: COPY.prdExpiry },
+		{ label: COPY.prdProfit, send: COPY.prdProfit },
+		...(asset === null ? [] : [{ label: COPY.startHedgeLabel(asset), send: COPY.startHedgeSend(asset) }]),
+		...rfqChips(asset),
+		...walletChips(input),
 	];
+	const tail = rotate(pool, input.turn)
+		.filter((chip) => chip.label !== anchor.label)
+		.slice(0, MAX_SUGGESTIONS - 2);
+	return [anchor, ...tail];
 }
 
 /** A chip that navigates instead of sending a message. */
@@ -537,7 +725,7 @@ export function isLinkChip(chip: Chip): chip is LinkSuggestion {
 export function postFillSuggestions(positionId: string): Chip[] {
 	return [
 		{ label: COPY.postFillPostLabel, href: `/new?link=/p/${positionId}` },
-		{ label: COPY.postFillPositionsLabel, send: COPY.postFillPositionsSend },
+		{ label: COPY.positionsLabel, send: COPY.positionsSend },
 	];
 }
 
@@ -570,11 +758,12 @@ export interface TurnPart extends ToolPart {
  * for something to press on every message, and a text-only answer used to offer
  * nothing at all.
  */
-export function chipsForTurn(input: {
-	readonly parts: readonly TurnPart[] | null | undefined;
-	readonly streaming?: boolean;
-	readonly asset?: string | null;
-}): Suggestion[] {
+export function chipsForTurn(
+	input: ChipState & {
+		readonly parts: readonly TurnPart[] | null | undefined;
+		readonly streaming?: boolean;
+	},
+): Suggestion[] {
 	const parts = input.parts;
 	// No parts at all is not a turn: the message exists but has produced
 	// nothing, which is what an assistant message looks like for one frame.
@@ -590,8 +779,9 @@ export function chipsForTurn(input: {
 		if (chips.length > 0) return chips;
 	}
 
-	const fromTools = suggestionsFor(parts);
+	const state: ChipState = { turn: input.turn, signedIn: input.signedIn, asset: input.asset };
+	const fromTools = suggestionsFor(parts, state);
 	if (fromTools.length > 0) return fromTools;
 
-	return fallbackSuggestions({ asset: input.asset });
+	return fallbackSuggestions(state);
 }

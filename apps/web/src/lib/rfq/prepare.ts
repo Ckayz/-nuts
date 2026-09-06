@@ -294,16 +294,21 @@ function asTx(input: { to: string; data: string }): TxRequest {
 const sameAddress = (left: string | null | undefined, right: string | null | undefined): boolean =>
 	typeof left === "string" && typeof right === "string" && left.toLowerCase() === right.toLowerCase();
 
-/** `QuotationSettled(uint256 indexed, address indexed, address indexed, address)`, from the ABI. */
-const quotationSettledTopic: Hex = (() => {
+/** topic0 of one factory event, from the ABI — never a literal, and never an ambiguous name. */
+function factoryEventTopic(name: string): Hex {
 	const events = (OPTION_FACTORY_ABI as readonly { type?: string; name?: string }[]).filter(
-		(entry) => entry.type === "event" && entry.name === "QuotationSettled",
+		(entry) => entry.type === "event" && entry.name === name,
 	);
 	if (events.length !== 1) {
-		throw new Error(`OPTION_FACTORY_ABI carries ${events.length} QuotationSettled events; expected exactly 1`);
+		throw new Error(`OPTION_FACTORY_ABI carries ${events.length} ${name} events; expected exactly 1`);
 	}
 	return encodeEventTopics({ abi: [events[0] as Abi[number]] })[0] as Hex;
-})();
+}
+
+/** `QuotationSettled(uint256 indexed, address indexed, address indexed, address optionAddress)`. */
+const quotationSettledTopic: Hex = factoryEventTopic("QuotationSettled");
+/** `QuotationCancelled(uint256 indexed quotationId)` — the id is its only argument. */
+const quotationCancelledTopic: Hex = factoryEventTopic("QuotationCancelled");
 
 /**
  * Unix seconds from either an ISO instant or a number, or null.
@@ -1035,35 +1040,58 @@ async function recordIdCall(
 			note: `That transaction reverted, so the request is unchanged. Transaction ${txHash}.`,
 		};
 	}
-	if (!sameAddress(transaction.to, row.factoryAddress)) {
-		return fail(
-			"RECEIPT_MISMATCH",
-			`That transaction does not call the OptionFactory, so it cannot be the ${kind === "rfq_cancel" ? "cancellation" : "settlement"} that was prepared. Nothing was recorded. Transaction ${txHash}.`,
-		);
-	}
-	const called = calledQuotationId(transaction.input, kind === "rfq_cancel" ? "cancelQuotation" : "settleQuotation");
-	if (called === null || called.toString() !== row.quotationId) {
-		return fail(
-			"RECEIPT_MISMATCH",
-			`That transaction does not ${kind === "rfq_cancel" ? "cancel" : "settle"} request ${row.quotationId}, so nothing was recorded. Transaction ${txHash}.`,
-		);
+	// THE LOG IS READ FIRST HERE TOO, for the same reason it is on the create
+	// path (C-1): a smart account or a multisig wraps the call, so the receipt's
+	// `to` is an entry point and `transaction.input` is a UserOperation rather
+	// than `cancelQuotation`/`settleQuotation`. The factory still emits
+	// `QuotationCancelled(uint256 indexed quotationId)` /
+	// `QuotationSettled(uint256 indexed quotationId, …)` for THIS row's id, and
+	// that log is proof the state change happened whatever address sits at the
+	// top of the transaction.
+	const idTopic = `0x${BigInt(row.quotationId).toString(16).padStart(64, "0")}`;
+	const terminalTopic = kind === "rfq_cancel" ? quotationCancelledTopic : quotationSettledTopic;
+	const proof = receipt.logs.find(
+		(log) =>
+			sameAddress(log.address, row.factoryAddress) &&
+			log.topics[0]?.toLowerCase() === terminalTopic.toLowerCase() &&
+			log.topics[1]?.toLowerCase() === idTopic,
+	);
+
+	// FALLBACK, only when the factory named no such event for this request: the
+	// call itself. A plain EOA cancel or settle is recorded by this path exactly
+	// as before, so nothing that worked stops working — NOT VERIFIED that a real
+	// on-chain cancel emits `QuotationCancelled` (the ABI carries it; no cancel of
+	// ours has been mined), which is why this stays rather than being replaced.
+	// Neither branch marks anything failed: a cancel or settle that cannot be
+	// proven leaves the request exactly as it is, still `active` and still
+	// cancellable.
+	if (proof === undefined) {
+		if (!sameAddress(transaction.to, row.factoryAddress)) {
+			return fail(
+				"RECEIPT_MISMATCH",
+				// TODO-OWNER: wording.
+				`That transaction does not call the OptionFactory and carries none of its events for request ${row.quotationId}, so it cannot be the ${kind === "rfq_cancel" ? "cancellation" : "settlement"} that was prepared. Nothing was recorded, and the request is unchanged. Transaction ${txHash}.`,
+			);
+		}
+		const called = calledQuotationId(transaction.input, kind === "rfq_cancel" ? "cancelQuotation" : "settleQuotation");
+		if (called === null || called.toString() !== row.quotationId) {
+			return fail(
+				"RECEIPT_MISMATCH",
+				`That transaction does not ${kind === "rfq_cancel" ? "cancel" : "settle"} request ${row.quotationId}, so nothing was recorded and the request is unchanged. Transaction ${txHash}.`,
+			);
+		}
 	}
 
-	// The option address, when settlement produced one. `QuotationSettled`'s only
-	// unindexed argument is `optionAddress`, so it is the whole of `data`. A log
-	// that cannot be read leaves the column null rather than guessing.
+	// The option address settlement produced, read out of the settled event
+	// itself. MEASURED from the ABI: `QuotationSettled`'s only UNINDEXED argument
+	// is `optionAddress`, so it is the whole of `data`. A log that cannot be read,
+	// or a zero address, leaves the column null rather than guessing.
 	let optionAddress: string | null = null;
-	if (kind === "rfq_settle") {
-		const idTopic = `0x${BigInt(row.quotationId).toString(16).padStart(64, "0")}`;
-		for (const log of receipt.logs) {
-			if (!sameAddress(log.address, row.factoryAddress)) continue;
-			if (log.topics[0]?.toLowerCase() !== quotationSettledTopic.toLowerCase()) continue;
-			if (log.topics[1]?.toLowerCase() !== idTopic) continue;
-			const word = log.data.replace(/^0x/, "");
-			if (word.length !== 64) continue;
+	if (kind === "rfq_settle" && proof !== undefined) {
+		const word = proof.data.replace(/^0x/, "");
+		if (word.length === 64) {
 			const candidate = `0x${word.slice(24)}`;
 			if (HEX_ADDRESS.test(candidate) && !sameAddress(candidate, ZERO_ADDRESS)) optionAddress = candidate;
-			break;
 		}
 	}
 

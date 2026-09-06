@@ -330,7 +330,7 @@ export const HISTORY_TOO_LONG = "agent:history-too-long";
 export const REQUEST_TOO_LONG = "agent:request-too-long";
 
 /**
- * The text of one message, exactly as the route's `userTexts` and the scope
+ * The text of one message, exactly as the route's `inboundTexts` and the scope
  * gate read it. One implementation so the validated string and the classified
  * string cannot drift apart.
  */

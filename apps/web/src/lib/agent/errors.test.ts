@@ -264,6 +264,56 @@ describe("F-E item 1: the id and the provider must agree", () => {
 		).toBeNull();
 	});
 
+	/**
+	 * B-1 (one-shot review of the RFQ build, MAJOR). An id that was never
+	 * configured is a configuration problem, not a crash.
+	 *
+	 * `providerModelProblem` used to dereference `model.id`, and `env.AGENT_MODEL`
+	 * is `undefined` whenever validation is skipped — which every `bun test`
+	 * preload and `scripts/verify.ts --offline` do. `GET /api/agent/health` then
+	 * threw `TypeError: undefined is not an object (evaluating 'model.id.includes')`
+	 * instead of naming the variable.
+	 */
+	test("an unset model id is reported, not dereferenced", () => {
+		for (const usingGateway of [true, false]) {
+			const problem = providerModelProblem({
+				usingGateway,
+				models: [
+					{ variable: "AGENT_MODEL", id: undefined },
+					{ variable: "AGENT_GATE_MODEL", id: "anthropic/claude-haiku-4.5" },
+				],
+			});
+			expect(problem, `usingGateway=${usingGateway}`).toContain("AGENT_MODEL is not set");
+		}
+		// The gate variable is named when it is the missing one.
+		expect(
+			providerModelProblem({
+				usingGateway: false,
+				models: [
+					{ variable: "AGENT_MODEL", id: "anthropic/claude-haiku-4.5" },
+					{ variable: "AGENT_GATE_MODEL", id: "   " },
+				],
+			}),
+		).toContain("AGENT_GATE_MODEL is not set");
+	});
+
+	test("the health endpoint answers 503 with the problem rather than throwing", async () => {
+		const { agentHealth } = await import("./health");
+		const { status, body } = await agentHealth({
+			usingGateway: true,
+			agent: { variable: "AGENT_MODEL", id: undefined },
+			gate: { variable: "AGENT_GATE_MODEL", id: undefined },
+			probe: false,
+			now: new Date("2026-09-06T00:00:00.000Z"),
+		});
+		expect(status).toBe(503);
+		expect(body.config.ok).toBe(false);
+		expect(body.config.problem).toContain("AGENT_MODEL is not set");
+		// The body keeps its shape: `id` is a string, never a dropped key.
+		expect(body.models.agent.id).toBe("");
+		expect(body.models.gate.id).toBe("");
+	});
+
 	test("providerName says which provider the credential selects", () => {
 		expect([providerName(true), providerName(false)]).toEqual(["gateway", "openrouter"]);
 	});

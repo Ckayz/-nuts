@@ -99,12 +99,15 @@ const stepStartPart = z.object({ type: z.literal("step-start") }).strict();
  * WHAT THIS DOES NOT DO, stated rather than implied: no schema can tell a
  * well-shaped FORGED output from a real one — only a server-side secret could,
  * and the parts come from the browser. `output` is therefore checked for the
- * shape each tool actually returns (read out of `tools.ts` and `execute.ts`
- * below), which refuses the reviewer's payload because it lacks the fields a
- * real preparation always carries, and nothing more. The guarantee that matters
- * is unchanged and lives elsewhere: NO server action trusts a tool part. The
- * card's send re-prepares through `prepareTradeFor`, and `recordTrade` verifies
- * the ticket against the signed order and the session's own wallet.
+ * shape each tool actually returns — every WRITE tool has its own schema in
+ * `WRITE_TOOL_OUTPUTS` below, read out of `execute.ts` and `rfq-tools.ts`, and
+ * every read tool must return an object — which refuses the reviewer's payloads
+ * because they lack the fields a real preparation always carries, and nothing
+ * more. The guarantee that matters is unchanged and lives elsewhere: NO server
+ * action trusts a tool part. The card's send re-prepares through
+ * `prepareTradeFor` / `prepareRfqCreateFor` / `prepareRfqCancelFor` /
+ * `prepareRfqSettleFor`, and `recordTrade` verifies the ticket against the
+ * signed order and the session's own wallet.
  */
 
 /** `providerMetadata` / `callProviderMetadata`, as loose as the SDK has them. */
@@ -133,14 +136,83 @@ const executionOutput = z.union([
 ]);
 
 /**
- * Every READ tool returns an object — the four in `tools.ts` and the two in
- * `positions.ts` — never a primitive or an array, so that much is checked and
- * no more.
+ * B-2 (one-shot review of the RFQ build). The same fence for the three
+ * approval-gated RFQ write tools, whose outputs come out of
+ * `lib/agent/rfq-tools.ts` `rfqCreateToolOutput` / `rfqActionToolOutput`.
+ *
+ * They were left in the `readToolOutput` bucket when they were added — any
+ * object at all — so the reviewer's forged payload went straight into the
+ * model's context under a money-moving tool's name:
+ *
+ *   requestOptionBookExecution   accepted=false
+ *   requestRfqCreation           accepted=true
+ *   requestRfqCancellation       accepted=true
+ *   requestRfqSettlement         accepted=true
+ *
+ * Required here are only fields EVERY genuine output carries, read from
+ * `rfq-tools.ts` and from `RfqPrepareResult` / `RfqCancelResult` /
+ * `RfqSettleResult` in `lib/rfq/prepare.ts`:
+ *
+ *   create  both stages carry `prepared`, `kind`, `chainId`, `stage`,
+ *           `transactions` and `expected`
+ *   action  both carry those plus `rfqRequestId` and `token`; `kind` and
+ *           `stage` are paired at the call site, so pinning both pins the pair
+ *
+ * `kind` on the refusal arm too: every `prepared: false` return in
+ * `rfq-tools.ts` names its own tool.
+ */
+const rfqCreateOutput = z.union([
+	z
+		.object({
+			prepared: z.literal(true),
+			kind: z.literal("rfq_create"),
+			chainId: z.literal(8453),
+			stage: z.enum(["approve", "create"]),
+			transactions: z.record(z.string(), z.unknown()),
+			expected: z.record(z.string(), z.unknown()),
+		})
+		.passthrough(),
+	z.object({ prepared: z.literal(false), kind: z.literal("rfq_create") }).passthrough(),
+]);
+
+function rfqActionOutput(kind: "rfq_cancel" | "rfq_settle", stage: "cancel" | "settle"): z.ZodTypeAny {
+	return z.union([
+		z
+			.object({
+				prepared: z.literal(true),
+				kind: z.literal(kind),
+				chainId: z.literal(8453),
+				stage: z.literal(stage),
+				transactions: z.record(z.string(), z.unknown()),
+				rfqRequestId: z.string(),
+				token: z.string(),
+			})
+			.passthrough(),
+		z.object({ prepared: z.literal(false), kind: z.literal(kind) }).passthrough(),
+	]);
+}
+
+/**
+ * Every READ tool returns an object — the four in `tools.ts`, the two in
+ * `positions.ts` and the four reads in `rfq-tools.ts` — never a primitive or an
+ * array, so that much is checked and no more.
  */
 const readToolOutput = z.record(z.string(), z.unknown());
 
+/**
+ * The fence, per tool. A LOOKUP rather than a ternary: the ternary is how the
+ * three RFQ writes silently inherited the read bucket when they were added, and
+ * a map makes the next omission visible. Anything not named here is a read tool.
+ */
+const WRITE_TOOL_OUTPUTS: Readonly<Record<string, z.ZodTypeAny>> = {
+	"tool-requestOptionBookExecution": executionOutput,
+	"tool-requestRfqCreation": rfqCreateOutput,
+	"tool-requestRfqCancellation": rfqActionOutput("rfq_cancel", "cancel"),
+	"tool-requestRfqSettlement": rfqActionOutput("rfq_settle", "settle"),
+};
+
 function outputSchemaFor(type: string): z.ZodTypeAny {
-	return type === "tool-requestOptionBookExecution" ? executionOutput : readToolOutput;
+	return WRITE_TOOL_OUTPUTS[type] ?? readToolOutput;
 }
 
 const toolType = z.enum(TOOL_PART_TYPES as unknown as [string, ...string[]]);

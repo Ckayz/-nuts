@@ -56,6 +56,24 @@ export interface ScopeDecision {
 	errorClass: AgentErrorClass;
 }
 
+/**
+ * B (one-shot review of the RFQ build). The IN-SCOPE list gained the RFQ
+ * vocabulary because the app now GENERATES chips whose text is exactly that
+ * vocabulary — `suggestions.ts` `postRfqCancelSend` sends "Cancel my request
+ * <id> and return the escrow." — while the list named only positions,
+ * portfolio, P&L, costs, risk and vague trading intent. A chip the app itself
+ * offers must not be refused by the app's own gate.
+ *
+ * MEASURED once, 2026-09-06, `minimax/minimax-m3:free` over OpenRouter (never
+ * the gateway), the two chip sentences in ONE gate call:
+ *
+ *   {"inScope":true,"degraded":false,"errorClass":"ok",
+ *    "reason":"Both messages relate to custom option requests (RFQs) on the
+ *              app, including listing and cancelling them."}
+ *
+ * NOT VERIFIED: how the gate answered BEFORE the list was extended, and how the
+ * paid gateway model answers — neither was measured, and neither is claimed.
+ */
 const GATE_INSTRUCTION = `You decide whether a message belongs to Thesis.fun, an options trading app on the Thetanuts protocol.
 
 IN SCOPE — answer true:
@@ -64,6 +82,7 @@ IN SCOPE — answer true:
 - What is tradeable, costs, risk, maximum loss, payoff, expiry, settlement
 - Theses posted on this app, backing or countering them
 - The user's own positions, portfolio and profit or loss
+- Custom option requests (RFQ): asking market makers to quote a strike or expiry the order book does not carry, the reserve price, the escrowed deposit, cancelling or settling a request, and the user's own requests
 - How this app works, what the agent can do, wallets and connecting
 - Vague trading intent that this app could act on ("I think ETH goes up", "I have $10, what can I do?")
 - Follow-ups and clarifications in an ongoing trading conversation

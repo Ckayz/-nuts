@@ -494,3 +494,97 @@ describe("the row knows whether anyone is signed in", () => {
 		expect(JSON.stringify(first)).not.toBe(JSON.stringify(second));
 	});
 });
+
+/* ------------------------------------------------------------------ *
+ * B-4 (one-shot review of the RFQ build): a marker inside a code block
+ * ------------------------------------------------------------------ */
+
+describe("B-4: an example inside a fenced block is not a trailer", () => {
+	/**
+	 * The reviewer's case. A reply that SHOWS the trailer format — reachable when
+	 * a user asks the agent about its own follow-ups, and through injected thesis
+	 * text that asks the model to print one mid-answer:
+	 *
+	 *   marker in a fenced block   body="Example:"   chips=["x"]
+	 *
+	 * "Done." was gone from the screen and an illustrative array became live
+	 * chips the user could press.
+	 */
+	test("a fenced example with an answer after it keeps the whole answer", () => {
+		const text = 'Example:\n```\nSUGGEST: ["x"]\n```\nDone.';
+		const { body, chips } = splitSuggestionTrailer(text, false);
+		expect(body).toBe(text);
+		expect(chips).toEqual([]);
+	});
+
+	test("the same, with a language tag and several lines of code", () => {
+		const text = 'The format is:\n\n```json\nSUGGEST: ["One","Two"]\n{"note":"illustration"}\n```\n\nThat is all it is.';
+		const { body, chips } = splitSuggestionTrailer(text, false);
+		expect(body).toBe(text);
+		expect(chips).toEqual([]);
+	});
+
+	test("a tilde fence counts too", () => {
+		const text = 'Example:\n~~~\nSUGGEST: ["x"]\n~~~\nDone.';
+		const { body, chips } = splitSuggestionTrailer(text, false);
+		expect(body).toBe(text);
+		expect(chips).toEqual([]);
+	});
+
+	test("an UNCLOSED fence swallowing the trailer is not a trailer either", () => {
+		// Everything after the opening fence is code the model never closed; the
+		// reader should see it rather than lose the end of the answer to a cut.
+		const text = 'Here is some code:\n```\nconst a = 1;\nSUGGEST: ["x"]';
+		const { body, chips } = splitSuggestionTrailer(text, false);
+		expect(body).toBe(text);
+		expect(chips).toEqual([]);
+	});
+
+	/**
+	 * The decoration the model really does emit still works: a fence opened for
+	 * the trailer ALONE, at the very end of the reply, is the trailer. That case
+	 * is measured in "survives the decoration a model puts around the marker"
+	 * above; here it is stated against the new rule so the two cannot drift.
+	 */
+	test("a fence around the trailer alone, ending the reply, is still the trailer", () => {
+		for (const tail of ['```\nSUGGEST: ["One","Two"]\n```', '```json\nSUGGEST: ["One","Two"]\n```', '```\nSUGGEST: ["One","Two"]\n```\n\n']) {
+			const { body, chips } = splitSuggestionTrailer(`Answer.\n\n${tail}`, false);
+			expect(chips.map((c) => c.label), tail).toEqual(["One", "Two"]);
+			expect(body, tail).toBe("Answer.");
+		}
+	});
+
+	test("mid-stream, a fence opened for the trailer alone is still cut", () => {
+		// The closing fence has not arrived yet. Cutting keeps raw `SUGGEST: [`
+		// off the screen, which is the whole point of the streaming branch; when
+		// the stream ends the real shape is known and the rules above apply.
+		const { body, chips } = splitSuggestionTrailer('Answer.\n\n```\nSUGGEST: ["On', true);
+		expect(body).toBe("Answer.");
+		expect(chips).toEqual([]);
+	});
+
+	test("mid-stream, a fence carrying real code is NOT cut", () => {
+		const text = 'Here:\n```\nconst a = 1;\nSUGGEST: ["x"';
+		expect(splitSuggestionTrailer(text, true).body).toBe(text);
+	});
+
+	test("the fence scan is linear, not quadratic", () => {
+		// 20,000 opening fences and a 100,000-character body: the scan jumps past
+		// each block it has already read, so no input is examined twice.
+		const many = "```\n".repeat(20_000);
+		const long = `${"x".repeat(100_000)}\n\nSUGGEST: ["One"]`;
+		for (const [name, input] of [["fences", many], ["body", long]] as const) {
+			const started = Bun.nanoseconds();
+			splitSuggestionTrailer(input, false);
+			const ms = (Bun.nanoseconds() - started) / 1e6;
+			expect({ name, fast: ms < 500 }).toEqual({ name, fast: true });
+		}
+	});
+
+	test("the LAST marker outside a fence still wins when an earlier one is fenced", () => {
+		const text = 'Example:\n```\nSUGGEST: ["fenced"]\n```\nHere it is.\n\nSUGGEST: ["real"]';
+		const { body, chips } = splitSuggestionTrailer(text, false);
+		expect(chips.map((c) => c.label)).toEqual(["real"]);
+		expect(body).toBe('Example:\n```\nSUGGEST: ["fenced"]\n```\nHere it is.');
+	});
+});

@@ -464,6 +464,45 @@ describe("C-P2-2: the real endpoint refuses an unauthorised probe", () => {
 	const url = "https://example.invalid/api/agent/health";
 	const WRONG = "not-the-configured-operator-token";
 
+	/**
+	 * B-1. These cases drive the REAL route, which reads `env.AGENT_MODEL` and
+	 * `env.AGENT_GATE_MODEL` — so the case must SET them rather than inherit
+	 * whatever the developer's `.env.local` happens to hold. They used to inherit,
+	 * and on any checkout carrying `AI_GATEWAY_API_KEY` (production parity, and
+	 * this worktree) all three failed: `SKIP_ENV_VALIDATION` is set by the test
+	 * preload, so zod never parses, the `.default()` never applies, and the ids
+	 * were `undefined`.
+	 *
+	 * Setting `process.env` does NOT reach `env` — `@nuts/env/server` snapshots
+	 * `process.env` at import (measured 2026-09-06: in a full-directory run the
+	 * module is already loaded before this file's body executes, and the mutation
+	 * is invisible). The values are therefore written onto the `env` object itself
+	 * and restored afterwards, so nothing leaks into the other files sharing this
+	 * process.
+	 *
+	 * `AI_GATEWAY_API_KEY` is deliberately NOT pinned: with two non-`:free` ids
+	 * the configuration is valid under either provider, so these three cases must
+	 * pass with the gateway key present AND absent. Both were measured.
+	 */
+	const FIXTURE_IDS = {
+		AGENT_MODEL: "anthropic/claude-haiku-4.5",
+		AGENT_GATE_MODEL: "anthropic/claude-haiku-4.5",
+	} as const;
+
+	async function withFixtureModelIds<T>(run: () => Promise<T>): Promise<T> {
+		const { env } = (await import("@nuts/env/server")) as unknown as { env: Record<string, unknown> };
+		const before = new Map(Object.keys(FIXTURE_IDS).map((key) => [key, env[key]]));
+		Object.assign(env, FIXTURE_IDS);
+		try {
+			return await run();
+		} finally {
+			for (const [key, value] of before) {
+				if (value === undefined) delete env[key];
+				else env[key] = value;
+			}
+		}
+	}
+
 	async function call(target: string, headers: Record<string, string> = {}) {
 		const { GET } = await import("../../app/api/agent/health/route");
 		const realFetch = globalThis.fetch;
@@ -473,7 +512,7 @@ describe("C-P2-2: the real endpoint refuses an unauthorised probe", () => {
 			throw new Error("no network in this test");
 		}) as unknown as typeof fetch;
 		try {
-			const response = await GET(new Request(target, { headers }));
+			const response = await withFixtureModelIds(() => GET(new Request(target, { headers })));
 			return { response, body: (await response.json()) as { probed: boolean; probeRefused: boolean }, attempts };
 		} finally {
 			globalThis.fetch = realFetch;

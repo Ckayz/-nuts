@@ -37,6 +37,7 @@ import {
 	type MarkerThesis,
 } from "@/lib/chart/thesis-markers";
 import { Avatar } from "@/components/primitives";
+import { countLabel } from "@/lib/format";
 
 /** A cluster plus where it currently sits over the canvas, in CSS pixels. */
 interface Pin {
@@ -304,10 +305,14 @@ export function PriceChart({
 					const extra = pin.cluster.theses.length - 1;
 					return (
 						<div className="tmark" key={pin.key} style={{ left: pin.x, top: pin.y }}>
+							{/* K-2 (pass-4 D4-m2): the app pluralises through ONE helper
+							    (`lib/format.ts countLabel`, already used by the profile
+							    counts); this label said "2 thesis on this candle". The
+							    two words are this sentence's own, in its own casing. */}
 							<button
 								type="button"
 								className={`tmark-dot ${lead.direction ?? "flat"}`}
-								aria-label={`${pin.cluster.theses.length} thesis on this candle by ${lead.handleLabel}`}
+								aria-label={`${pin.cluster.theses.length} ${countLabel(pin.cluster.theses.length, "theses", "thesis")} on this candle by ${lead.handleLabel}`}
 								aria-expanded={open}
 								onMouseEnter={() => setOpenCluster(pin.key)}
 								onMouseLeave={() => setOpenCluster((current) => (current === pin.key ? null : current))}

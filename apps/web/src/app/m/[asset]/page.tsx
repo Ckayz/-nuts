@@ -15,10 +15,11 @@ import { RightTabs } from "@/components/market/right-tabs";
 import { TakeASide } from "@/components/market/take-a-side";
 import { usd2 } from "@/lib/format";
 import { marketStatTiles } from "@/lib/market/stat-tiles";
-import { marketBookStats } from "@/lib/market/summaries";
+import { marketBookStats, marketSummariesData } from "@/lib/market/summaries";
 import { usingDatabase } from "@/lib/data/source";
 import { marketBySlug, marketSummaries, thesesByMarket } from "@/lib/view-data";
 import { railTheses } from "@/lib/page-data";
+import type { Metadata } from "next";
 import type { Market, MarketSummary, Thesis } from "@/lib/display-types";
 import type { TradePanelContext } from "@/lib/trade/types";
 import "@/styles/market.css";
@@ -62,6 +63,28 @@ import "@/styles/position.css";
  * calling the OptionBook feed from the build.
  */
 export const dynamic = "force-dynamic";
+
+/**
+ * K-2 (pass-4 D4-m5). This route printed the layout's generic "Thesis.fun" in
+ * the tab and in every shared link, and it is the trading surface — the tab most
+ * likely to be kept open or sent to somebody. The title is the page's OWN h1
+ * text (`<h1>{market.name}</h1>` below), joined to the site name with the
+ * separator the one other route that names it uses (`app/agent/page.tsx:5`,
+ * "Agent · Thesis.fun"). No new words.
+ *
+ * It reads the SAME market summaries the layout's nav already reads, which read
+ * the cached order snapshot, so this costs no extra network call and no second
+ * page render. A slug with no summary — mock fixtures, an unreadable book, an
+ * unknown asset — returns no override at all and the layout's title stands,
+ * rather than inventing a name for a market that may not exist.
+ * TODO-OWNER: page title (it is also the link preview), as on /agent.
+ */
+export async function generateMetadata({ params }: { params: Promise<{ asset: string }> }): Promise<Metadata> {
+	const { asset } = await params;
+	const { markets } = await marketSummariesData();
+	const match = markets.find((market) => market.slug === asset.toLowerCase());
+	return match === undefined ? {} : { title: `${match.name} · Thesis.fun` };
+}
 
 interface Loaded {
 	market: Market;

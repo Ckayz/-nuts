@@ -54,14 +54,20 @@ test("only allowlisted assets reach the outbound request", () => {
 	expect(binancePair("BTC")).toBe("BTCUSDT");
 	expect(binancePair("btc")).toBe("BTCUSDT");
 	expect(binancePair(" eth ")).toBe("ETHUSDT");
-	for (const bad of ["", "DOGE", "../../etc", "BTC&x=1", "UNKNOWN_FEED:0xabc"]) {
+	// K-2 (pass-4 D4-m4): "DOGE" used to stand here as the unmapped case. It is
+	// a configured Base feed and Binance prices it, so it is mapped now; the
+	// unmapped case has to be an asset Thetanuts does not list at all.
+	for (const bad of ["", "LTC", "../../etc", "BTC&x=1", "UNKNOWN_FEED:0xabc"]) {
 		expect(binancePair(bad)).toBeNull();
 	}
 });
 
-test("every asset the live book quotes has a pair", () => {
-	// MEASURED 2026-09-05: these six are the assets with live OptionBook orders.
-	for (const asset of ["BTC", "ETH", "BNB", "SOL", "AVAX", "XRP"]) {
+test("every asset configured on Base has a pair", () => {
+	// The eight symbols `buildPriceFeedSymbolMap(8453)` returns (read from the
+	// SDK 2026-09-06). Six of them had live OptionBook orders that day; the
+	// other two must not lose their chart the day they get liquidity, and each
+	// pair was requested from Binance and returned a candle (klines.ts).
+	for (const asset of ["BTC", "ETH", "SOL", "DOGE", "XRP", "BNB", "PAXG", "AVAX"]) {
 		expect(binancePair(asset)).not.toBeNull();
 	}
 });

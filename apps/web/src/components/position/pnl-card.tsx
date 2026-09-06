@@ -129,10 +129,22 @@ function CompactCard({ card, href }: { card: PnlCardView; href?: boolean }) {
 function ShareCard({ card }: { card: PnlCardView }) {
 	const tone = card.pnl.pnlClass;
 	const arrow = arrowFor(tone);
-	const subLine =
-		[card.strikesLabel, card.expiryFullLabel === null ? null : `expires ${card.expiryFullLabel}`]
-			.filter(Boolean)
-			.join(" · ") || `${card.sideLabel} · Base · Thetanuts OptionBook`;
+	/**
+	 * K-2 (pass-4 D4-m1). ONE composition for this line, shared with the Open
+	 * Graph image the same card is rendered into
+	 * (`app/p/[id]/opengraph-image.tsx`), which built it as
+	 * `[strikesLabel, expiryFullLabel, sideLabel, "Base"]` while this renderer
+	 * put `sideLabel` in a FALLBACK that only fired when strikes and expiry were
+	 * both missing. MEASURED on one position at the pin: the page's hero read
+	 * "2,340 P · expires 07 Sep 26 08:00 UTC" and its share image read
+	 * "2,340 P · 07 Sep 26 08:00 UTC · Bear · Base" — the position page was the
+	 * one surface whose hero never said Bull or Bear, which is exactly the drift
+	 * owner default 1 ended everywhere else. Same tokens, same order, both
+	 * places; no new words.
+	 */
+	const subLine = [card.strikesLabel, card.expiryFullLabel, card.sideLabel, "Base"]
+		.filter(Boolean)
+		.join(" · ");
 	return (
 		<div className="frame">
 			<div className="sc">

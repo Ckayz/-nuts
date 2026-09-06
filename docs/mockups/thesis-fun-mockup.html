@@ -944,12 +944,20 @@ em{font-style:normal}
         <h3 style="font-size:16px">Take a side</h3>
         <div class="mut num" style="font-size:12.5px;font-weight:500;margin-top:4px">BTC put spread 78,000 / 74,000 P · 11 Sep 26 08:00 UTC</div>
 
+        <!-- AMENDED 2026-09-06 (owner default 1: Bull/Bear name the ASSET's direction,
+             so the ticket relabels per instrument). The structure selected above is a
+             PUT spread, and buying a put is a BEAR position, so Bear is the buy side
+             here and Bull is the sell side. Copied from the running app on a selected
+             BTC put spread that day: "Bull · sell" (unfillable, disabled) and
+             "Bear · buy", with the copy reading "Bear buys the BTC put spread
+             81,000 / 80,000 P and pays premium." Only the two direction words moved;
+             no wording was added. -->
         <div class="seg" style="margin-top:16px" role="group" aria-label="Side">
-          <button type="button" aria-pressed="true">Bull &#183; buy</button>
-          <button type="button" aria-pressed="false">Bear &#183; sell</button>
+          <button type="button" aria-pressed="false">Bull &#183; sell</button>
+          <button type="button" aria-pressed="true">Bear &#183; buy</button>
         </div>
         <p class="mut" style="font-size:12.5px;font-weight:500;margin-top:10px;line-height:1.5">
-          Bull buys the spread and pays premium. Bear sells it and posts collateral. Both are live OptionBook fills sized to your budget.</p>
+          Bear buys the spread and pays premium. Bull sells it and posts collateral. Both are live OptionBook fills sized to your budget.</p>
 
         <div class="lbl" style="margin-top:18px">Your max loss</div>
         <div class="amt" style="margin-top:8px">

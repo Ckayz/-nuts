@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { StackedColumns } from "./stacked-columns";
 
 /**
  * The three-column frame every page sits in
@@ -39,17 +40,27 @@ export function PageFrame({
 		.join(" ");
 	return (
 		<div className={columns}>
-			{left === undefined ? null : (
-				<div className="col-left">
-					<div className="sticky">{left}</div>
-				</div>
-			)}
-			<div className={stackGap === "lg" ? "col-main stack lg" : "col-main stack"}>{children}</div>
-			{right === undefined ? null : (
-				<div className="col-right">
-					<div className="sticky stack">{right}</div>
-				</div>
-			)}
+			{/* K-2: the three wrappers are UNCHANGED; only the order they are
+			    rendered in follows the viewport, so the tab sequence matches what
+			    the viewer sees. See components/shell/stacked-columns.tsx. */}
+			<StackedColumns
+				phoneLeftFirst={variant === "feed"}
+				left={
+					left === undefined ? null : (
+						<div className="col-left">
+							<div className="sticky">{left}</div>
+						</div>
+					)
+				}
+				main={<div className={stackGap === "lg" ? "col-main stack lg" : "col-main stack"}>{children}</div>}
+				right={
+					right === undefined ? null : (
+						<div className="col-right">
+							<div className="sticky stack">{right}</div>
+						</div>
+					)
+				}
+			/>
 		</div>
 	);
 }

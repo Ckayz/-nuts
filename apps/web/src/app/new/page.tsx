@@ -3,6 +3,17 @@ import { Composer } from "./composer";
 import { composerData } from "@/lib/thesis/composer-data";
 
 /**
+ * K-2 (pass-4 D4-m5). This route printed the layout's generic "Thesis.fun" in
+ * the tab and in every shared link. The title is the page's OWN h1 text, joined
+ * to the site name with the separator the one other route that names it uses
+ * (`app/agent/page.tsx:5`, "Agent · Thesis.fun") — no new words.
+ * TODO-OWNER: page title (it is also the link preview), as on /agent.
+ */
+export const metadata = {
+	title: "New thesis · Thesis.fun",
+};
+
+/**
  * The composer. Round 6 (owner 2026-09-05, "a pure text opinion is fine also"):
  * a post is text first. Naming a market is optional, naming a structure inside
  * that market is optional, and backing it with your own fill happens on the

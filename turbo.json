@@ -24,6 +24,8 @@
 				"BASE_RPC_URL",
 				"THESIS_REFERRER",
 				"THETANUTS_ORDERS_URL",
+				"AGENT_HEALTH_PROBE_TOKEN",
+				"RFQ_KEY_MASTER_KEY",
 				"SKIP_ENV_VALIDATION"
 			],
 			"outputs": [

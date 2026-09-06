@@ -149,7 +149,9 @@ export type RfqStatusKind =
 	| "settled"
 	| "cancelled"
 	| "expired_unfilled"
-	| "failed";
+	| "failed"
+	/** C-4: `lib/rfq/status.ts` says this when the indexer reports a state this build does not model. */
+	| "unknown";
 
 export type RfqNextAction = "wait" | "settle" | "cancel" | "none";
 

@@ -121,7 +121,7 @@
     <div class="divider in"></div>
     <div class="grid-2 in">
       <div class="card">
-        <p class="h3">fomo</p>
+        <p class="h3" style="display:flex;align-items:center;gap:12px;"><img src="img/fomo.png" alt="" style="width:36px;height:36px;border-radius:9px;">fomo</p>
         <div class="grid-2" style="margin-top:18px;gap:18px;">
           <div class="metric"><div class="metric-value num gain">$7.06M</div><div class="metric-label">revenue, last 7 days</div></div>
           <div class="metric"><div class="metric-value num">$18.3M</div><div class="metric-label">revenue, last 30 days</div></div>
@@ -129,7 +129,7 @@
         <p class="metric-src">≈ $1.0M per day this week · $47.6M all-time · DefiLlama, 6 Sep 2026</p>
       </div>
       <div class="card">
-        <p class="h3">pump.fun</p>
+        <p class="h3" style="display:flex;align-items:center;gap:12px;"><img src="img/pumpfun.png" alt="" style="width:36px;height:36px;border-radius:9px;">pump.fun</p>
         <div class="grid-2" style="margin-top:18px;gap:18px;">
           <div class="metric"><div class="metric-value num gain">$7.2M</div><div class="metric-label">revenue, last 7 days</div></div>
           <div class="metric"><div class="metric-value num">$35.9M</div><div class="metric-label">revenue, last 30 days</div></div>
@@ -137,33 +137,18 @@
         <p class="metric-src">$1.11B all-time · DefiLlama, 6 Sep 2026</p>
       </div>
     </div>
-    <p class="body in" style="margin-top:28px;">Both are built for one thing: <b style="color:var(--c-text);">memecoins and spot majors.</b> Nobody has done this for derivatives.</p>
+    <p class="body in" style="margin-top:28px;">Both are built for one thing: <b style="color:var(--c-text);">memecoins and spot majors.</b> Nobody has done this for options. So we built it.</p>
     <div class="notes">These are DefiLlama numbers pulled today (6 Sep 2026), not press quotes. fomo's 7-day pace is about one million dollars a day. If a judge asks "isn't fomo on Solana?" — yes, and that is the point: the model is proven, the venue and the asset class are open.</div>
-  </div>
-
-  <!-- 4 · The gap -->
-  <div class="slide">
-    <span class="caption in">The gap</span>
-    <h1 class="h1 in" style="margin-top:16px;max-width:1100px;">Options are the biggest derivatives market crypto has, and almost none of it is social or onchain.</h1>
-    <div class="divider in"></div>
-    <div class="grid-3 in">
-      <div class="metric card"><div class="metric-value num">$1.9T</div><div class="metric-label">Deribit options volume, 2025</div><div class="metric-src">≈ 49% of all crypto options · Cryptonomist / CoinLaw</div></div>
-      <div class="metric card"><div class="metric-value num">&lt;1%</div><div class="metric-label">of crypto options volume is onchain</div><div class="metric-src">CryptoSlate, 2026</div></div>
-      <div class="metric card"><div class="metric-value num">$69M</div><div class="metric-label">onchain options notional, last 30 days</div><div class="metric-src">DefiLlama options dashboard, 6 Sep 2026 · Derive leads at $64M</div></div>
-    </div>
-    <p class="body in" style="margin-top:28px;">Onchain options venues exist. Social apps exist. <b style="color:var(--c-text);">The square where they meet is empty.</b> So we built it.</p>
-    <div class="notes">Two numbers to remember: nearly two trillion in offchain options volume last year, under one percent of options onchain. That is the room. Do not oversell the onchain number — it is small today, which is exactly why a consumer front door matters.</div>
   </div>
 
   <!-- 5 · Introducing -->
   <div class="slide bg-alt" style="justify-content:center;">
     <span class="caption in">Introducing</span>
-    <h1 class="hero in" style="margin-top:16px;font-size:80px;">thesis<span class="lift">.fun</span></h1>
-    <p class="h2 in" style="margin-top:22px;max-width:1100px;font-weight:600;color:var(--c-text-secondary);">A trade is a post. Every position is a real option on Thetanuts, filled from your own wallet, with its own page and a live P&amp;L card anyone can verify on Base.</p>
-    <div class="grid-3 in" style="margin-top:44px;">
-      <div class="card"><p class="h3">Every market with liquidity</p><p class="small" style="margin-top:8px;">Assets, strikes and expiries come live from the OptionBook. Nothing hardcoded. 352 structures across 6 assets right now.</p></div>
-      <div class="card"><p class="h3">Both sides, honest sizing</p><p class="small" style="margin-top:8px;">Buy an option: lose at most the premium. Sell one: lock collateral, earn the premium. The ticket says exactly what you risk.</p></div>
-      <div class="card"><p class="h3">A feed that cannot lie</p><p class="small" style="margin-top:8px;">Likes, comments, follows and a leaderboard built only from onchain fills. A losing thesis cannot be deleted.</p></div>
+    <h1 class="hero in" style="margin-top:12px;font-size:64px;">thesis<span class="lift">.fun</span></h1>
+    <p class="h3 in" style="margin-top:18px;max-width:1200px;font-weight:500;color:var(--c-text-secondary);">A trade is a post. Every position is a real option on Thetanuts, filled from your own wallet, with its own page and a live P&amp;L card anyone can verify on Base.</p>
+    <div class="in" style="margin-top:30px;display:flex;gap:24px;align-items:flex-start;justify-content:center;">
+      <div class="shot" style="flex:0 1 auto;max-width:66%;"><img src="img/market-btc.png" alt="The BTC market page: live structures, the Bull/Bear ticket, the chart" style="max-height:52vh;width:auto;max-width:100%;object-fit:contain;"></div>
+      <div class="shot" style="flex:0 1 auto;"><img src="img/market-phone.png" alt="The same market on a phone" style="max-height:52vh;width:auto;object-fit:contain;"></div>
     </div>
     <div class="notes">Three things, then demo. "Every market with liquidity" is a real differentiator: we derive the whole product from the live book, so when Thetanuts lists something we list it the same minute.</div>
   </div>
@@ -258,7 +243,7 @@
     <div class="grid-3 in">
       <div class="card"><p class="caption" style="color:var(--c-primary-lift);">TAM</p><div class="metric-value num" style="margin-top:12px;font-size:56px;">≈ $3.8T</div><p class="metric-label">crypto options volume per year, all venues</p><p class="metric-src">Deribit $1.875T in 2025 at ≈ 49% share → whole market ≈ $3.8T · derived</p></div>
       <div class="card"><p class="caption" style="color:var(--c-primary-lift);">SAM</p><div class="metric-value num" style="margin-top:12px;font-size:56px;">≈ $650M</div><p class="metric-label">social-trading fee pool per year</p><p class="metric-src">fomo $18.3M + pump.fun $35.9M in the last 30 days, ×12 · DefiLlama, 6 Sep 2026</p></div>
-      <div class="card" style="border-color:var(--c-primary);"><p class="caption" style="color:var(--c-primary-lift);">SOM · year one</p><div class="metric-value num" style="margin-top:12px;font-size:56px;">referrer share</div><p class="metric-label">of every fill we route through the OptionBook</p><p class="metric-src">fee = min(0.06% notional, 12.5% premium), measured on chain; our split is set by Thetanuts (TBD)</p></div>
+      <div class="card" style="border-color:var(--c-primary);"><p class="caption" style="color:var(--c-primary-lift);">SOM · what Thetanuts can absorb today</p><div class="metric-value num" style="margin-top:12px;font-size:56px;">≈ $2.6M</div><p class="metric-label">resting on the Thetanuts OptionBook right now</p><p class="metric-src">USDC + aBasUSDC maker liquidity across 343 live structures, read from the book at 10:0x on 6 Sep 2026 · we earn a referrer share of the fee on every fill we route (fee = min(0.06% notional, 12.5% premium), measured on chain; the split is set by Thetanuts)</p></div>
     </div>
     <p class="body in" style="margin-top:28px;">We do not need to move the options market onchain. We need a fraction of the people who already trade socially to try one <b style="color:var(--c-text);">defined-risk</b> trade.</p>
     <div class="notes">Be honest about SOM: it is a formula, not a forecast, because the referrer split is Thetanuts' number. The pitch is that the social-trading pool alone is about $650M a year of fees between two apps, and none of it touches options.</div>
@@ -270,16 +255,16 @@
     <h1 class="h1 in" style="margin-top:16px;">Everyone has half of it.</h1>
     <div class="divider in"></div>
     <table class="cmp in">
-      <thead><tr><th style="width:280px;"></th><th>fomo</th><th>pump.fun</th><th>Base app</th><th>Deribit</th><th style="color:var(--c-primary-lift);">thesis.fun</th></tr></thead>
+      <thead><tr><th style="width:280px;"></th><th><span style="display:inline-flex;align-items:center;gap:8px;"><img src="img/fomo.png" alt="" style="width:24px;height:24px;border-radius:6px;">fomo</span></th><th><span style="display:inline-flex;align-items:center;gap:8px;"><img src="img/pumpfun.png" alt="" style="width:24px;height:24px;border-radius:6px;">pump.fun</span></th><th>Base app</th><th>Deribit</th><th style="color:var(--c-primary-lift);">thesis.fun</th></tr></thead>
       <tbody>
         <tr><td>Social feed, follow, leaderboard</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">✗</td><td class="yes">✓</td></tr>
         <tr><td>Options, not just spot</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td><td class="yes">✓</td></tr>
         <tr><td>Defined risk on every trade</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-        <tr><td>Track record verifiable on chain</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td></tr>
-        <tr class="us"><td>Social + options + self-custody</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td></tr>
+        <tr><td>Trades settle on chain, trackable</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">✗</td><td class="yes">✓</td></tr>
+        <tr class="us"><td>Social + options + onchain</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td></tr>
       </tbody>
     </table>
-    <div class="notes">Give the others credit. fomo and pump.fun nailed distribution. Deribit nailed options. We are the only one that puts a defined-risk instrument inside a social feed with the wallet as identity.</div>
+    <div class="notes">Give the others credit. fomo and pump.fun nailed distribution and their trades are on chain too. Deribit nailed options. We are the only one that puts a defined-risk instrument inside a social feed.</div>
   </div>
 
   <!-- 13 · Business model -->
@@ -288,7 +273,7 @@
     <h1 class="h1 in" style="margin-top:16px;">The platform earns on trading fees. Nothing else, yet.</h1>
     <div class="divider in"></div>
     <div class="grid-2 in">
-      <div class="card"><p class="h3">Referrer fees, live today</p><p class="body" style="margin-top:12px;">Every quote and fill carries our referrer address. Thetanuts pays a share of the protocol fee per collateral token, claimable by us.</p><p class="metric-src">Seen on chain this morning: 0.124998 USDC fee on a 0.99999 USDC premium, referrer 0xd5E6…47dd.</p></div>
+      <div class="card"><p class="h3">Referrer fees, live today</p><p class="body" style="margin-top:12px;">Every quote and fill carries our referrer address.</p><p class="metric-src">Seen on chain this morning: 0.124998 USDC fee on a 0.99999 USDC premium, referrer 0xd5E6…47dd.</p></div>
       <div class="card"><p class="h3">Creator fees, roadmap</p><p class="body" style="margin-top:12px;">Attribution is already recorded on every fill made from a post. Paying the author is one ledger away.</p><p class="metric-src">Deliberately not shipped for a hackathon with real money.</p></div>
     </div>
     <div class="notes">If asked about the referrer split: it is set by the Thetanuts team per referrer and is zero until we are whitelisted. Say that plainly. It is a nice thing to say to a Thetanuts judge.</div>

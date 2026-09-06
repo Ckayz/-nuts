@@ -24,7 +24,15 @@ export function PositionRow({ position }: { position: Position }) {
 			<span className="t">
 				<b>{position.thesisHeadline ?? `${position.asset} position`}</b>
 				<i>
-					{position.side === "bull" ? "Bull" : "Bear"} · {usd(position.riskedUsd)} risked ·{" "}
+					{/*
+					 * D-R3-1 (pass 3). The direction comes from the option, via
+					 * `positionDirection()`, so this row and the same position's
+					 * share card cannot disagree. A row whose order snapshot could
+					 * not be decoded carries no direction and prints none, rather
+					 * than the participant's side of a post relabelled "Bull".
+					 */}
+					{position.sideLabel === null ? null : <>{position.sideLabel} · </>}
+					{usd(position.riskedUsd)} risked ·{" "}
 					<StatusChip status={position.statusTone} label={position.statusLabel} />
 				</i>
 			</span>
@@ -57,7 +65,13 @@ export function MarketList({ markets }: { markets: MarketSummary[] }) {
 					<Avatar asset={market.asset} initials={market.asset} tone="asset" size={30} />
 					<span className="t">
 						<b>{market.name}</b>
-						<i>{market.asset} · Base</i>
+						{/* K-2 (pass-4 D4-m9): the symbol is dropped from this line when it
+						    repeats the name above it. This card renders the LIVE summaries
+						    (`app/page.tsx` passes `marketSummariesData()`), whose `name` IS
+						    the symbol — the Thetanuts SDK publishes ticker symbols and no
+						    full names — so the row read "BTC" over "BTC · Base". The chain
+						    stays: it is the one thing this line says that the name does not. */}
+						<i>{market.asset === market.name ? "Base" : `${market.asset} · Base`}</i>
 					</span>
 					<span className="v">
 						<b className="num">{market.spotUsd.usd2}</b>

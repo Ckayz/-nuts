@@ -25,9 +25,34 @@
 /**
  * Binance's kline endpoint. Public, unauthenticated, no key. Weight 2 per call
  * against a 6,000/minute budget, so the cache window below is generous.
- * VERIFIED 2026-09-06: every live Thetanuts asset has a USDT pair here.
+ *
+ * MEASURED 2026-09-06 23:34 UTC, one request per pair against this endpoint
+ * (`?interval=1h&limit=1`), for ALL EIGHT symbols `buildPriceFeedSymbolMap(8453)`
+ * configures on Base — read from the SDK the same day, not from a doc:
+ * ETH BTC SOL DOGE XRP BNB PAXG AVAX. Every one returned a candle row:
+ *
+ *   BTCUSDT  [[1788649200000,"79783.99000000",...
+ *   ETHUSDT  [[1788649200000,"2480.98000000",...
+ *   SOLUSDT  [[1788649200000,"103.38000000",...
+ *   BNBUSDT  [[1788649200000,"770.49000000",...
+ *   AVAXUSDT [[1788649200000,"7.60200000",...
+ *   XRPUSDT  [[1788649200000,"1.41440000",...
+ *   DOGEUSDT [[1788649200000,"0.09010000",...
+ *   PAXGUSDT [[1788649200000,"4432.75000000",...
  */
-const BINANCE_KLINES = "https://api.binance.com/api/v3/klines";
+/*
+ * Binance's PUBLIC market-data host, not `api.binance.com`. MEASURED
+ * 2026-09-06 09:1x: production (Vercel) answered `{"candles":[]}` for BTC and
+ * ETH while the same route on a Malaysian machine returned candles and
+ * `api.binance.com` answered it 200 — `api.binance.com` refuses US-hosted
+ * callers (HTTP 451), which is where Vercel's default region runs; that refusal
+ * was NOT read from Vercel's logs (no project link here), it is inferred from
+ * the two measurements. `data-api.binance.vision` serves the identical
+ * `/api/v3/klines` shape (measured from here: 200, same rows) and Binance
+ * documents it as the market-data endpoint without the geo restriction. The
+ * data is still Binance spot, so the chart's label stays true.
+ */
+const BINANCE_KLINES = "https://data-api.binance.vision/api/v3/klines";
 
 /** TODO-OWNER: the window and granularity the chart opens on. */
 export const CHART_INTERVAL = "1h";
@@ -36,9 +61,42 @@ export const CHART_LIMIT = 168; // one week of hourly candles
 /** Seconds the proxy caches a series. TODO-OWNER. */
 export const CHART_REVALIDATE_SECONDS = 300;
 
+/**
+ * One deadline for the WHOLE upstream exchange, headers and body alike.
+ *
+ * MEASURED 2026-09-06 before this was added: `fetchCandles` passed no signal and
+ * raced nothing, so a `fetchImpl` that never resolves — and a real Binance that
+ * accepts the connection and never answers — left the promise pending forever.
+ * That promise is awaited inside the `/api/klines/[asset]` route handler, so a
+ * stalled upstream holds a serverless function open until its own budget runs
+ * out, and the browser's `fetch` of that route stalls with it: the chart would
+ * sit in its loading phase with nothing in the box and no message. A response
+ * whose headers arrive and whose body never does is the same stall, and only
+ * the JSON read below puts the signal in front of it, so it is raced too. Same
+ * shape as `lib/farcaster/casts.ts`, for the same reason.
+ *
+ * The number is PROVISIONAL and matched to `FARCASTER_TIMEOUT_MS` (3 s) rather
+ * than invented: both are secondary panels read inside a page render, and a
+ * serverless function's own budget is single-digit seconds. Binance's real
+ * latency was not measured, so this is a bound, not an estimate.
+ * TODO-OWNER: the number.
+ */
+export const CHART_TIMEOUT_MS = 3_000;
+
 /** The sentence shown under the chart. TODO-OWNER: the wording. */
 export const CHART_SOURCE_NOTE =
 	"Binance spot, hourly. Thetanuts settles on a Chainlink TWAP, which can differ.";
+
+/**
+ * What the chart's window IS, in words, for the screen-reader alternative — a
+ * canvas has no readable content of its own, so the label has to say it.
+ *
+ * Derived from the two constants above and not independently chosen: `1h` ×
+ * 168 = 168 hours = one week. `klines.test.ts` pins the arithmetic, so changing
+ * either constant fails that test rather than leaving this sentence lying.
+ * TODO-OWNER: the wording.
+ */
+export const CHART_WINDOW_LABEL = "one week of hourly candles";
 
 /**
  * The pair to ask Binance for.
@@ -46,6 +104,17 @@ export const CHART_SOURCE_NOTE =
  * An allowlist, deliberately: the asset arrives from a URL segment, and an
  * unmapped value must never be concatenated into an outbound request. An asset
  * Thetanuts lists but Binance does not price simply has no chart.
+ *
+ * K-2 (pass-4 D4-m4). DOGE and PAXG were missing and the omission was explained
+ * as "Binance does not price" them, which is false: both pairs were requested
+ * and both returned candles (the measurement is in the comment above the
+ * endpoint). They have no live orders today, so nothing rendered differently —
+ * they would simply have lost their chart, silently, the day they got
+ * liquidity. All eight configured Base feeds are mapped now, so this list and
+ * `buildPriceFeedSymbolMap(8453)` cover the same assets.
+ *
+ * `app/api/klines/[asset]/route.ts` guards the proxy with `binancePair()` — this
+ * map — and keeps no second list of its own.
  * TODO-OWNER: the quote currency, if a venue ever needs a different one.
  */
 const PAIRS: Readonly<Record<string, string>> = {
@@ -55,6 +124,8 @@ const PAIRS: Readonly<Record<string, string>> = {
 	BNB: "BNBUSDT",
 	AVAX: "AVAXUSDT",
 	XRP: "XRPUSDT",
+	DOGE: "DOGEUSDT",
+	PAXG: "PAXGUSDT",
 };
 
 export function binancePair(asset: string): string | null {
@@ -105,10 +176,36 @@ export function parseKlines(body: unknown): Candle[] {
 	return candles;
 }
 
-/** Fetch one series. Returns an empty list for any failure; never throws. */
+/**
+ * A promise that never resolves and rejects when `signal` aborts.
+ *
+ * Exported because the browser side of the chart needs the same bound on its
+ * read of our own proxy route. Used only inside `Promise.race`, which attaches a
+ * handler, so its rejection is always handled even when the real work wins;
+ * `AbortSignal.timeout`'s timer does not hold the event loop open, so a losing
+ * race costs nothing.
+ */
+export function whenAborted(signal: AbortSignal): Promise<never> {
+	return new Promise((_resolve, reject) => {
+		if (signal.aborted) {
+			reject(signal.reason);
+			return;
+		}
+		signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+	});
+}
+
+/**
+ * Fetch one series. Returns an empty list for any failure; never throws, and —
+ * see `CHART_TIMEOUT_MS` — never pends longer than that deadline.
+ *
+ * The signal is passed to the transport AND raced against, on purpose: the
+ * signal alone only bounds a transport that honours it, while the race bounds
+ * this function whatever the transport does, which is what the page needs.
+ */
 export async function fetchCandles(
 	asset: string,
-	options: { fetchImpl?: typeof fetch; limit?: number } = {},
+	options: { fetchImpl?: typeof fetch; limit?: number; timeoutMs?: number } = {},
 ): Promise<Candle[]> {
 	const pair = binancePair(asset);
 	if (pair === null) return [];
@@ -117,10 +214,14 @@ export async function fetchCandles(
 	url.searchParams.set("interval", CHART_INTERVAL);
 	url.searchParams.set("limit", String(options.limit ?? CHART_LIMIT));
 	const request = options.fetchImpl ?? fetch;
+	const signal = AbortSignal.timeout(options.timeoutMs ?? CHART_TIMEOUT_MS);
 	try {
-		const response = await request(url, { next: { revalidate: CHART_REVALIDATE_SECONDS } });
+		const response = await Promise.race([
+			request(url, { next: { revalidate: CHART_REVALIDATE_SECONDS }, signal }),
+			whenAborted(signal),
+		]);
 		if (!response.ok) return [];
-		return parseKlines(await response.json());
+		return parseKlines(await Promise.race([response.json(), whenAborted(signal)]));
 	} catch {
 		return [];
 	}

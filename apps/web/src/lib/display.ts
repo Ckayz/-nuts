@@ -5,7 +5,7 @@ import { renderTextWithLinks } from "./thesis/links";
 // NOT from `./position/pnl`: that module imports `@nuts/thetanuts`, whose
 // bundle reaches for `fs/promises`, and this file is imported by CLIENT
 // components. `./position/lifecycle` holds the same rules with no SDK.
-import { failedButOnChain, lifecycleStatus, resolvePnl } from "./position/lifecycle";
+import { failedButOnChain, lifecycleStatus, positionDirection, resolvePnl } from "./position/lifecycle";
 /** Validate and split decimal strings without a binary floating-point conversion. */
 function decimal(value: string) {
     if (!/^-?\d+(?:\.\d+)?$/.test(value))
@@ -178,6 +178,7 @@ export function thesisWithOrigin(value: Domain.Thesis, siteOrigin: string | read
     return { id: value.id, slug: value.slug, headline: value.thesis.headline, note: value.thesis.rationale,
         asset: value.market?.underlyingAsset ?? null, direction: value.thesis.direction, creator: creator(value.creator), status, statusLabel,
         postedLabel: settled ? `· settled ${value.backing?.mock.settledAgoMinutes ?? "—"}m` : `· ${elapsed(value.thesis.createdAt, value.dataAsOf)}`,
+        createdAtIso: value.thesis.createdAt,
         tag: value.market === null ? null : { slug: marketSlug(value.market.underlyingAsset), asset: value.market.underlyingAsset, structureLabel: struct === null ? null : `${struct.strikesLabel} · ${struct.expiryLabel}` },
         structure: struct, backing: value.backing === null ? null : backing(value, settled),
         likes: value.likes, likedByViewer: value.likedByViewer, commentCount: value.commentCount,
@@ -325,6 +326,18 @@ export interface PnlCardInput {
     readonly verified: boolean;
 }
 
+/**
+ * D-R3-1 (pass 3). ONE set of words for a direction, wherever it is printed.
+ *
+ * The list row spelled its own "Bull"/"Bear" ternary while the card spelled
+ * another, over two different inputs, so the same position could read Bull in a
+ * list and Bear on its page. Both now take the direction from
+ * `positionDirection()` and the words from here.
+ */
+export function directionLabel(direction: View.Side | null): string | null {
+    return direction === null ? null : direction === "bull" ? "Bull" : "Bear";
+}
+
 export function pnlCard(input: PnlCardInput): View.PnlCard {
     // C#9: the chip reads the failure REASON, so a fill that is on chain is
     // never styled as a reverted transaction.
@@ -343,7 +356,7 @@ export function pnlCard(input: PnlCardInput): View.PnlCard {
         expiryFullLabel: input.expiryFullLabel,
         // `side` is NOT the market direction; see PnlCardInput.direction.
         side: input.direction,
-        sideLabel: input.direction === null ? null : input.direction === "bull" ? "Bull" : "Bear",
+        sideLabel: directionLabel(input.direction),
         pnl: amount(input.pnl.usd),
         pnlLabel: settled ? "Result" : "Live P&L",
         // TODO-OWNER: the denominator. Max loss is the money genuinely at stake,
@@ -452,7 +465,20 @@ export function position(value: Domain.Position, asOf: Date = new Date(), live?:
         expiryAt: value.expiryAt ?? null,
         asOf: asOf.toISOString(),
     });
-    return { id: value.id, thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: value.side === "back" ? "bull" : "bear", riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(pnl.pnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled,
+    /**
+     * D-R3-1 (pass 3, Astra lane D). The MARKET direction, from the option the
+     * fill executed against — the same `positionDirection()` the share card and
+     * `/p/<id>` read. This used to be `value.side === "back" ? "bull" : "bear"`,
+     * which is the PARTICIPANT's side of a post ("did you back the author") and
+     * says nothing about the market: the reviewer measured the same bought put
+     * as `{"rowSide":"bull","cardSideLabel":"Bear"}`.
+     *
+     * Null when no order snapshot could be decoded (every typed fixture, a row
+     * whose snapshot is unreadable), and the row then prints no direction rather
+     * than a wrong one — exactly what the card has always done.
+     */
+    const direction = positionDirection(value.instrument);
+    return { id: value.id, thesisSlug: value.thesisSlug, thesisHeadline: value.thesisHeadline, asset: value.underlyingAsset, side: direction, sideLabel: directionLabel(direction), riskedUsd: amount(value.economics.maximumLossUsd), livePnlUsd: amount(pnl.pnlUsd), contracts: quantity(value.contracts), entryUsd: optionalAmount(value.entrySpotPriceUsd), tx: tx(value.verification.transactionHash, value.mockTransactionFragment), settled,
         statusLabel: display.label, statusTone: display.tone, pnlLabel: settled ? "Result" : "Live P&L", pnlBasisLabel: pnl.detail, basis: pnl.basis };
 }
 export function participant(value: Domain.Participant, asOf: Date = new Date(), live?: LiveRowPnl): View.Participant {

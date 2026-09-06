@@ -13,6 +13,7 @@ const {
 	FARCASTER_TEXT_LIMIT,
 	FARCASTER_TIMEOUT_MS,
 	FARCASTER_ASSET_COUNT,
+	FARCASTER_SEARCH_QUERY,
 	farcasterCastUrl,
 	loadFarcasterRail,
 	parseCast,
@@ -694,4 +695,69 @@ test("a short page yields its turn rather than holding a slot", () => {
 	expect(merged.map((c) => c.hash)).toEqual(["0xa", "0xb"]);
 	expect(interleavePages([])).toEqual([]);
 	expect(interleavePages([[], []])).toEqual([]);
+});
+
+// ── farcasterRail: the key is checked before anything is read ────────────────
+
+import { env } from "@nuts/env/server";
+import { farcasterRail } from "./casts";
+
+/**
+ * B-P4-1 (one-shot review pass 4). `farcasterRail` used to `await` the order
+ * book — `getAvailableAssets()`, a live network read — and only then hand the
+ * key to `loadFarcasterRail`, which returns `unconfigured` without it. So a
+ * deployment with no `NEYNAR_API_KEY`, and every mock-mode render, paid for a
+ * book read whose result was thrown away, on a path the Neynar timeout never
+ * covered.
+ *
+ * The asset reader is injected rather than mocked: `mock.module` is
+ * process-wide (measured by fold F-C) and would leak into every other file in
+ * the run.
+ */
+test("no Neynar key means the order book is never read", async () => {
+	// The premise of this test: this process really has no key, so the branch
+	// under test is the one the real `env` takes.
+	expect(env.NEYNAR_API_KEY ?? "").toBe("");
+	let reads = 0;
+	const state = await farcasterRail(5, {
+		readAssets: async () => {
+			reads += 1;
+			return ["BTC"];
+		},
+	});
+	expect(state.status).toBe("unconfigured");
+	expect(reads).toBe(0);
+});
+
+/**
+ * The other half of B-P4-1: when there IS a key the read happens, but bounded.
+ * A book that never answers must not hold the render open — the rail falls back
+ * to no assets, which `searchQueriesFor` answers with the single generic query.
+ */
+test("a hanging order book is bounded and the rail still runs with no assets", async () => {
+	const urls: string[] = [];
+	const fetchImpl = (async (input: string | URL | Request) => {
+		urls.push(String(input));
+		return new Response(JSON.stringify({ result: { casts: [] } }), {
+			status: 200,
+			headers: { "content-type": "application/json" },
+		});
+	}) as unknown as typeof fetch;
+
+	const started = Date.now();
+	const state = await farcasterRail(5, {
+		apiKey: "test-key-not-a-real-neynar-key",
+		readAssets: () => new Promise<readonly string[]>(() => {}),
+		assetTimeoutMs: 50,
+		fetchImpl,
+	});
+	const elapsed = Date.now() - started;
+
+	expect(state.status).toBe("ready");
+	// `assets: []` — exactly one query, the generic one, with no asset term.
+	expect(urls).toHaveLength(1);
+	const query = new URL(urls[0] ?? "").searchParams.get("q") ?? "";
+	expect(query).toContain(FARCASTER_SEARCH_QUERY);
+	// Bounded by `assetTimeoutMs`, not by the reader (which never resolves).
+	expect(elapsed).toBeLessThan(FARCASTER_TIMEOUT_MS);
 });

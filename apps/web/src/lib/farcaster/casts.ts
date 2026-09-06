@@ -719,28 +719,89 @@ export async function loadFarcasterRail(
 }
 
 /**
+ * The order book read that names the rail's assets, isolated so `farcasterRail`
+ * can decide WHETHER to run it. Never throws and never reports somebody else's
+ * outage: an unreadable book (and mock mode) yields an empty list, for which
+ * `searchQueriesFor` falls back to the generic query.
+ */
+async function readRailAssets(): Promise<string[]> {
+	try {
+		const { getAvailableAssets, isFeedUnavailable } = await import("@/lib/thetanuts/orders");
+		const { rankAssets } = await import("./assets");
+		const rows = await getAvailableAssets();
+		return isFeedUnavailable(rows) ? [] : rankAssets(rows, FARCASTER_ASSET_COUNT);
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * B-P4-1 (one-shot review pass 4). The asset read, bounded. `readRailAssets`
+ * swallows its own errors but nothing bounded its TIME: `getAvailableAssets`
+ * reaches the order book over the network, and the Neynar timeout inside
+ * `loadFarcasterRail` starts only after this resolves, so a hanging book would
+ * hang the whole page render past both budgets.
+ *
+ * Raced against the same `AbortSignal.timeout` + `aborted` pair `fetchOnePage`
+ * uses — the reader takes no signal of its own, so a race is the only bound
+ * that holds whatever it does. The loser is ignored (`Promise.race` attaches a
+ * handler to both, so a late rejection is never unhandled) and the timer does
+ * not hold the event loop open.
+ *
+ * Returns `[]` on timeout: the same honest answer an unreadable book gives.
+ */
+async function railAssetsWithin(
+	read: () => Promise<readonly string[]>,
+	timeoutMs: number,
+): Promise<readonly string[]> {
+	const signal = AbortSignal.timeout(timeoutMs);
+	try {
+		return await Promise.race([read(), aborted(signal)]);
+	} catch {
+		return [];
+	}
+}
+
+/**
  * What a page calls. The key is server-only and never reaches the browser: this
  * module is `server-only` and the rail component receives already-reduced casts.
+ *
+ * B-P4-1: the KEY is checked FIRST. This function used to await the order book
+ * before `loadFarcasterRail` could return `unconfigured`, so a deployment with
+ * no `NEYNAR_API_KEY` — and every mock-mode render — paid for a book read whose
+ * result was then thrown away, on a path the Neynar timeout does not cover. No
+ * key now means no read of anything.
+ *
+ * The assets are resolved HERE rather than passed down from the page, and that
+ * costs nothing when it does run: `readRailAssets` reads the same
+ * `getOrderSnapshot` cache the market summaries already read, so no second
+ * network round trip happens and the page's three reads still run in parallel.
+ * Threading the assets through the page would have serialised the rail behind
+ * the book.
  */
-export async function farcasterRail(limit = FARCASTER_RAIL_LIMIT): Promise<FarcasterRailState> {
-	// The assets are resolved HERE rather than passed down from the page, and
-	// that costs nothing: `readRailAssets` reads the same `getOrderSnapshot`
-	// cache the market summaries already read, so no second network round trip
-	// happens and the page's three reads still run in parallel. Threading the
-	// assets through the page would have serialised the rail behind the book.
-	//
-	// An empty list is the honest answer in mock mode and whenever the book is
-	// unreadable; `searchQueriesFor` falls back to the generic query for it.
-	const { getAvailableAssets, isFeedUnavailable } = await import("@/lib/thetanuts/orders");
-	const { rankAssets } = await import("./assets");
-	let assets: string[] = [];
-	try {
-		const rows = await getAvailableAssets();
-		if (!isFeedUnavailable(rows)) assets = rankAssets(rows, FARCASTER_ASSET_COUNT);
-	} catch {
-		// The book being unreadable is not this rail's story to tell; it falls
-		// back to the generic query rather than reporting somebody else's outage.
-		assets = [];
-	}
-	return loadFarcasterRail(env.NEYNAR_API_KEY, { limit, assets });
+export async function farcasterRail(
+	limit = FARCASTER_RAIL_LIMIT,
+	/**
+	 * Only tests pass these; the page calls `farcasterRail()` with no options at
+	 * all. `apiKey` mirrors the seam `loadFarcasterRail` already has, and it is
+	 * needed rather than convenient: `@nuts/env/server` reads `process.env` ONCE
+	 * at import (measured 2026-09-06 — setting `process.env.NEYNAR_API_KEY`
+	 * after the import leaves `env.NEYNAR_API_KEY` undefined), so a single test
+	 * file cannot exercise both the configured and the unconfigured path through
+	 * the environment.
+	 */
+	options: {
+		apiKey?: string;
+		readAssets?: () => Promise<readonly string[]>;
+		assetTimeoutMs?: number;
+		fetchImpl?: typeof fetch;
+	} = {},
+): Promise<FarcasterRailState> {
+	const apiKey = options.apiKey ?? env.NEYNAR_API_KEY;
+	if (apiKey === undefined || apiKey.trim() === "") return { status: "unconfigured" };
+	const assets = await railAssetsWithin(
+		options.readAssets ?? readRailAssets,
+		options.assetTimeoutMs ?? FARCASTER_TIMEOUT_MS,
+	);
+	return loadFarcasterRail(apiKey, { limit, assets, fetchImpl: options.fetchImpl });
 }

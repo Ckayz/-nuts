@@ -23,7 +23,7 @@ import { encodeFillEventSnapshot } from "@nuts/db/fill-event-snapshot";
 import { orderSnapshotV1Schema } from "@nuts/db/order-snapshot";
 import { FEED_PAGE_SIZE } from "./constants";
 import type { Database } from "./reads";
-import { getCreator, getPortfolio, getThread, leaderboard, listFeed, listPositionsByIds, listThesesByAsset, trending } from "./reads";
+import { getCreator, getPortfolio, getThread, leaderboard, leaderboardPositions, listFeed, listPositionsByIds, listThesesByAsset, trending } from "./reads";
 import { readPositionDetail } from "@/lib/position/read";
 import { thesisWithOrigin } from "@/lib/display";
 
@@ -507,6 +507,17 @@ if (!databaseUrl) {
 			expect(profile?.creator.walletAddress).toBe(ALICE_WALLET);
 		});
 
+		// Owner decision 6 (2026-09-06). The bio was stored and never read back
+		// out of the database by anything but the OWNER's own editor; the profile
+		// page needs it for every visitor.
+		probe("carries the stored bio, and null when there is none", async (tx) => {
+			const text = "Selling weekend vol. Every fill is on chain.";
+			await tx.execute(sql`update users set bio = ${text} where id = ${ALICE}::uuid`);
+			await tx.execute(sql`update users set bio = null where id = ${BOB}::uuid`);
+			expect((await getCreator(ALICE_WALLET, { database: tx }))?.bio).toBe(text);
+			expect((await getCreator(BOB_WALLET, { database: tx }))?.bio).toBeNull();
+		});
+
 		probe("an address that is not a wallet, or is unknown, is a miss", async (tx) => {
 			expect(await getCreator("merkle_mike", { database: tx })).toBeNull();
 			expect(await getCreator("0x000000000000000000000000000000000000dead", { database: tx })).toBeNull();
@@ -577,6 +588,35 @@ if (!databaseUrl) {
 			// VALUE is asserted rather than its spelling.
 			expect(dave?.netPnlUsd).not.toBeNull();
 			expect(Number(dave?.netPnlUsd)).toBe(1234);
+		});
+
+		// Owner decision 9 (2026-09-06). The cell's live figure is summed over the
+		// rows `leaderboardPositions` returns, so those rows must be EXACTLY the
+		// ones the ranking totalled: same window, same fill statuses, same
+		// thesis-visibility rule. A row that leaks in here would print a number
+		// that disagrees with the order the table is in — and a DRAFT post's
+		// position would leak into a public figure.
+		probe("owner 9: leaderboardPositions returns the ranking's rows and no others", async (tx) => {
+			const rows = await leaderboardPositions([ALICE, BOB], { database: tx, window: "1W" });
+			const bob = (rows.get(BOB) ?? []).map((row) => row.id);
+			expect(bob).toContain(P_BULL);
+			// Not filled: a pending or failed fill is not a position anyone holds.
+			expect(bob).not.toContain(P_PENDING);
+			expect(bob).not.toContain(P_FAILED);
+			// Filled, but on a DRAFT post: excluded from the aggregate, so
+			// excluded from the figure.
+			expect(bob).not.toContain(P_DRAFT);
+			// Outside the 1W window: eligible in every other respect.
+			const OLD = "33330000-0000-4000-8000-0000000000c9";
+			await tx.insert(positions).values([
+				position({ id: OLD, thesisId: null, role: "standalone", userId: BOB, walletAddress: BOB_WALLET,
+					confirmedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }),
+			]);
+			expect((await leaderboardPositions([BOB], { database: tx, window: "1W" })).get(BOB)?.map((row) => row.id))
+				.not.toContain(OLD);
+			// A trader with no eligible row is ABSENT, never an empty array: the
+			// caller has to be able to tell that apart from "priced to nothing".
+			expect(rows.has("11110000-0000-4000-8000-00000000dead")).toBe(false);
 		});
 
 		probe("B4: a position on a DRAFT post is still excluded from the leaderboard", async (tx) => {

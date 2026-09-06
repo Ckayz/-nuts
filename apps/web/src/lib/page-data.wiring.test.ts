@@ -223,7 +223,13 @@ const SEED_AND_READ = `
 		const creator = await pageData.creatorPageData(handle);
 
 		const cardOf = (post) => post?.tradeCards?.[0] ?? null;
-		const feedPost = [...discover.ranked.trending, ...discover.top, ...discover.ranked.ending]
+		// Owner decision 9: the leaderboard money cell. The seeded trader has
+		// exactly ONE eligible row, so its cell must equal that row's derived
+		// figure — the same \`expected\` every surface above is pinned to.
+		const seat = discover.leaderboard.find((row) => row.creator.handle === handle);
+		// B-P3-1: every audience now carries its own three ranked lists, so top
+		// is trending/ending/settled rather than one array.
+		const feedPost = [...discover.ranked.trending, ...discover.top.trending, ...discover.ranked.ending]
 			.find((post) => post.slug === written.slug);
 
 		console.log("RESULT:" + JSON.stringify({
@@ -239,6 +245,10 @@ const SEED_AND_READ = `
 				: { pnl: cardOf(creator.callouts[0]).pnl.raw, basis: cardOf(creator.callouts[0]).basis },
 			profileRow: creator?.positions?.[0] === undefined ? null
 				: { pnl: creator.positions[0].livePnlUsd.raw, basis: creator.positions[0].basis },
+			leaderboardSize: discover.leaderboard.length,
+			leaderboardHandles: discover.leaderboard.map((row) => row.creator.handle),
+			leaderboardCell: seat === undefined ? null
+				: { live: seat.livePnlUsd?.raw ?? null, stored: seat.creator.netPnlUsd?.raw ?? null },
 		}));
 	} finally {
 		await db.execute(sql\`delete from activity where user_id = \${userId}::uuid\`);
@@ -263,6 +273,9 @@ live(
 			thread: { pnl: string; basis: string } | null;
 			calloutCard: { pnl: string; basis: string } | null;
 			profileRow: { pnl: string; basis: string } | null;
+			leaderboardSize: number;
+			leaderboardHandles: string[];
+			leaderboardCell: { live: string | null; stored: string | null } | null;
 		};
 
 		// Guards: without these the equalities below could all hold at "—".
@@ -293,6 +306,16 @@ live(
 		expect(result.profileRow).not.toBeNull();
 		expect(result.profileRow?.pnl).toBe(result.expected!);
 		expect(result.profileRow?.basis).toBe("derived");
+
+		// Owner decision 9. The LEADERBOARD CELL, through the same book:
+		// `discoverData` -> `leaderboardPositions` -> `rowPnl` -> `listRowPnl`,
+		// summed per trader. One eligible row, so the sum IS that row's figure.
+		expect({ found: result.leaderboardCell !== null, handles: result.leaderboardHandles })
+			.toEqual({ found: true, handles: result.leaderboardHandles });
+		expect(result.leaderboardCell?.live).toBe(result.expected!);
+		// And the ranking is untouched: the stored aggregate this trader is
+		// ranked by is still absent, which is exactly why the cell used to be "—".
+		expect(result.leaderboardCell?.stored ?? "—").toBe("—");
 	},
 	TIMEOUT_MS,
 );
@@ -314,6 +337,11 @@ live("an unreadable feed leaves every one of those surfaces at '—'", () => {
 		expect(cell?.pnl).toBe("—");
 		expect(cell?.basis).toBe("unavailable");
 	}
+	// Owner decision 9: the leaderboard cell goes back to null, which the rail
+	// renders as "—". Not "+$0" — a figure nobody could derive is not a flat one.
+	const seat = result.leaderboardCell as { live: string | null } | null;
+	expect(seat).not.toBeNull();
+	expect(seat?.live).toBeNull();
 }, TIMEOUT_MS);
 
 /**

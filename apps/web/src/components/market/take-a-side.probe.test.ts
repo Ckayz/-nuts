@@ -74,8 +74,8 @@ function context(): TradePanelContext {
 		structureLabel: "ETH put 2500 P",
 		expiryLabel: "05 Sep 26 15:00 UTC",
 		sides: {
-			bull: { taker: "buy", available: true, reason: null },
-			bear: { taker: "sell", available: true, reason: null },
+			bull: { taker: "buy", word: "Bull", directional: true, available: true, reason: null },
+			bear: { taker: "sell", word: "Bear", directional: true, available: true, reason: null },
 		},
 		quote: quoteView("bull", RAW_BUY, "BUY-A"),
 		presets: ["50"],
@@ -316,6 +316,103 @@ describe("C#2: a remount must not put a second fill in front of the user", () =>
 		});
 		await again.settle();
 		expect(primary(again).text).toBe("Trade");
+	});
+});
+
+/**
+ * K-1 (pass-4 lane C BLOCKER-1). The same remount, with the SERVER modelled.
+ *
+ * The block above swaps `replies.record` for a lost answer and leans on the
+ * browser's own hold (`lib/trade/held-fill.ts`). That hold lives in
+ * `sessionStorage`, so a private window, a cleared store, a second tab or
+ * another device has none — and until this fold nothing on the server did
+ * either, because the only `pending` row is written by `recordTrade` itself.
+ * Measured on the pre-fix bytes, with the fence below and no store:
+ *
+ *   MIN1_MARKET {"afterFirst":{"sends":1,"serverPendingRows":0},
+ *                "secondLabel":"Trade","afterSecond":{"sends":2},
+ *                "sent":["0xBUY_A","0xBUY_A"]}
+ *
+ * Two identical `eth_sendTransaction` calls on an OptionBook fill, which is
+ * final and has no cancel. `lib/trade/prepare.ts` now reads `OrderFilled` logs
+ * for this wallet, so the evidence is the chain rather than the browser; the
+ * model here is that rule, and NOT `calls.records`, which counts what the
+ * browser ATTEMPTED.
+ */
+describe("K-1: with no store, the SERVER fence stops a second fill of the same order", () => {
+	/** Chain evidence (`calls.broadcast`) minus the rows recording actually wrote. */
+	function serverWithChainFence(): void {
+		replies.prepare = async () =>
+			calls.broadcast.some((hash) => !calls.recorded.includes(hash))
+				? { ok: false, code: "UNRECORDED_FILL", reason: "Your last fill is not recorded yet." }
+				: fill("0xBUY_A", RAW_BUY);
+	}
+
+	/** A private window: no `sessionStorage` at all, the way `held-fill.ts` sees one. */
+	function withoutStorage<T>(run: () => Promise<T>): Promise<T> {
+		const real = (globalThis as { sessionStorage?: unknown }).sessionStorage;
+		(globalThis as { sessionStorage?: unknown }).sessionStorage = undefined;
+		return run().finally(() => {
+			(globalThis as { sessionStorage?: unknown }).sessionStorage = real;
+		});
+	}
+
+	test("NO_STORAGE_REMOUNT — a lost recording answer leaves sends at 1", async () => {
+		reset();
+		serverWithChainFence();
+		// The request never arrived: the handler never ran, so no row was written.
+		replies.record = async () => ({ ok: false, code: "LOST", reason: "The server did not answer." });
+		await withoutStorage(async () => {
+			const trade = context();
+			const first = mountTicket(trade);
+			first.click(first.button(/Trade/) as NonNullable<ReturnType<typeof first.button>>);
+			await first.settle();
+			const afterFirst = { sends: calls.sends.length, recorded: calls.recorded.length };
+
+			first.unmount();
+			const second = mountTicket(trade);
+			await second.settle();
+			second.click(primary(second));
+			await second.settle();
+
+			expect({
+				afterFirst,
+				afterSecond: { sends: calls.sends.length },
+				refused: second.text().includes("not recorded yet"),
+			}).toEqual({
+				afterFirst: { sends: 1, recorded: 0 },
+				afterSecond: { sends: 1 },
+				refused: true,
+			});
+		});
+	});
+
+	/**
+	 * The half that separates a faithful model from `calls.records.length > 0`:
+	 * a recording that SUCCEEDED releases the ticket. Both models refuse after a
+	 * lost answer; only the client-evidence one keeps refusing after a good one.
+	 */
+	test("a recording that SUCCEEDED releases the ticket, with no store either", async () => {
+		reset();
+		serverWithChainFence();
+		await withoutStorage(async () => {
+			const trade = context();
+			const first = mountTicket(trade);
+			first.click(first.button(/Trade/) as NonNullable<ReturnType<typeof first.button>>);
+			await first.settle();
+
+			first.unmount();
+			const second = mountTicket(trade);
+			await second.settle();
+			second.click(primary(second));
+			await second.settle();
+
+			expect({
+				sends: calls.sends.length,
+				recorded: calls.recorded.length,
+				label: primary(second).text,
+			}).toEqual({ sends: 2, recorded: 2, label: "Filled" });
+		});
 	});
 });
 
@@ -582,5 +679,376 @@ describe("M5: the ticket stops waiting for an approval and says so", () => {
 		await h.settle();
 		expect(h.text()).toContain("The approval did not succeed on Base");
 		expect(calls.sends.length).toBe(1);
+	});
+});
+
+// ---------------------------------------------------- I-1: the direction words
+
+/**
+ * Owner 2026-09-06, decision 1. The ticket prints the words the SERVER resolved
+ * for this instrument and sends the taker side those words stand for.
+ */
+describe("I-1: Bull and Bear on the ticket name the asset's direction", () => {
+	/** A PUT: Bull SELLS it, Bear BUYS it. Shaped exactly as `lib/market/page.ts` builds it. */
+	function putContext(): TradePanelContext {
+		const base = context();
+		return {
+			...base,
+			structureLabel: "ETH put 2,340 P",
+			sides: {
+				bull: { taker: "sell", word: "Bull", directional: true, available: true, reason: null },
+				bear: { taker: "buy", word: "Bear", directional: true, available: true, reason: null },
+			},
+			quote: { ...quoteView("bear", RAW_BUY, "PUT-A"), taker: "buy", sideNote: "Bear buys the ETH put 2,340 P and pays premium." },
+		};
+	}
+
+	test("the two buttons read Bull · sell and Bear · buy on a put", () => {
+		reset();
+		const h = mountTicket(putContext());
+		const labels = h
+			.buttons()
+			.map((b) => b.text)
+			.filter((t) => /Bull|Bear|^Buy$|^Sell$/.test(t));
+		expect(labels).toEqual(["Bull · sell", "Bear · buy"]);
+		expect(h.text()).toContain("Bear buys the ETH put 2,340 P and pays premium.");
+	});
+
+	test("pressing Bull on a put quotes and prepares the SELL side", async () => {
+		reset();
+		replies.quote = async () => ({ ...quoteView("bull", RAW_SELL, "PUT-A"), taker: "sell", sideNote: "Bull sells" });
+		replies.prepare = async () => fill("0xSELL_A", RAW_SELL);
+		const h = mountTicket(putContext());
+		const bull = h.button(/^Bull/);
+		expect(bull).not.toBeNull();
+		h.click(bull!);
+		await h.settle();
+		expect(calls.quotes).toEqual([{ structureId: "s1", side: "bull", taker: "sell", budgetInput: "5" }]);
+		h.click(primary(h));
+		await h.settle();
+		expect(calls.prepares.map((c) => ({ side: c.side, taker: c.taker }))).toEqual([{ side: "bull", taker: "sell" }]);
+	});
+
+	test("a structure with no direction is labelled with the raw taker verbs", () => {
+		reset();
+		const base = context();
+		const h = mountTicket({
+			...base,
+			sides: {
+				bull: { taker: "buy", word: "Buy", directional: false, available: true, reason: null },
+				bear: { taker: "sell", word: "Sell", directional: false, available: true, reason: null },
+			},
+		});
+		const labels = h
+			.buttons()
+			.map((b) => b.text)
+			.filter((t) => /^(Buy|Sell)$/.test(t) || /Bull|Bear/.test(t));
+		expect(labels).toEqual(["Buy", "Sell"]);
+		expect(h.text()).not.toContain("Bull");
+		expect(h.text()).not.toContain("Bear");
+	});
+
+	/**
+	 * Measured on `/m/eth` at port 31610 before the fix: selecting an ETH put
+	 * spread while the panel sat on Bull left
+	 *   {"text":"Bull · sell","checked":true,"disabled":true}
+	 * — a checked, unfillable button. The server already opens on the fillable
+	 * side (`lib/market/page.ts`); this applies the same rule after a
+	 * client-side navigation.
+	 */
+	test("a structure change moves off a side this instrument cannot fill", async () => {
+		reset();
+		replies.quote = async () => quoteView("bear", RAW_BUY, "PUT-A");
+		const h = mountTicket();
+		expect(h.buttons().find((b) => /Bull/.test(b.text))?.props["aria-checked"]).toBe(true);
+		const put = putContext();
+		const next: TradePanelContext = {
+			...put,
+			structureId: "s2",
+			sides: {
+				bull: { taker: "sell", word: "Bull", directional: true, available: false, reason: "no maker" },
+				bear: { taker: "buy", word: "Bear", directional: true, available: true, reason: null },
+			},
+		};
+		h.setProps({ ticket: next.quote.ticket, structureLabel: next.structureLabel, expiryLabel: next.expiryLabel, trade: next });
+		await h.settle();
+		const checked = h.buttons().filter((b) => b.props["aria-checked"] === true).map((b) => b.text);
+		expect(checked).toEqual(["Bear · buy"]);
+		expect(calls.quotes.at(-1)).toMatchObject({ structureId: "s2", side: "bear", taker: "buy" });
+	});
+});
+
+// ------------------------------------- K3: the ticket's keyboard path
+
+/** The amount field. Present only with live wiring (`trade !== undefined`). */
+function amountField(h: ReturnType<typeof mount>) {
+	const hit = h.find((e) => e.type === "input")[0];
+	if (hit === undefined) throw new Error("no amount input");
+	return hit;
+}
+
+const pills = (h: ReturnType<typeof mount>) => h.find((e) => e.props.className === "pill");
+
+/** Type into the amount field, exactly as `onChange` receives it. */
+function type(h: ReturnType<typeof mount>, value: string): void {
+	(amountField(h).props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
+	h.flush();
+}
+
+/** Leave the amount field. */
+function blur(h: ReturnType<typeof mount>): void {
+	(amountField(h).props.onBlur as () => void)();
+	h.flush();
+}
+
+describe("K3: a blur that changes nothing must not requote", () => {
+	test("UNCHANGED_BLUR — tabbing out of an untouched amount field asks the server nothing", async () => {
+		reset();
+		const h = mountTicket();
+		await h.settle();
+		calls.quotes = [];
+
+		blur(h);
+		await h.settle();
+
+		// And nothing has been taken out of the keyboard's way for it.
+		expect({
+			quotes: calls.quotes,
+			pillsDisabled: pills(h).map((p) => p.props.disabled),
+			tradeDisabled: primary(h).props.disabled,
+		}).toEqual({ quotes: [], pillsDisabled: [false], tradeDisabled: false });
+	});
+
+	test("a blur after a CHANGED amount still requotes — the fix removes no quote the panel needs", async () => {
+		reset();
+		const h = mountTicket();
+		await h.settle();
+		calls.quotes = [];
+
+		type(h, "7");
+		blur(h);
+		await h.settle();
+
+		expect(calls.quotes).toEqual([{ structureId: "s1", side: "bull", taker: "buy", budgetInput: "7" }]);
+	});
+
+	test("a blur after the amount was typed back to what was quoted asks nothing either", async () => {
+		reset();
+		const h = mountTicket();
+		await h.settle();
+		calls.quotes = [];
+
+		type(h, "7");
+		type(h, "5");
+		blur(h);
+		await h.settle();
+
+		expect(calls.quotes).toEqual([]);
+	});
+});
+
+describe("K3: a requote in flight must not take the controls out of the tab order", () => {
+	test("QUOTE_IN_FLIGHT — the presets and Trade stay focusable and say they are busy", async () => {
+		reset();
+		const held = deferred<TicketQuoteView>();
+		replies.quote = () => held.promise;
+
+		const h = mountTicket();
+		await h.settle();
+		type(h, "7");
+		blur(h);
+
+		// The quote is in flight: one request out, no answer yet.
+		expect(calls.quotes.length).toBe(1);
+		const state = {
+			label: primary(h).text,
+			tradeDisabled: primary(h).props.disabled,
+			tradeAriaBusy: primary(h).props["aria-busy"],
+			tradeAriaDisabled: primary(h).props["aria-disabled"],
+			pillsDisabled: pills(h).map((p) => p.props.disabled),
+			pillsAriaBusy: pills(h).map((p) => p.props["aria-busy"]),
+			pillsAriaDisabled: pills(h).map((p) => p.props["aria-disabled"]),
+		};
+
+		// `mount().click` refuses a `disabled` element, so this line is itself the
+		// assertion that the button is reachable — and the counts after it are the
+		// assertion that reaching it changed nothing.
+		h.click(primary(h));
+		h.click(pills(h)[0] as NonNullable<ReturnType<typeof primary>>);
+
+		expect({
+			...state,
+			sends: calls.sends,
+			prepares: calls.prepares,
+			// The preset press must not have started a second quote either.
+			quotes: calls.quotes.length,
+		}).toEqual({
+			label: "Quoting…",
+			tradeDisabled: false,
+			tradeAriaBusy: true,
+			tradeAriaDisabled: true,
+			pillsDisabled: [false],
+			pillsAriaBusy: [true],
+			pillsAriaDisabled: [true],
+			sends: [],
+			prepares: [],
+			quotes: 1,
+		});
+
+		held.resolve(quoteView("bull", RAW_BUY, "BUY-A"));
+		await h.settle();
+		// And once the answer lands the ticket is usable again.
+		expect({ tradeDisabled: primary(h).props.disabled, pillsDisabled: pills(h).map((p) => p.props.disabled) }).toEqual({
+			tradeDisabled: false,
+			pillsDisabled: [false],
+		});
+	});
+
+	test("a PREPARATION in flight is still a real `disabled` — it is not a transient requote", async () => {
+		reset();
+		const held = deferred<PrepareResult>();
+		replies.prepare = () => held.promise;
+
+		const h = mountTicket();
+		h.click(primary(h));
+
+		expect({
+			tradeDisabled: primary(h).props.disabled,
+			pillsDisabled: pills(h).map((p) => p.props.disabled),
+			amountDisabled: amountField(h).props.disabled,
+		}).toEqual({ tradeDisabled: true, pillsDisabled: [true], amountDisabled: true });
+
+		held.resolve({ ok: false, code: "X", reason: "stop" });
+		await h.settle();
+	});
+});
+
+describe("K3: quoteIsCurrent", () => {
+	const at = (structureId: string, side: "bull" | "bear", budgetInput: string) => ({ structureId, side, budgetInput });
+
+	test("the same structure, side and amount is current; any difference is not", async () => {
+		const { quoteIsCurrent } = (await import("./take-a-side")) as unknown as {
+			quoteIsCurrent: (a: ReturnType<typeof at> | null, b: ReturnType<typeof at>) => boolean;
+		};
+		expect({
+			same: quoteIsCurrent(at("s1", "bull", "5"), at("s1", "bull", "5")),
+			otherBudget: quoteIsCurrent(at("s1", "bull", "5"), at("s1", "bull", "7")),
+			otherSide: quoteIsCurrent(at("s1", "bull", "5"), at("s1", "bear", "5")),
+			otherStructure: quoteIsCurrent(at("s1", "bull", "5"), at("s2", "bull", "5")),
+			// Fails closed: with nothing quoted, the blur must still requote.
+			nothingQuoted: quoteIsCurrent(null, at("s1", "bull", "5")),
+			// "" and "5" are different amounts, not both "empty".
+			emptyVsValue: quoteIsCurrent(at("s1", "bull", ""), at("s1", "bull", "5")),
+		}).toEqual({
+			same: true,
+			otherBudget: false,
+			otherSide: false,
+			otherStructure: false,
+			nothingQuoted: false,
+			emptyVsValue: false,
+		});
+	});
+});
+
+describe("K3: isQuoting — which pending transition may keep the controls focusable", () => {
+	const PHASES = ["idle", "quoting", "preparing", "approving", "filling", "recording", "confirmed", "failed"] as const;
+
+	test("every phase, both `pending` values, with and without a sent fill", async () => {
+		const { isQuoting } = (await import("./take-a-side")) as unknown as {
+			isQuoting: (pending: boolean, phase: (typeof PHASES)[number], hasSentFill: boolean) => boolean;
+		};
+		const table = (pending: boolean, hasSentFill: boolean) =>
+			Object.fromEntries(PHASES.map((phase) => [phase, isQuoting(pending, phase, hasSentFill)]));
+
+		expect({
+			// Nothing in flight: never "quoting", whatever the phase says.
+			notPending: table(false, false),
+			// A transition in flight. `idle` is in here on purpose: it is the frame
+			// in which a landed quote has already set the phase back while the
+			// transition is still pending, and treating it as held put the
+			// `disabled` attribute on all five controls for one frame (measured).
+			pending: table(true, false),
+			// A sent, unrecorded fill owns the ticket no matter what else is true.
+			pendingWithSentFill: table(true, true),
+		}).toEqual({
+			notPending: {
+				idle: false,
+				quoting: false,
+				preparing: false,
+				approving: false,
+				filling: false,
+				recording: false,
+				confirmed: false,
+				failed: false,
+			},
+			pending: {
+				idle: true,
+				quoting: true,
+				preparing: false,
+				approving: false,
+				filling: false,
+				recording: false,
+				confirmed: true,
+				failed: true,
+			},
+			pendingWithSentFill: {
+				idle: false,
+				quoting: false,
+				preparing: false,
+				approving: false,
+				filling: false,
+				recording: false,
+				confirmed: false,
+				failed: false,
+			},
+		});
+	});
+});
+
+describe("K3: the frame in which a landed quote meets a still-pending transition", () => {
+	test("QUOTE_LANDING — no control takes the `disabled` attribute back on the way out", async () => {
+		reset();
+		const held = deferred<TicketQuoteView>();
+		replies.quote = () => held.promise;
+
+		const h = mountTicket();
+		await h.settle();
+		type(h, "7");
+		blur(h);
+		const labelWhileInFlight = primary(h).text;
+
+		// Step the answer home one microtask at a time and render each frame. The
+		// component's own `setPhase("idle")` runs a whole tick before the
+		// transition's `isPending` clears, and rendering that gap is the only way
+		// to see the frame Chrome saw: measured on a db-mode build with the
+		// requote held 600 ms, Tab-ing through the presets as the answer landed
+		// went `button:$500` → `<body>` because all five controls were `disabled`
+		// again for exactly one frame.
+		const frames: Array<{ label: string; trade: unknown; pills: unknown[] }> = [];
+		held.resolve(quoteView("bull", RAW_BUY, "BUY-A"));
+		for (let i = 0; i < 8; i += 1) {
+			await Promise.resolve();
+			h.flush();
+			frames.push({ label: primary(h).text, trade: primary(h).props.disabled, pills: pills(h).map((p) => p.props.disabled) });
+		}
+		await h.settle();
+
+		expect({
+			labelWhileInFlight,
+			// The gap really was rendered: the phase is back to `idle` — the button
+			// reads "Trade" again — in the very first frame after the answer, a
+			// tick before the transition's `isPending` clears. Without this line
+			// the rest of the assertion could pass vacuously.
+			firstFrameAfterLanding: frames[0]?.label,
+			everDisabled: frames.some((f) => f.trade === true || f.pills.some((d) => d === true)),
+			finalTrade: primary(h).props.disabled,
+			finalPills: pills(h).map((p) => p.props.disabled),
+		}).toEqual({
+			labelWhileInFlight: "Quoting…",
+			firstFrameAfterLanding: "Trade",
+			everDisabled: false,
+			finalTrade: false,
+			finalPills: [false],
+		});
 	});
 });

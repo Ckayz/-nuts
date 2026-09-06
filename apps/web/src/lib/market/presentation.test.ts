@@ -5,7 +5,7 @@ import { collateralAmount, structureRow, ticketFrom, type LiveStructure } from "
 const structure: LiveStructure = {
 	id: "row", asset: "BTC", expiry: 1800000000n, expiryAt: "2027-01-15T08:00:00Z",
 	productType: "ranger", implementationName: "RANGER", implementationAddress: "0x0",
-	isCall: true, strikes: [10000000000n, 20000000000n], strikesUsd: ["100", "200"],
+	isCall: true, riskKind: null, strikes: [10000000000n, 20000000000n], strikesUsd: ["100", "200"],
 	collateralAddress: "0x0", collateralSymbol: "cbBTC", collateralDecimals: 8,
 	// Only the two fields this presentation boundary reads; no SDK call is made.
 	buy: { availableAmount: 100000000n, pricePerContract: 100000000n } as Market, sell: null,

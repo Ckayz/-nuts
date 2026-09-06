@@ -314,14 +314,25 @@ export function WalletBar() {
 						<button type="button" className="btn sec" onClick={() => disconnect()}>
 							Disconnect
 						</button>
-
-						{message === null ? null : (
-							<span className="fine" role="status">
-								{message}
-							</span>
-						)}
 					</div>
 				</details>
+
+				{/*
+				 * D-R3-m1 / F24 (pass 3). The failure sentence lives BESIDE the
+				 * control that produced it, not inside the closed `···` menu. A
+				 * click on "Sign in" that fails set this message and rendered it
+				 * only inside an unopened `<details>`, so the reviewer measured a
+				 * visible button, an enabled retry and no visible explanation:
+				 *   {"statuses":["Sign-in could not be completed. …"],
+				 *    "details":[{"open":false,…}],"signInEnabled":true}
+				 * Same `.fine` status element and same wording; only its place
+				 * changed.
+				 */}
+				{message === null ? null : (
+					<span className="fine" role="status">
+						{message}
+					</span>
+				)}
 			</span>
 			{picker}
 		</>

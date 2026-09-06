@@ -25,17 +25,19 @@ import { getSession } from "@/lib/auth/session";
 import { createOrFetchUser } from "@/lib/auth/store";
 import { findStructure, readClient, type LiveStructure } from "@/lib/market/live";
 import { quoteStructure, type StructureQuote } from "@/lib/market/quote";
+import { sideWord } from "@/lib/market/direction";
 import { takerSideDisagreement, TAKER_SIDE_CONTRADICTION } from "@/lib/market/taker-side";
 import { parseTokenAmount } from "@/lib/market/units";
 import { isFeedUnavailable } from "@/lib/thetanuts/orders";
 import { strikesLabel } from "@/lib/display";
 import { approvalMatches, decodeApproval } from "./approval";
 import { instrumentMismatch } from "./attachment";
-import { findThesis, findUnrecordedFill, unrecordedFillReason } from "./store";
-import { simulateFill } from "./chain";
+import { findThesis, findUnrecordedFill, firstUnknownFill, unrecordedFillReason } from "./store";
+import { recentFillsByWallet, type FillReader } from "./chain-fills";
+import { publicClient, simulateFill } from "./chain";
 import { encodeTradeTicket, type TradeTicketPayload } from "./ticket";
-import { rawOf, takerFor } from "./view";
-import type { PrepareResult, TicketSide, TxRequest } from "./types";
+import { directionOfSide, rawOf, takerFor } from "./view";
+import type { PrepareResult, TakerSide, TicketSide, TxRequest } from "./types";
 
 function fail(code: string, reason: string, needsSignIn = false): PrepareResult {
 	return needsSignIn ? { ok: false, code, reason, needsSignIn } : { ok: false, code, reason };
@@ -52,7 +54,31 @@ function asTx(input: { to: string; data: string }): TxRequest {
 
 export interface PrepareTradeInput {
 	readonly structureId: string;
+	/**
+	 * The MARKET DIRECTION the visitor picked (I-1, owner 2026-09-06 decision 1):
+	 * "bull" means they profit if the asset goes UP. Which side of the book that
+	 * is depends on the INSTRUMENT — on a put it is the taker SELL — and is
+	 * resolved below, after the structure has been re-read, never assumed from
+	 * the word.
+	 */
 	readonly side: TicketSide;
+	/**
+	 * I-1, optional and authoritative when present: the taker side the ticket
+	 * resolved from the same server-built `TradePanelContext.sides` it labelled
+	 * its buttons from. The market ticket always sends it.
+	 *
+	 * Absent means the caller is `lib/agent/execute.ts`, which passes a
+	 * hardcoded `side: "bull"` that has always meant "prepare a taker BUY" (it
+	 * refuses every order whose `side !== "buy"` first). Those requests keep the
+	 * legacy `takerFor` mapping, so the agent's behaviour is unchanged by this
+	 * fold; see `./view.ts` for the follow-up that removes the fallback.
+	 *
+	 * Trusting it adds no authority: the browser could already choose either
+	 * side through `side`, the server re-quotes whichever side it resolves, and
+	 * the economics the wallet is asked to sign are the ones this function
+	 * returns for THAT side.
+	 */
+	readonly taker?: TakerSide;
 	readonly budgetInput: string;
 	/**
 	 * The post being traded on, when the visitor arrived from one. Absent means a
@@ -70,20 +96,82 @@ export interface PrepareTradeInput {
 export async function prepareTradeFor(
 	session: { userId: string; walletAddress: string } | null,
 	input: PrepareTradeInput,
+	/**
+	 * K-1. The chain reader the unrecorded-fill fence uses, supplied by the
+	 * caller exactly as `recordTradeFor(session, input, reader = publicClient())`
+	 * does, so a test can drive the fence without a chain. The exported action
+	 * always passes the real read-only Base client.
+	 */
+	fills: FillReader = publicClient(),
 ): Promise<PrepareResult> {
 	if (session === null) {
 		return fail("NO_SESSION", "Sign in with your wallet before signing a trade.", true);
 	}
-	const taker = takerFor(input.side);
-
 	// C#2. A fill this wallet has already broadcast and not recorded owns the
 	// ticket until it is settled. The browser holds the same fence in
 	// `lib/trade/held-fill.ts`; this one also covers a cleared store, a second
 	// tab and another device. A read failure is NOT treated as "no such row" —
-	// it throws, and the action's own catch turns it into a refusal.
+	// it throws.
+	//
+	// K-1, correcting this comment at the bytes: the sentence used to say "the
+	// action's own catch turns it into a refusal", and `./actions.ts` has NO
+	// catch. What actually happens is that the throw leaves the server action,
+	// the CALLER catches it (`components/market/take-a-side.tsx:850`,
+	// `components/agent/trade-execution.tsx`) and shows a failure — and no
+	// calldata is ever built either way, which is the property that matters. The
+	// chain fence below catches its own read failure so the person is told what
+	// went wrong instead of seeing a generic action error.
 	const unrecorded = await findUnrecordedFill(db, session.walletAddress, new Date());
 	if (unrecorded !== null) {
 		return fail("UNRECORDED_FILL", unrecordedFillReason(unrecorded.txHash));
+	}
+
+	// K-1 (pass-4 lane C BLOCKER-1). The pending row above exists only once
+	// `recordTrade` REACHED the server. When that request was lost — offline, a
+	// closed tab, a 502 at the edge — and the browser holds no store, NOTHING on
+	// the server knew about the fill and this wallet could fill the same order
+	// again. Measured on the pre-fix bytes with the market ticket and a server
+	// modelled faithfully:
+	//   MIN1_MARKET {"afterFirst":{"sends":1,"serverPendingRows":0},
+	//                "secondLabel":"Trade","afterSecond":{"sends":2},
+	//                "sent":["0xBUY_A","0xBUY_A"]}
+	//
+	// So the chain is asked directly: every OptionBook fill this wallet took
+	// inside the lookback must have a `positions` row of its own, or the ticket
+	// is refused with the same sentence the pending fence uses.
+	//
+	// FAIL-CLOSED, deliberately: a read that could not run is a refusal, never a
+	// pass. That means a Base outage stops trading — the alternative is a fence
+	// that disappears exactly when the chain cannot be checked.
+	//
+	// Residuals, stated rather than implied:
+	//  - a fill BROADCAST but not yet MINED is not in the logs yet (Base blocks
+	//    are 2 s, measured). Inside that gap only the pending row and the
+	//    browser's own held fill stand; with neither, two wallet prompts inside
+	//    one block can both fill. NOT VERIFIED how long a wallet takes to hand
+	//    the hash back. Recorded in docs/OPEN-WORK.md §7.
+	//  - a fill this wallet took OUTSIDE this app has no row and never will, so
+	//    it refuses the ticket for the length of the window. It self-heals, the
+	//    same way the pending fence does. Recorded in docs/OPEN-WORK.md §7.
+	//  - the log filter is `buyer OR seller`, which is every party to the fill,
+	//    so a wallet that is a MAKER on the book is refused by its own makers'
+	//    fills too. Kept deliberately WIDE: narrowing the fence on a money path
+	//    is a product decision, and refusing too much costs a wait while
+	//    refusing too little costs a duplicated premium. The discriminator is
+	//    measured and available when the owner wants it — on all three
+	//    chain-verified production fills the TAKER is `sellerWasMaker ? buyer :
+	//    seller` (`0x9c4bb1…` buyer/true, `0xdf3323…` seller/false, `0x3e7417…`
+	//    seller/false). Recorded in docs/OPEN-WORK.md §7.
+	let chainFills: ReadonlyArray<{ txHash: string }>;
+	try {
+		chainFills = await recentFillsByWallet(session.walletAddress as Address, fills);
+	} catch {
+		// TODO-OWNER: wording. The refusal itself is not a choice — see above.
+		return fail("CHAIN_UNAVAILABLE", "Base could not be read to check your recent fills, so nothing was prepared. Try again.");
+	}
+	const unknown = await firstUnknownFill(db, session.walletAddress, chainFills);
+	if (unknown !== null) {
+		return fail("UNRECORDED_FILL", unrecordedFillReason(unknown.txHash));
 	}
 
 	let budget: bigint;
@@ -96,13 +184,33 @@ export async function prepareTradeFor(
 	if (isFeedUnavailable(found)) return fail(found.error.toUpperCase(), found.detail);
 	const { structure } = found;
 
+	// I-1. The side of the book is resolved HERE, against the instrument that was
+	// just re-read — the mapping from a direction word to a taker side is a
+	// property of the option, not of the word, so it cannot be computed before
+	// the structure is known.
+	// `takerFor`, NOT `takerForSide`: a request that names no taker is the agent's
+	// (`lib/agent/execute.ts:205`) or a browser still running the pre-fold build,
+	// and both mean the LEGACY reading of the word. Resolving such a request
+	// through the new mapping would turn every agent BUY on a put into a
+	// collateral-posting SELL — measured, this exact line, before it was fixed:
+	//   [prepare agent-shaped] {"ok":false,"code":"NO_ORDER_ON_SIDE",
+	//    "reason":"No maker is buying this structure right now, so the Bull side
+	//    cannot be filled."}
+	// on an AVAX put whose only live order is the buy side.
+	const taker: TakerSide = input.taker ?? takerFor(input.side);
+	// The direction the RESULTING position will carry, which is the word every
+	// surface downstream prints. Derived from the taker side that is actually
+	// filled, so a request whose `side` and `taker` disagree can never mint a
+	// ticket that misnames itself.
+	const direction: TicketSide = directionOfSide(structure, taker);
+
 	const order: Market | null = structure[taker];
 	if (order === null) {
 		return fail(
 			"NO_ORDER_ON_SIDE",
 			taker === "sell"
-				? "No maker is buying this structure right now, so the Bear side cannot be filled."
-				: "No maker is selling this structure right now, so the Bull side cannot be filled.",
+				? `No maker is buying this structure right now, so the ${sideWord(structure, taker)} side cannot be filled.`
+				: `No maker is selling this structure right now, so the ${sideWord(structure, taker)} side cannot be filled.`,
 		);
 	}
 	if (structure.collateralDecimals === null || structure.collateralSymbol === null) {
@@ -210,7 +318,7 @@ export async function prepareTradeFor(
 		chainId: 8453,
 		structureId: structure.id,
 		instrumentLabel: `${structure.asset} ${structure.productType} ${strikesLabel(structure.strikesUsd, structure.isCall)}`,
-		side: input.side,
+		side: direction,
 		taker,
 		thesisId: resolved.thesisId,
 		role: resolved.role,

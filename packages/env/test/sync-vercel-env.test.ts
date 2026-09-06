@@ -123,6 +123,17 @@ for (const [label, url] of [
 	["integer unspecified", "postgresql://u:p@0:5432/postgres"],
 	["hex ipv4-mapped ipv6", "postgresql://u:p@[::ffff:7f00:1]:5432/postgres"],
 	["ipv4-compatible ipv6", "postgresql://u:p@[::7f00:1]:5432/postgres"],
+	/**
+	 * A4-1 (one-shot review pass 4). `postgresql:` is not a special scheme, so
+	 * `new URL(...).hostname` keeps percent-escapes while `pg` decodes them.
+	 * Measured 2026-09-06 against the real script and `pg@8.23.0`: each value
+	 * below exited 0 and planned a production sync, and the driver reported its
+	 * effective host as `localhost`, `127.0.0.1` and `[::1]` respectively.
+	 */
+	["percent-encoded localhost", "postgresql://u:p@%6cocalhost:5432/postgres"],
+	["percent-encoded ipv4 digit", "postgresql://u:p@127.0.0.%31:5432/postgres"],
+	["percent-encoded bracketed ipv6", "postgresql://u:p@%5B%3A%3A1%5D:5432/postgres"],
+	["percent-encoded bracketed ipv6, lowercase escapes", "postgresql://u:p@%5b%3a%3a1%5d:5432/postgres"],
 ] as const) {
 	test(`refuses a ${label} value for production`, () => {
 		const file = envFile(`loopback-${label.replace(/[^a-z0-9]+/gi, "-")}.env`, `DATABASE_URL=${url}\nSESSION_SECRET=${SECRETS.sessionSecret}\n`);
@@ -152,6 +163,14 @@ for (const [label, url] of [
 	["integer non-loopback ipv4", "postgresql://u:p@3232235777:5432/postgres"],
 	["global ipv6", "postgresql://u:p@[2001:db8::1]:5432/postgres"],
 	["ordinary hostname", "postgresql://u:p@db.example.invalid:5432/postgres"],
+	/**
+	 * A4-1, the other direction: the new decode runs ONCE, exactly like the
+	 * driver. Measured 2026-09-06 — `pg@8.23.0` reads
+	 * `postgresql://u:p@%25%36%63ocalhost/x` as host `%6cocalhost`, not
+	 * `localhost`, so a decode loop here would refuse a value the driver would
+	 * never send to the loopback.
+	 */
+	["double-percent-encoded localhost", "postgresql://u:p@%25%36%63ocalhost:5432/postgres"],
 ] as const) {
 	test(`accepts a ${label} value for production`, () => {
 		const file = envFile(`remote-${label.replace(/[^a-z0-9]+/gi, "-")}.env`, `DATABASE_URL=${url}\nSESSION_SECRET=${SECRETS.sessionSecret}\n`);
@@ -161,6 +180,88 @@ for (const [label, url] of [
 		expect(output).not.toContain("local-only value(s)");
 	});
 }
+
+/**
+ * A3-1 (one-shot review pass 3). The loopback fence above judges the URL's
+ * AUTHORITY hostname, but `pg` obeys query parameters that REPLACE the
+ * destination. The reviewer's fixture — a deployable authority plus
+ * `?host=%3A%3A1` — exited 0 and planned the sync before this fold, while the
+ * installed driver reported its effective host as `::1`. Every parameter in the
+ * shared `DESTINATION_OVERRIDE_PARAMETERS` list must refuse, whatever the
+ * authority says.
+ */
+for (const [label, query] of [
+	["reviewer fixture, encoded ipv6", "host=%3A%3A1"],
+	["integer loopback host", "host=2130706433"],
+	["percent-encoded parameter name", "%68ost=%3A%3A1"],
+	/**
+	 * A4-1. `URLSearchParams` already decodes keys once (measured 2026-09-06:
+	 * `?h%6fst=` reads back as `host`), so this case passed before the fold too —
+	 * it is pinned here so a future edit that reads the RAW query string keeps
+	 * catching it.
+	 */
+	["percent-encoded parameter name, mid-word", "h%6fst=%3A%3A1"],
+	["uppercase parameter name", "HOST=%3A%3A1"],
+	["hostaddr", "hostaddr=%3A%3A1"],
+	["port", "port=54322"],
+	["dbname", "dbname=other"],
+	["database", "database=other"],
+	["options", "options=-c%20search_path%3Dother"],
+	["connectionstring", "connectionstring=postgresql%3A%2F%2Fu%40db.other.invalid%2Fy"],
+	["service", "service=local"],
+	["servicefile", "servicefile=%2Ftmp%2Fpgservice.conf"],
+] as const) {
+	test(`refuses a DATABASE_URL carrying ${label}`, () => {
+		const file = envFile(
+			`override-${label.replace(/[^a-z0-9]+/gi, "-")}.env`,
+			`DATABASE_URL=postgresql://postgres:${SECRETS.remotePassword}@aws-0.pooler.example.invalid:6543/postgres?${query}\nSESSION_SECRET=${SECRETS.sessionSecret}\n`,
+		);
+		const { code, output } = run(["production", file, "--dry-run"]);
+		expect(code).toBe(1);
+		expect(output).toContain("destination-override query parameter(s)");
+		expect(output).toContain("DATABASE_URL");
+		expect(output).not.toContain("Dry run");
+		expect(output).not.toContain("Syncing");
+	});
+}
+
+/** The fence is judged per VALUE, not per key name: any URL-valued key is covered. */
+test("refuses a non-database URL value carrying a destination-override parameter", () => {
+	const file = envFile(
+		"override-rpc.env",
+		[
+			`DATABASE_URL=postgresql://postgres:${SECRETS.remotePassword}@aws-0.pooler.example.invalid:6543/postgres`,
+			"BASE_RPC_URL=https://base-mainnet.example.invalid/v1?service=local",
+			`SESSION_SECRET=${SECRETS.sessionSecret}`,
+		].join("\n"),
+	);
+	const { code, output } = run(["production", file, "--dry-run"]);
+	expect(code).toBe(1);
+	expect(output).toContain("destination-override query parameter(s)");
+	expect(output).toContain("BASE_RPC_URL");
+	expect(output).not.toContain("Dry run");
+});
+
+/**
+ * The other direction: the fence must not refuse deployable values. A query the
+ * driver does not obey stays allowed, and a non-URL value that merely CONTAINS
+ * one of the parameter names is not a URL at all, so it carries no query.
+ */
+test("accepts a remote URL whose query holds no destination-override parameter", () => {
+	const file = envFile(
+		"override-clean.env",
+		[
+			`DATABASE_URL=postgresql://postgres:${SECRETS.remotePassword}@aws-0.pooler.example.invalid:6543/postgres?sslmode=require&application_name=thesis`,
+			`SESSION_SECRET=${SECRETS.sessionSecret}`,
+			`OPENROUTER_API_KEY=${SECRETS.openrouter}-host=db.example.invalid`,
+		].join("\n"),
+	);
+	const { code, output } = run(["production", file, "--dry-run"]);
+	expect(code).toBe(0);
+	expect(output).toContain("Dry run");
+	expect(output).not.toContain("destination-override");
+	expect(output).not.toContain("local-only value(s)");
+});
 
 test("skips keys outside the validated schema, naming them without reading their values", () => {
 	const { code, output } = run(["production", remoteFile, "--dry-run"]);

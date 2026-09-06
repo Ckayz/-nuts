@@ -172,6 +172,57 @@ export function lifecycleStatus(status: PositionStatus, expiryAt: string | null,
 	return isPastExpiry(expiryAt, asOf) ? "expired" : status;
 }
 
+/**
+ * Which way a position is betting: the market direction, not whose side of a
+ * thesis it is.
+ *
+ * These are two different facts and conflating them was a real defect. A
+ * `PositionSide` is "back" or "counter" — did you back the author's thesis, or
+ * take the other side of it. That says nothing about the market: BACKING a BEAR
+ * thesis is a bear position. `lib/display.ts` printed `side === "back"` as
+ * "Bull", so every position card read Bull, bear positions included.
+ *
+ * The market direction is a property of the OPTION, and it is standard options
+ * semantics:
+ *
+ *   buy a call   long upside          bull
+ *   sell a put   short downside       bull   (you are paid to accept the strike)
+ *   buy a put    long downside        bear
+ *   sell a call  short upside         bear
+ *
+ * `takerSide` is already the MEASURED taker side from `measuredTakerSide()`,
+ * which is derived from the maker's `isLong` flag against chain bytes — see
+ * `lib/market/taker-side.ts`. This function only reads it; it does not re-derive
+ * the side, so the chain-verified rule stays in one place.
+ */
+export function marketDirection(option: { readonly isCall: boolean; readonly takerSide: "buy" | "sell" }): "bull" | "bear" {
+	const longTheOption = option.takerSide === "buy";
+	// buy call / sell put are bullish; buy put / sell call are bearish.
+	return option.isCall === longTheOption ? "bull" : "bear";
+}
+
+/**
+ * D-R3-1 / C-1 (pass 3, Astra lanes C and D). THE displayed-direction rule, for
+ * every surface that shows a direction: list rows, the share card, the post-fill
+ * card, the OG images and `/p/<id>`.
+ *
+ * Measured before this existed: `lib/display.ts` mapped `side === "back"` to
+ * "bull" while `lib/position/view.ts` called `marketDirection(instrument)`, and
+ * the SAME position (`isCall: false`, `takerSide: "buy"` — a bought put)
+ * rendered `{"rowSide":"bull","cardSideLabel":"Bear"}`. `lib/trade/record.ts`
+ * passed `ticket.side` instead, so the post-fill card repeated the ticket's own
+ * Bull/Bear button rather than the option that was actually filled.
+ *
+ * Null — not a guess — when no instrument could be decoded: a direction that
+ * cannot be read is printed as nothing, which is what `PnlCardInput.direction`
+ * has always done.
+ */
+export function positionDirection(
+	instrument: { readonly isCall: boolean; readonly takerSide: "buy" | "sell" } | null | undefined,
+): "bull" | "bear" | null {
+	return instrument === null || instrument === undefined ? null : marketDirection(instrument);
+}
+
 /** C7. True once the option's expiry has passed. Unreadable dates count as NOT expired: a false "settlement pending" would be its own wrong claim. */
 export function isPastExpiry(expiryAt: string | null, asOf: string): boolean {
 	if (expiryAt === null) return false;

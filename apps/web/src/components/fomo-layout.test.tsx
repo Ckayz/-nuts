@@ -87,8 +87,8 @@ test("the feed's list is the hairline container, not a gapped stack of cards", (
 	const html = renderToStaticMarkup(
 		<CalloutTabs
 			ranked={{ trending: posts, ending: [], settled: [] }}
-			following={[]}
-			top={[]}
+			following={{ trending: [], ending: [], settled: [] }}
+			top={{ trending: [], ending: [], settled: [] }}
 			signedIn={false}
 			databaseMode={false}
 		/>,

@@ -380,6 +380,18 @@ export interface CreatorProfile {
 	creator: Domain.Creator;
 	theses: Domain.Thesis[];
 	positions: Domain.Participant[];
+	/**
+	 * Owner decision 6 (2026-09-06): the profile bio, rendered under the name and
+	 * handle on `/u/<handle>`. It was WRITE-ONLY before — `users.bio` was
+	 * collected by the profile editor and displayed nowhere (fold-final-D §5).
+	 *
+	 * It rides on the user row `getCreator` already selects, so showing it costs
+	 * no query. It is deliberately NOT on `Domain.Creator`: that type extends the
+	 * FROZEN `ThesisAiContext["creator"]` contract (PRD §10.3), which neither
+	 * side changes unilaterally, and a bio is a profile-page fact rather than
+	 * something every creator reference carries.
+	 */
+	bio: string | null;
 }
 
 /** Resolve a stored handle, or a wallet address for existing links and handle-less users. */
@@ -450,6 +462,7 @@ export async function getCreator(
 
 	return {
 		creator,
+		bio: user.bio ?? null,
 		theses: thesisRows.map((row: { thesis: ThesisRow; creatorPosition: PositionRow | null }) =>
 			mapThesis({
 				thesis: row.thesis,
@@ -530,23 +543,79 @@ export async function listActivity(userId: string, options: ReadOptions & { thes
 		}));
 }
 
+/**
+ * WHICH position rows the 1W leaderboard is built from.
+ *
+ * Extracted so the aggregate below and `leaderboardPositions` cannot drift: the
+ * live P&L the cell prints (owner decision 9) has to be summed over EXACTLY the
+ * rows the ranking totalled, or the number and its position in the table would
+ * describe different sets of fills.
+ */
+function leaderboardEligible(since: Date, now: Date) {
+	return and(
+		or(isNull(positions.thesisId), inArray(theses.status, [...PUBLIC_THESIS_STATUSES])),
+		inArray(positions.status, [...FILLED_POSITION_STATUSES]),
+		gte(positions.confirmedAt, since), lte(positions.confirmedAt, now),
+	);
+}
+
+/** TODO-OWNER: existing 1W window copied from social/ranking.ts:12. */
+function leaderboardSince(now: Date): Date {
+	return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * Owner decision 9 (2026-09-06): the position rows behind each listed trader's
+ * leaderboard total, so the cell can print the SAME live P&L the list rows
+ * print instead of the recorded-column aggregate — which is `—` for every
+ * trader until the indexer has written an `estimated_pnl_usd`.
+ *
+ * The RANKING is untouched: it is still `leaderboard()`'s SQL sum over the
+ * stored columns, and this read only supplies the rows for the figure in the
+ * cell. Same window, same statuses, same thesis-visibility rule, by
+ * construction (`leaderboardEligible`).
+ *
+ * Returns a map keyed by user id. A trader with no eligible row is absent, not
+ * an empty array, so the caller can tell "no rows" from "rows that priced to
+ * nothing".
+ */
+export async function leaderboardPositions(
+	userIds: readonly string[],
+	options: ReadOptions & { window: "1W"; now?: Date } ,
+): Promise<Map<string, Domain.Position[]>> {
+	const wanted = [...new Set(userIds.filter((id) => UUID.test(id)).map((id) => id.toLowerCase()))];
+	const result = new Map<string, Domain.Position[]>();
+	if (wanted.length === 0) return result;
+	const database = options.database ?? defaultDb;
+	const now = options.now ?? new Date();
+	const rows = await database
+		.select({ position: positions, thesis: theses })
+		.from(positions)
+		.leftJoin(theses, eq(theses.id, positions.thesisId))
+		.where(and(inArray(positions.userId, wanted), leaderboardEligible(leaderboardSince(now), now)));
+	for (const row of rows) {
+		const userId = row.position.userId.toLowerCase();
+		const list = result.get(userId) ?? [];
+		// B6: a draft or cancelled post's headline never leaves the database, on
+		// this path either.
+		list.push(mapPosition({ position: row.position, thesis: publicThesisOrNull(row.thesis) }));
+		result.set(userId, list);
+	}
+	return result;
+}
+
 /** Same 1W eligibility and exact decimal sum as social/ranking.ts, before LIMIT. */
 export async function leaderboard(options: ReadOptions & { window: "1W"; now?: Date; limit?: number }): Promise<(Domain.Creator & { followingByViewer: boolean })[]> {
 	const database = options.database ?? defaultDb;
 	const now = options.now ?? new Date();
-	// TODO-OWNER: existing 1W window copied from social/ranking.ts:12.
-	const since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+	const since = leaderboardSince(now);
 	const component = sql`case when ${positions.status} = 'settled' then ${positions.finalPnlUsd} else ${positions.estimatedPnlUsd} end`;
 	// usdDecimalOrNull rejects NULL and non-decimal numeric values. Any such
 	// component makes the entire creator total unavailable, sorted last.
 	const pnl = sql<string | null>`case when bool_and(coalesce((${component})::text ~ '^-?[0-9]+(\\.[0-9]+)?$', false)) then sum(${component}) else null end`;
 	const rows = await database.select({ user: users, pnl: sql<string | null>`(${pnl})::text` }).from(positions)
 		.innerJoin(users, eq(users.id, positions.userId)).leftJoin(theses, eq(theses.id, positions.thesisId))
-		.where(and(
-			or(isNull(positions.thesisId), inArray(theses.status, [...PUBLIC_THESIS_STATUSES])),
-			inArray(positions.status, [...FILLED_POSITION_STATUSES]),
-			gte(positions.confirmedAt, since), lte(positions.confirmedAt, now),
-		))
+		.where(leaderboardEligible(since, now))
 		.groupBy(users.id)
 		.orderBy(sql`${pnl} desc nulls last`, users.id)
 		.limit(options.limit ?? LEADERBOARD_LIMIT);
@@ -591,9 +660,17 @@ async function rankedTheses(kind: "trending" | "ending" | "settled", options: Ra
 	}), kind);
 	return ranked.map(row => mapThesis({ ...row, aggregates: aggregates.get(row.id) ?? { ...emptyAggregates }, dataAsOf: new Date() }));
 }
+/**
+ * B-P3-1 (pass 3): all three take `RankedReadOptions`. `endingSoon` and
+ * `settled` used to take only `{ limit }`, so the Following audience could not
+ * be read for them at all and the tabs intersected instead — which dropped a
+ * followed author's post whenever it sat outside the GLOBAL top `limit`.
+ * `rankedTheses` has always applied `creatorIds` inside the same query as the
+ * limit; only these two signatures were narrower than the implementation.
+ */
 export async function trending(options: RankedReadOptions = {}) { return rankedTheses("trending", options); }
-export async function endingSoon(options: ReadOptions & { limit?: number } = {}) { return rankedTheses("ending", options); }
-export async function settled(options: ReadOptions & { limit?: number } = {}) { return rankedTheses("settled", options); }
+export async function endingSoon(options: RankedReadOptions = {}) { return rankedTheses("ending", options); }
+export async function settled(options: RankedReadOptions = {}) { return rankedTheses("settled", options); }
 
 /**
  * One position and its owner, for `/p/[id]` and for the trade cards a post's

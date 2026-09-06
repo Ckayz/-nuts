@@ -8,7 +8,19 @@
  */
 import type { PnlCard, Ticket } from "@/lib/display-types";
 
+/**
+ * THE MARKET DIRECTION a ticket button stands for — "you profit if the asset
+ * goes UP" / "…DOWN" (owner 2026-09-06, decision 1).
+ *
+ * I-1: this used to be the ticket's own shorthand for the taker side ("bull" =
+ * taker BUY on every structure), which is why the market page called a bought
+ * put "Bull · buy" while its own position page, title and Open Graph card
+ * called it "Bear". Which taker side a direction selects is a property of the
+ * INSTRUMENT and is resolved by `lib/market/direction.ts`; it is never assumed
+ * from the word.
+ */
 export type TicketSide = "bull" | "bear";
+/** Which side of the maker's order is taken. This is the money-bearing fact. */
 export type TakerSide = "buy" | "sell";
 
 /** Raw integer base units behind every figure the ticket prints. */
@@ -50,7 +62,17 @@ export interface TicketQuoteView {
 }
 
 export interface SideAvailability {
+	/** The taker side this button fills, resolved against the instrument. */
 	readonly taker: TakerSide;
+	/**
+	 * I-1. The button's leading word: "Bull" / "Bear" when this structure's
+	 * payoff is monotone in spot, and the raw "Buy" / "Sell" when it is not
+	 * (RANGER, fly, condor, unnamed implementation). Computed once on the server
+	 * by `sideWord()` so the ticket cannot spell a second rule.
+	 */
+	readonly word: string;
+	/** True exactly when `word` is a market direction rather than a taker verb. */
+	readonly directional: boolean;
 	readonly available: boolean;
 	readonly reason: string | null;
 }

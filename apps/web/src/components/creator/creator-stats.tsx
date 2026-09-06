@@ -7,7 +7,18 @@ import { Avatar } from "@/components/primitives";
 import { countLabel, pnlClass, signedUsd } from "@/lib/format";
 import type { Creator } from "@/lib/display-types";
 
-export function CreatorStats({ creator, following = false, signedIn = false, databaseMode = false, self = false, profile = false, compact = false }: { creator: Creator; following?: boolean; signedIn?: boolean; databaseMode?: boolean; self?: boolean; profile?: boolean; compact?: boolean }) {
+/**
+ * Owner decision 6 (2026-09-06): `bio` renders under the name and handle on the
+ * PROFILE header, in the `.meta` muted text the address line already uses — no
+ * new class, no new component. It was write-only before: the editor collected
+ * `users.bio` and nothing displayed it (fold-final-D §5, which stopped for the
+ * owner because the mockup's `#profile` header draws no bio).
+ *
+ * Whitespace-only is the same as absent, so a bio of spaces draws no empty row.
+ * It is not shown on the compact creator card or the market's creator panel:
+ * the decision names `/u/<handle>` only.
+ */
+export function CreatorStats({ creator, bio = null, following = false, signedIn = false, databaseMode = false, self = false, profile = false, compact = false }: { creator: Creator; bio?: string | null; following?: boolean; signedIn?: boolean; databaseMode?: boolean; self?: boolean; profile?: boolean; compact?: boolean }) {
 	const hintId = useId();
 	const [local, setLocal] = useState({ following, followers: creator.followerCount });
 	const [pending, startTransition] = useTransition();
@@ -43,7 +54,7 @@ export function CreatorStats({ creator, following = false, signedIn = false, dat
     <Avatar seed={creator.avatarSeed} initials={creator.initials} size={profile ? "lg" : undefined} />
     {!profile ? <span className="t"><Link href={`/u/${creator.handle}`}><b>{creator.displayName}</b></Link><i>{[creator.walletAddress, creator.sinceLabel].filter(Boolean).join(" · ")}</i></span> : null}
    </div>
-   {profile ? <><div className="profile-identity"><h1>{creator.displayName}</h1><div className="handle">@{creator.handleLabel}</div><div className="meta num">{[creator.walletAddress, creator.sinceLabel].filter(Boolean).join(" · ")}</div><div className="counts">{followers !== undefined ? <span><b className="num">{followers}</b> {countLabel(state.followers, "Followers", "Follower")}</span> : null}{creator.thesesCount !== undefined ? <span><b className="num">{creator.thesesCount}</b> {countLabel(creator.thesesCount, "Theses", "Thesis")}</span> : null}</div></div><div className="prof-act">{!self ? follow : null}</div></> : null}
+   {profile ? <><div className="profile-identity"><h1>{creator.displayName}</h1><div className="handle">@{creator.handleLabel}</div>{bio !== null && bio.trim() !== "" ? <p className="meta bio">{bio}</p> : null}<div className="meta num">{[creator.walletAddress, creator.sinceLabel].filter(Boolean).join(" · ")}</div><div className="counts">{followers !== undefined ? <span><b className="num">{followers}</b> {countLabel(state.followers, "Followers", "Follower")}</span> : null}{creator.thesesCount !== undefined ? <span><b className="num">{creator.thesesCount}</b> {countLabel(creator.thesesCount, "Theses", "Thesis")}</span> : null}</div></div><div className="prof-act">{!self ? follow : null}</div></> : null}
   </div>
   <div className={profile ? "stats" : "creator-metrics"}>{stats}{!profile && followers !== undefined ? <span className="tile"><i>Followers</i><b className="num">{followers}</b></span> : null}</div>
  </section>;

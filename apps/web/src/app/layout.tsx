@@ -65,7 +65,7 @@ export default async function RootLayout({
 					    TODO-OWNER: "Skip to content" is provisional wording. */}
 					<a className="skip-link" href="#main">Skip to content</a>
 					<TopBar />
-					<Nav firstMarketSlug={markets.markets[0]?.slug} unavailable={markets.unavailable} />
+					<Nav marketSlug={markets.navMarketSlug} unavailable={markets.unavailable} />
 					<main className="wrap" id="main">{children}</main>
 					<AgentLauncher />
 					{/* The mockup's footer line, minus its "mockup only". The
@@ -74,6 +74,14 @@ export default async function RootLayout({
 					<footer className="foot">
 						{usingDatabase() ? "Base · Thetanuts OptionBook" : footerSource}
 					</footer>
+					{/* D-R3-2 (pass 3): the document-level layer every modal portals
+					    into. The connect dialog used to render inside the sticky top
+					    bar, whose `z-index:30` trapped the scrim's `z-index:60`
+					    inside that stacking context, so the agent launcher and its
+					    panel (`z-index:38`, document level) painted above the modal
+					    and stayed clickable through it. Last child of `<body>`, so
+					    the scrim competes in the ROOT stacking context. */}
+					<div id="modal-root" />
 				</Providers>
 			</body>
 		</html>

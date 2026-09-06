@@ -18,7 +18,7 @@ import { getSession } from "@/lib/auth/session";
 import { isFeedUnavailable } from "@/lib/thetanuts/orders";
 import type { FeedUnavailable } from "@/lib/thetanuts/types";
 import { findThesis } from "@/lib/trade/store";
-import { quoteView, takerFor } from "@/lib/trade/view";
+import { quoteView, takerForSide } from "@/lib/trade/view";
 import { EXPLORER_TX_BASE } from "@/lib/trade/chain";
 import type { SideAvailability, TicketSide, TradePanelContext } from "@/lib/trade/types";
 import {
@@ -31,6 +31,7 @@ import {
 	ticketFrom,
 	type LiveStructure,
 } from "./live";
+import { directionNameable, sideWord } from "./direction";
 import { quoteStructure, type QuoteResult } from "./quote";
 import { structureIdOf } from "./structures";
 import { parseTokenAmount } from "./units";
@@ -101,16 +102,19 @@ function structureOfThesis(snapshot: unknown): string | null {
 }
 
 function quoteOne(structure: LiveStructure, side: TicketSide, budgetInput: string): QuoteResult {
-	const taker = takerFor(side);
+	const taker = takerForSide(structure, side);
 	const order = structure[taker];
 	if (order === null) {
+		// I-1. The refusal names the BUTTON the visitor pressed, which on a put is
+		// not the button the old "Bull = buy" shorthand named.
+		const word = sideWord(structure, taker);
 		return {
 			ok: false,
 			code: "NO_ORDER_ON_SIDE",
 			reason:
 				taker === "sell"
-					? "No maker is buying this structure right now, so the Bear side cannot be filled."
-					: "No maker is selling this structure right now, so the Bull side cannot be filled.",
+					? `No maker is buying this structure right now, so the ${word} side cannot be filled.`
+					: `No maker is selling this structure right now, so the ${word} side cannot be filled.`,
 		};
 	}
 	if (structure.collateralDecimals === null) {
@@ -131,9 +135,14 @@ function quoteOne(structure: LiveStructure, side: TicketSide, budgetInput: strin
 	});
 }
 
-function availability(quote: QuoteResult, side: TicketSide): SideAvailability {
+function availability(structure: LiveStructure, quote: QuoteResult, side: TicketSide): SideAvailability {
+	const taker = takerForSide(structure, side);
 	return {
-		taker: takerFor(side),
+		taker,
+		// I-1. The word and the taker side are decided together, on the server,
+		// from the same instrument. The ticket only prints them.
+		word: sideWord(structure, taker),
+		directional: directionNameable(structure),
 		available: quote.ok,
 		reason: quote.ok ? null : quote.reason,
 	};
@@ -186,7 +195,7 @@ export async function marketPageData(
 	const quote = side === "bull" ? bullQuote : bearQuote;
 
 	const view = quoteView({ structure, side, quote, budgetInput });
-	const sideNote = sideNoteFor(structure, takerFor(side), quote);
+	const sideNote = sideNoteFor(structure, takerForSide(structure, side), quote);
 
 	const { listFeed, listPositionsByIds } = await import("@/lib/data/reads");
 	const feed = await listFeed({ viewerUserId: session?.userId ?? null });
@@ -200,7 +209,10 @@ export async function marketPageData(
 		structureId: structure.id,
 		structureLabel: page.market.selectedLabel,
 		expiryLabel: page.market.selectedExpiryLabel,
-		sides: { bull: availability(bullQuote, "bull"), bear: availability(bearQuote, "bear") },
+		sides: {
+			bull: availability(structure, bullQuote, "bull"),
+			bear: availability(structure, bearQuote, "bear"),
+		},
 		quote: view,
 		presets: [...BUDGET_PRESETS],
 		thesis:

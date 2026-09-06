@@ -65,7 +65,7 @@ import { getSession } from "@/lib/auth/session";
 import { ascendingStrikes, riskKindFor } from "@/lib/market/structures";
 import { formatBaseUnits, formatUsd8 } from "@/lib/market/units";
 import { pnlCard } from "@/lib/display";
-import { resolvePnl } from "@/lib/position/lifecycle";
+import { lifecycleStatus, positionDirection, resolvePnl } from "@/lib/position/lifecycle";
 import type { LivePriceBook } from "@/lib/position/types";
 import { mapCreator, mapPosition } from "@/lib/data/map";
 import { creatorHandle, creatorInitials } from "@/lib/data/identity";
@@ -478,16 +478,34 @@ export async function fillCard(ticket: TradeTicketPayload, row: Position, prices
 		const usd8 = usd8Of(BigInt(base), symbol, decimals);
 		return usd8 === null ? null : formatUsd8(usd8);
 	};
+	/**
+	 * C-1 / D-R3-1 (pass 3, Astra lanes C and D). The lifecycle and the
+	 * direction come from THIS ROW, through the same two functions `/p/<id>`
+	 * uses, not from the ticket and not from a constant.
+	 *
+	 * Measured before this change, with the same stored row at three statuses:
+	 *   {"confirmed":{"sideLabel":"Bull","statusLabel":"Open · syncing"},
+	 *    "expired":  {"sideLabel":"Bull","statusLabel":"Open · syncing"},
+	 *    "settled":  {"sideLabel":"Bull","statusLabel":"Open · syncing"}}
+	 * — because the status was forced to `confirmed` for every non-failed row
+	 * and the direction was `ticket.side`, the Bull/Bear BUTTON the user
+	 * pressed. The order that was filled is a bought put, i.e. bear, and its own
+	 * page said "Bear".
+	 *
+	 * `mapPosition` decodes the row's immutable order snapshot — the same
+	 * decode `pricedPnl` below already performs for the P&L.
+	 */
+	const domain = mapPosition({ position: row, thesis: null });
 	const card = pnlCard({
 		id: row.id,
 		owner,
-		status: row.status === "failed" ? "failed" : "confirmed",
+		status: lifecycleStatus(domain.status, domain.expiryAt ?? null, new Date().toISOString()),
+		failureReason: domain.failureReason,
 		createdAt: (row.confirmedAt ?? row.createdAt).toISOString(),
 		instrumentLabel: ticket.instrumentLabel,
-		// The MARKET direction. `ticket.side` is already TicketSide, "bull" |
-		// "bear" — the direction the user chose on the ticket. The `side` field
+		// The MARKET direction, read from the option itself. The `side` field
 		// below is "back"/"counter", which is about a thesis, not the market.
-		direction: ticket.side,
+		direction: positionDirection(domain.instrument),
 		// The order snapshot's own strings are already in the ticket's label; the
 		// split fields stay null rather than re-parsing that label back apart.
 		asset: null,
@@ -659,10 +677,22 @@ async function claimPending(
 
 	// Conditional on the row still being pending AND still the other wallet's,
 	// so a holder that legitimately confirmed in the meantime is not clobbered.
+	//
+	// K-1 (pass-4 lane C MINOR-1). The wallet predicate used to be in the
+	// sentence only, not in the SQL. No code path changes `wallet_address` —
+	// `grep -rn "update(positions)" apps/web/src` returns four sites
+	// (`record.ts` 151 / 235 / 314 / 681) and none sets it — so the property
+	// held; it is written down now so the claim and the statement cannot drift.
 	await db
 		.update(positions)
 		.set({ status: "failed", failureReason: "superseded_by_onchain_taker" })
-		.where(and(eq(positions.id, held.id), eq(positions.status, "pending")));
+		.where(
+			and(
+				eq(positions.id, held.id),
+				eq(positions.status, "pending"),
+				eq(positions.walletAddress, held.walletAddress),
+			),
+		);
 
 	const second = await insertPending(ticket, txHash, identity);
 	if (second.kind === "row") return { ok: true, row: second.row };

@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { and, eq, sql } from "drizzle-orm";
 import type { Log } from "viem";
@@ -1542,5 +1543,29 @@ describeLive("MAJOR-1: the post-fill card is priced like every other surface", (
 			onChain: true,
 		});
 		expect(unproven.detail).not.toContain("This transaction failed");
+	});
+});
+
+/**
+ * K-1 (pass-4 lane C MINOR-1). `claimPending`'s supersede said one thing in its
+ * comment and another in its SQL: "Conditional on the row still being pending
+ * AND still the other wallet's", against
+ * `and(eq(positions.id, held.id), eq(positions.status, "pending"))`.
+ *
+ * A source pin rather than a behavioural one, and it is honest about why: no
+ * code path changes `wallet_address` — `grep -rn "update(positions)"` returns
+ * four sites (`record.ts` 151 / 235 / 314 / 681) and none of them sets it — so
+ * no reachable state can tell the two `where` clauses apart. The property held
+ * before this fold; what is pinned is that the statement carries the condition
+ * the sentence beside it claims.
+ */
+describe("K-1: the supersede's SQL carries the wallet condition its comment claims", () => {
+	test("the conditional update fences on id, status AND wallet", () => {
+		const source = readFileSync(new URL("./record.ts", import.meta.url), "utf8");
+		const update = source.slice(source.indexOf('failureReason: "superseded_by_onchain_taker"'));
+		const where = update.slice(0, update.indexOf("const second"));
+		expect(where).toContain("eq(positions.id, held.id)");
+		expect(where).toContain('eq(positions.status, "pending")');
+		expect(where).toContain("eq(positions.walletAddress, held.walletAddress)");
 	});
 });

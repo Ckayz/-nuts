@@ -101,6 +101,11 @@ em{font-style:normal}
 /* Wallet rows in the connect dialog: the connector's own icon, then its name. */
 .wallet-choice{justify-content:flex-start;gap:10px}
 .wallet-choice img{border-radius:6px;flex:none}
+/* Owner decision 5 (2026-09-06): Create lives in the top bar, beside the wallet
+   chip. Matched to the chip's height so the two read as one control group; it
+   never wraps and never shrinks, which is the whole point of moving it out of
+   the `overflow-x:auto` nav. */
+.top-create{height:36px;padding:0 14px;flex:none;white-space:nowrap}
 
 /* ---------- nav ---------- */
 .nav{display:flex;align-items:center;gap:26px;padding:0 24px;height:46px;
@@ -115,12 +120,14 @@ em{font-style:normal}
 .nav a[aria-current="page"]::after,.nav button[aria-current="page"]::after{content:"";position:absolute;left:0;right:0;bottom:-1px;
   height:2px;background:var(--accent);border-radius:2px 2px 0 0}
 .nav .spacer{margin-left:auto}
-/* Adaptation: the mockup's nav ends with mockup-only view switchers; the app
-   puts the Create control there (the icon rail it replaces owned the only
-   route to /new). It must beat the `.nav a` height and colour above. */
-.nav a.btn{height:30px;font-size:13px;padding:0 14px;color:var(--accent-ink)}
-.nav a.btn:hover{color:var(--accent-ink)}
-.nav a.btn::after{display:none}
+/* The nav's "Leaderboard" item is an in-page anchor. `.top` (60px) and `.nav`
+   (46px) are both sticky, so without this the card lands underneath them. */
+#top-traders{scroll-margin-top:114px}
+/* `.nav a.btn` lived here to style the Create control the nav used to carry.
+   Owner decision 5 (2026-09-06) moved it to the top bar, so the three rules are
+   gone with it — nothing in `.nav` is a button any more. `.nav .spacer` above
+   stays: it is a class-for-class port of the mockup's own nav, which still has
+   one before its view switchers. */
 
 /* ---------- shell ---------- */
 .wrap{max-width:1392px;margin:0 auto;padding:22px 24px 60px}
@@ -173,6 +180,11 @@ em{font-style:normal}
   padding:0 13px;font-size:12.5px;border-radius:var(--r-chip)}
 .btn.out:hover{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn.block{width:100%}
+/* The connect dialog's wallet rows: icon and label on ONE centred row. Declared
+   unlayered so no layered utility can flip the display again (measured
+   2026-09-06 09:0x: the `block` utility had made these `display:block`). */
+.wallet-choice{display:flex;align-items:center;justify-content:center;gap:10px;width:100%}
+.wallet-choice img{display:block;flex:none}
 .btn.big{height:46px;font-size:15px;border-radius:var(--r-field)}
 .btn:disabled{opacity:.55}
 .pills{display:flex;gap:6px;flex-wrap:wrap}
@@ -442,12 +454,28 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 .stats .tile+.tile{padding-left:13px;border-left:1px solid var(--line)}
 
 /* ---------- structures table ---------- */
+/* K-2 (pass-4 D4-M1). CORRECTION to the comment that stood here: it said a
+   600px floor, unlike a 640px one, kept the book from scrolling sideways "at
+   the WIDEST layout". A floor cannot do that. The cells below are
+   `white-space:nowrap`, so the CONTENT sets the width and `min-width` only
+   matters when the content is narrower than the floor. MEASURED on /m/eth with
+   the real book (127 structures) at this commit: `.tbl-wrap` scrollWidth 794px
+   against clientWidth 634 at 1440 and at 1600, 423 at 1181, 738 at 768, 360 at
+   390 — a horizontal scrollbar at every width except 1000 (single column, 950).
+   The Select control sat at x 1111-1174 while the scroller ended at 1035: the
+   ticket's only input was off screen on a normal laptop.
+
+   So the Select column is PINNED to the scroller's right edge and carries a
+   hairline on the side the hidden columns slide under, which is also the scroll
+   affordance the wrap had none of (`mask-image`, `box-shadow`, `background-image`
+   were all `none`). Its background repeats the row's own so nothing shows
+   through: `--surface` is what the table sits on (measured: the nearest painted
+   ancestor is `.card.tabcard`, rgb(18,17,26) = `--surface`), `--surface2` on
+   hover, and the selected row's `--accent-tint-soft` is 8% alpha so it is
+   layered OVER `--surface` rather than replacing it.
+   Sticky cells need `border-collapse:separate`, which the rule below already
+   sets for the row radii. */
 .tbl-wrap{overflow-x:auto}
-/* The floor was 640px. The centre column is 636px at the 1392px shell now that
-   the left rail is fomo's 340px, so a 640px floor put a horizontal scrollbar
-   under the book at the WIDEST layout. 600px is a floor, not a width: the cells
-   are `white-space:nowrap`, so the table still grows to its own content and
-   still scrolls inside `.tbl-wrap` on a narrow screen. */
 .tbl{width:100%;min-width:600px;border-collapse:separate;border-spacing:0}
 .tbl th{text-align:left;font-size:12.5px;font-weight:600;color:var(--muted);padding:0 9px 10px;white-space:nowrap}
 .tbl td{padding:12px 9px;font-size:13.5px;font-weight:500;border-top:1px solid var(--line-soft);white-space:nowrap}
@@ -459,6 +487,13 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 .tbl tbody tr[aria-selected="true"]{background:var(--accent-tint-soft)}
 .tbl tbody tr[aria-selected="true"] td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 .tbl .struct{font-weight:700;color:var(--text)}
+/* The one cell allowed to wrap: strikes are the widest string in the row and the
+   only one that reads correctly on two lines. TODO-OWNER: the 120px floor. */
+.tbl td.strikes{white-space:normal;min-width:120px}
+.tbl .sel-col{position:sticky;right:0;background-color:var(--surface);border-left:1px solid var(--line)}
+.tbl tbody tr:hover .sel-col{background-color:var(--surface2)}
+.tbl tbody tr[aria-selected="true"] .sel-col{background-color:var(--surface);
+  background-image:linear-gradient(var(--accent-tint-soft),var(--accent-tint-soft))}
 .sel-btn{height:28px;padding:0 11px;border-radius:var(--r-chip);font-size:12.5px;font-weight:600;
   color:var(--muted);border:1px solid var(--line);transition:color .16s var(--ease),border-color .16s var(--ease)}
 .sel-btn:hover{color:var(--text);border-color:#3a3a48}
@@ -556,21 +591,34 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 @media (max-width:900px){
   .cols.feed,.cols.page,.cols.feed.no-left,.cols.page.no-left{grid-template-columns:minmax(0,1fr)}
   .col-left{display:none}
+  /* Owner decision 7 (2026-09-06). The FEED's left column is the Top traders
+     card, and the nav's "Leaderboard" item is an in-page anchor to it — with
+     the rule above it scrolled to something `display:none`, so on a phone the
+     leaderboard did not exist at all. On the feed only, the column stays in the
+     flow and `order` puts it in the single stacked column directly under the
+     posts, ahead of the right-hand panels. Every other page's left rail (the
+     "Latest theses" list) is still hidden, as CLAUDE.md has it.
+     ONE instance either way: this is the same element the desktop draws, moved,
+     never a second copy — so `#top-traders` stays unique in the document. */
+  .cols.feed>.col-left{display:block;order:1}
+  .cols.feed>.col-right{order:2}
+  /* Somebody else's network stays a desktop-only rail: hiding it is what the
+     whole left column did before this exception, and decision 7 names the Top
+     traders card alone. */
+  .rail-desktop-only{display:none}
   .search{display:none}
   .wrap{padding:16px 14px 48px}
   .top{gap:12px;padding:0 14px}
   /* The mockup's mobile nav scrolls horizontally inside `.nav`, which keeps the
      DOCUMENT at the viewport width (measured: /m/btc at 390px, scrollWidth 390 =
-     clientWidth 390). But `Create` then sits past the right edge and has to be
-     found by scrolling, so the row is tightened here until all five items fit.
-     Measured at 390px with FIVE items: `.nav` scrollWidth 362 = clientWidth 362,
-     i.e. nothing was hidden. A sixth item (Agent) was added on 2026-09-06 and
-     that measurement no longer holds — the row is expected to scroll at 390px,
-     so `Create` may sit past the right edge again. The nav is `overflow-x:auto`
-     so nothing is unreachable, but this is UNVERIFIED in a browser.
-     TODO-OWNER: tighten the gap, shorten a label, or accept the scroll. */
+     clientWidth 390). Owner decision 5 (2026-09-06) took `Create` out of this
+     row and put it in the top bar, so what is left here is five NAVIGATION
+     items, all of them reachable by scrolling and none of them a control that
+     must be on screen. The tightening stays: it is what keeps the five from
+     scrolling at all at 390px.
+     TODO-OWNER: whether a scrolling nav is acceptable at 320px. */
   .nav{padding:0 12px;gap:14px}
-  .nav a.btn{padding:0 11px}
+  .top-create{padding:0 12px}
   .post{padding:16px 16px;border-radius:16px;gap:12px}
   .p-body{font-size:15.5px}
   .sc-pnl b{font-size:36px}
@@ -595,6 +643,22 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
   /* The mockup's 390px feed puts the filter pills on their own LEFT-aligned
      line under the tabs (design-r1-8-feed-mobile.png). */
   .feed-head .pills{margin-left:0}
+}
+
+/* Owner decision 5, second half: Create has to FIT, not merely exist.
+   MEASURED at 320px on `/` in database mode, signed out (the widest wallet
+   state, "Connect wallet" at 132px), with Create in the top bar and the rules
+   above applied: `.top` scrollWidth 337 against clientWidth 320 — brand 100 +
+   gap 12 + top-r 212 + padding 28. The DOCUMENT scrolled sideways, which the
+   design rules forbid.
+   These four are the tightening that removes it, in the order that costs the
+   least: the bar's own padding and gap, then the button's padding, then the
+   brand's step. Re-measured after: see the fold report. Nothing about the
+   layout at 360px and up changes except the same tightening. */
+@media (max-width:400px){
+  .top{gap:8px;padding:0 10px}
+  .brand{font-size:18px}
+  .top-create{padding:0 10px}
 }
 
 }

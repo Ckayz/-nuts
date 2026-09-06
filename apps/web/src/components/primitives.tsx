@@ -14,8 +14,14 @@ import type { Tag, Thesis, ThesisStatus } from "@/lib/display-types";
  * Avatar sizes are the mockup's `.av-*` steps. The three legacy names stay so
  * components outside this round's fence keep compiling; each maps to the
  * nearest mockup step (`s` → 26, default → 34, `lg` → 40).
+ *
+ * K-2 (pass-4 D4-m6): `80` was admitted after `.av-80` had been deleted from
+ * `index.css` as dead CSS, so passing it would have rendered an unsized avatar.
+ * Nothing passed it (measured: no `size={80}` call site), and the profile hero
+ * is 80px through `styles/profile.css` `.profile-avatar>.av`, not through a
+ * step. The steps here are exactly the `.av-*` classes that exist.
  */
-export type AvatarSize = "s" | "lg" | 22 | 26 | 30 | 34 | 40 | 44 | 80;
+export type AvatarSize = "s" | "lg" | 22 | 26 | 30 | 34 | 40 | 44;
 
 const AVATAR_STEP: Record<string, number> = { s: 26, lg: 40 };
 
@@ -190,6 +196,31 @@ export function TodoOwner({ style }: { style?: CSSProperties }) {
 	return (
 		<span className="todo" style={style}>
 			TODO-OWNER
+		</span>
+	);
+}
+
+/**
+ * K-2 (CL-10). The same rule for a note whose WORDS ARE the placeholder.
+ *
+ * `TodoOwner` above hides the MARKER in production, which is right when the
+ * sentence beside it is real copy the owner may still change. It is wrong when
+ * the "sentence" is itself the open question: `/new` shipped a visible line
+ * reading "Composer copy, length limits and posting rules" and three leaderboard
+ * footers ended "…settlements. Ranking formula", with only the badge hidden — so
+ * a visitor read the team's own to-do list as product copy. MEASURED on a
+ * db-mode production build before this: `span.mut.compose-note` on `/new` was
+ * 616x20, `display:block`, `visibility:visible`.
+ *
+ * Wrapping the placeholder WORDS (not the real sentence they sit beside) hides
+ * them together with the marker, and keeps the decision on the record exactly
+ * where `TodoOwner` keeps it: in the source, at the call site.
+ */
+export function TodoOwnerNote({ children, className }: { children: ReactNode; className?: string }) {
+	if (process.env.NODE_ENV === "production") return null;
+	return (
+		<span className={className}>
+			{children} <TodoOwner />
 		</span>
 	);
 }

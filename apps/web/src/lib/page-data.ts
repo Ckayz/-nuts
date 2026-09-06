@@ -25,6 +25,7 @@ import * as mock from "./view-data";
 import * as mockSource from "@/mock/data";
 import { attachLinkedPositions, enrichWithTradeLinks } from "./thesis/enrich";
 import { PUBLIC_THESIS_STATUSES } from "./data/constants";
+import { sumDecimals } from "./data/decimal";
 import { usingDatabase } from "./data/source";
 import { rankTheses } from "./social/ranking";
 
@@ -63,6 +64,26 @@ export interface LeaderboardEntry {
 	/** Whether the signed-in viewer already follows this creator. False in mock
 	 *  mode and for a signed-out visitor, who is routed to sign-in by the control. */
 	following: boolean;
+	/**
+	 * Owner decision 9 (2026-09-06): the SAME live P&L the list rows show, summed
+	 * over the rows this leaderboard already covers.
+	 *
+	 * `creator.netPnlUsd` is the stored-column aggregate the RANKING is built
+	 * from (`lib/data/reads.ts` `leaderboard`), and it is `—` for every trader
+	 * until the indexer has written an `estimated_pnl_usd` — so the rail printed
+	 * a column of dashes beside names whose own position pages printed a number
+	 * (fold-final-D §1 measured this and stopped for the owner's call).
+	 *
+	 * This is derived at the current spot through `lib/position/view.ts`
+	 * `listRowPnl`, exactly as a position row and a linked trade card are, over
+	 * `leaderboardPositions`' rows for this trader. Null — rendered "—" — only
+	 * when NOT ONE of those rows produced a figure, which is the honest result
+	 * when the feed is unreadable or nothing is derivable.
+	 *
+	 * The ranking is deliberately UNCHANGED. Re-basing the order on this number
+	 * is a product decision the owner has not made; decision 9 names the cell.
+	 */
+	livePnlUsd: View.DisplayAmount | null;
 }
 
 /**
@@ -84,8 +105,15 @@ export interface DiscoverData {
 	signedIn: boolean;
 	databaseMode: boolean;
 	leaderboard: LeaderboardEntry[];
-	following: View.Thesis[];
-	top: View.Thesis[];
+	/**
+	 * B-P3-1 (pass 3). Each audience carries its OWN three ranked lists, so the
+	 * feed renders `audience[ranking]` directly. These used to be one open-only
+	 * list each, which the tabs then intersected with the globally limited
+	 * ranking: a followed author's eligible post outside the global top N
+	 * disappeared, and Following/Top + Settled were always empty.
+	 */
+	following: RankedTheses;
+	top: RankedTheses;
 	ranked: RankedTheses;
 	yourPositions: View.Position[];
 }
@@ -98,6 +126,13 @@ export interface CreatorPageData {
 	following: boolean;
 	self: boolean;
 	creator: View.Creator;
+	/**
+	 * Owner decision 6 (2026-09-06): the stored profile bio, or null. Rendered
+	 * under the name and handle by `components/creator/creator-stats.tsx`; empty
+	 * and whitespace-only values render nothing. Mock mode has no bio column, so
+	 * the fixtures answer null.
+	 */
+	bio: string | null;
 	callouts: View.Thesis[];
 	positions: View.Participant[];
 	activity: View.ActivityItem[];
@@ -198,6 +233,27 @@ function rankFixtures(rows: readonly Domain.Thesis[], kind: "trending" | "ending
 	).map((entry) => entry.row);
 }
 
+/** The three rankings of one fixture cohort, in view shape. */
+async function rankedFixtures(rows: readonly Domain.Thesis[]): Promise<RankedTheses> {
+	return {
+		trending: await toPosts(rankFixtures(rows, "trending")),
+		ending: await toPosts(rankFixtures(rows, "ending")),
+		settled: await toPosts(rankFixtures(rows, "settled")),
+	};
+}
+
+/** One audience's three ranked lists, enriched and mapped, order untouched. */
+async function toRanked(
+	feed: { trending: Domain.Thesis[]; ending: Domain.Thesis[]; settled: Domain.Thesis[] },
+	withLinks: (rows: readonly Domain.Thesis[]) => Domain.Thesis[],
+): Promise<RankedTheses> {
+	return {
+		trending: await toPosts(withLinks(feed.trending)),
+		ending: await toPosts(withLinks(feed.ending)),
+		settled: await toPosts(withLinks(feed.settled)),
+	};
+}
+
 export async function discoverData(): Promise<DiscoverData> {
 	if (!usingDatabase()) {
 		const rows = mockPostsWithTradeLinks();
@@ -206,20 +262,21 @@ export async function discoverData(): Promise<DiscoverData> {
 			posts.map((post) => bySlug.get(post.slug) ?? post);
 		return {
 			signedIn: false, databaseMode: false,
-			following: await toPosts(cohort(mockSource.following)),
-			top: await toPosts(cohort(mockSource.top)),
-			// Mock mode has no viewer, so nobody is followed yet.
-			leaderboard: mock.leaderboard.map((creator) => ({ creator, following: false })),
-			ranked: {
-				trending: await toPosts(rankFixtures(rows, "trending")),
-				ending: await toPosts(rankFixtures(rows, "ending")),
-				settled: await toPosts(rankFixtures(rows, "settled")),
-			},
+			// Mock mode has no follow graph and no Top cohort rule, so both
+			// audiences are the fixtures ranked by the product's own rule,
+			// restricted to the fixture cohorts. TODO-OWNER, as before.
+			following: await rankedFixtures(cohort(mockSource.following)),
+			top: await rankedFixtures(cohort(mockSource.top)),
+			// Mock mode has no viewer, so nobody is followed yet. It also reads no
+			// order book, so there is no live spot to derive against: the fixtures
+			// keep their own recorded figure and the cell says so with a null.
+			leaderboard: mock.leaderboard.map((creator) => ({ creator, following: false, livePnlUsd: null })),
+			ranked: await rankedFixtures(rows),
 			yourPositions: mock.yourPositions,
 		};
 	}
 	await connection();
-	const { getPortfolio, leaderboard, trending, endingSoon, settled, listPositionsByIds } =
+	const { getPortfolio, leaderboard, leaderboardPositions, trending, endingSoon, settled, listPositionsByIds } =
 		await import("./data/reads");
 	const { following, top } = await import("./social/feeds");
 	const signedIn = await viewer();
@@ -228,7 +285,7 @@ export async function discoverData(): Promise<DiscoverData> {
 	// the positions behind them. A post that links nothing costs nothing, and the
 	// three rankings plus the two cohorts are enriched in ONE lookup because they
 	// are overlapping views of the same posts.
-	const [trendingRows, endingRows, settledRows, followingRows, topRows] = await Promise.all([
+	const [trendingRows, endingRows, settledRows, followingFeed, topFeed] = await Promise.all([
 		trending(options),
 		endingSoon(options),
 		settled(options),
@@ -238,7 +295,11 @@ export async function discoverData(): Promise<DiscoverData> {
 	const enriched = new Map(
 		(
 			await enrichWithTradeLinks(
-				[...trendingRows, ...endingRows, ...settledRows, ...followingRows, ...topRows].filter(
+				[
+					...trendingRows, ...endingRows, ...settledRows,
+					...followingFeed.trending, ...followingFeed.ending, ...followingFeed.settled,
+					...topFeed.trending, ...topFeed.ending, ...topFeed.settled,
+				].filter(
 					(row, index, all) => all.findIndex((other) => other.id === row.id) === index,
 				),
 				(ids) => listPositionsByIds(ids),
@@ -250,14 +311,23 @@ export async function discoverData(): Promise<DiscoverData> {
 	const positions = signedIn === null ? [] : await getPortfolio(signedIn.walletAddress);
 	// TODO-OWNER: provisional social/ranking.ts formulas; UI notes retained.
 	const ranked = await leaderboard({ ...options, window: "1W" });
+	// Owner decision 9: the rows behind each listed trader's total, so the cell
+	// can print the same live figure the list rows print. The ranking above is
+	// untouched.
+	const rankedRows = await leaderboardPositions(ranked.map((row) => row.id), { ...options, window: "1W" });
+	// ONE price book for the whole page: the viewer's own portfolio rows AND
+	// every leaderboard row are priced from a single `livePriceBook`, which
+	// itself reads the cached order snapshot once.
+	const live = await rowPnl([...positions, ...[...rankedRows.values()].flat()]);
 	return {
 		signedIn: signedIn !== null, databaseMode: true,
 		leaderboard: ranked.map((row) => ({
 			creator: display.creator(row),
 			following: row.followingByViewer,
+			livePnlUsd: liveLeaderboardPnl(rankedRows.get(row.id.toLowerCase()) ?? [], live),
 		})),
-		following: await toPosts(withLinks(followingRows)),
-		top: await toPosts(withLinks(topRows)),
+		following: await toRanked(followingFeed, withLinks),
+		top: await toRanked(topFeed, withLinks),
 		ranked: {
 			trending: await toPosts(withLinks(trendingRows)),
 			ending: await toPosts(withLinks(endingRows)),
@@ -265,11 +335,27 @@ export async function discoverData(): Promise<DiscoverData> {
 		},
 		// `getPortfolio` already applies the single fill-status rule, so nothing
 		// is filtered by status a second time here.
-		yourPositions: await (async () => {
-			const live = await rowPnl(positions);
-			return positions.map((row) => display.position(row, new Date(), live(row))).filter(isOpen);
-		})(),
+		yourPositions: positions.map((row) => display.position(row, new Date(), live(row))).filter(isOpen),
 	};
+}
+
+/**
+ * Owner decision 9 (2026-09-06). One trader's leaderboard cell: the sum of the
+ * SAME per-row live P&L the list rows print, over the rows the leaderboard
+ * already covers.
+ *
+ * A row the risk model cannot value is SKIPPED rather than counted as zero — a
+ * missing figure is not a flat one. Null when not one row produced a figure, so
+ * the cell says "—" instead of "+$0".
+ */
+function liveLeaderboardPnl(
+	rows: readonly Domain.Position[],
+	live: (row: Domain.Position) => { derivedPnlUsd: string | null },
+): View.DisplayAmount | null {
+	const figures = rows
+		.map((row) => live(row).derivedPnlUsd)
+		.filter((value): value is string => value !== null);
+	return figures.length === 0 ? null : display.amount(sumDecimals(figures));
 }
 
 /**
@@ -407,6 +493,8 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		return {
 			signedIn: false, databaseMode: false, following: false, self: false, isOwner: false,
 			creator,
+			// The fixtures carry no bio; null is the honest answer, never "".
+			bio: null,
 			callouts: await toPosts(mockSource.theses.filter((post) => post.creator.handle === handle)),
 			positions: mock.participantsByCreator(handle),
 			activity: mock.activityByCreator(handle),
@@ -424,6 +512,7 @@ export async function creatorPageData(handle: string): Promise<CreatorPageData |
 		signedIn: signedIn !== null, databaseMode: true, self: signedIn?.userId === profile.creator.id,
 		following: (await getFollowState(signedIn?.userId ?? null, profile.creator.id)).following,
 		creator: display.creator(profile.creator),
+		bio: profile.bio,
 		callouts: await toPosts(await enrichWithTradeLinks(profile.theses.filter((thesis) => renderableStatus(thesis.thesis.status)), listPositionsByIds, await siteOrigins())),
 		positions: await (async () => {
 			const live = await rowPnl(profile.positions);

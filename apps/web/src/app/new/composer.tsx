@@ -13,7 +13,7 @@
  */
 import { useActionState, useState } from "react";
 import { Textarea } from "@nuts/ui/components/textarea";
-import { Avatar, TodoOwner } from "@/components/primitives";
+import { Avatar, TodoOwner, TodoOwnerNote } from "@/components/primitives";
 import { TradeCards } from "@/components/feed/trade-card";
 import type { PnlCard } from "@/lib/display-types";
 import type { AssetTag } from "@/lib/thesis/composer-data";
@@ -92,9 +92,9 @@ export function Composer({
 					required
 					className="compose-input"
 				/>
-				<span className="mut compose-note">
-					Composer copy, length limits and posting rules <TodoOwner />
-				</span>
+				{/* K-2 (CL-10): these WORDS are the placeholder, so they are hidden
+				    whole in production, not just the badge beside them. */}
+				<TodoOwnerNote className="mut compose-note">Composer copy, length limits and posting rules</TodoOwnerNote>
 			</div>
 
 			<div className="field">

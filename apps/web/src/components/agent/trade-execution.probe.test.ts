@@ -211,6 +211,37 @@ function approveTrade(over: { calldataAmount?: bigint; printedAmount?: string; a
 	};
 }
 
+/**
+ * C-4 (lane C pass 3). The server's answer now decides whether an approval leg
+ * happens at all: the card asks BEFORE it broadcasts, and `prepareTradeFor`
+ * returns `stage: "approve"` only while the on-chain allowance is short. So a
+ * probe that wants to exercise the approval leg has to say so — a stub that
+ * answers `stage: "fill"` is a wallet whose allowance already covers the fill,
+ * and skipping the approval there is the fix, not a regression.
+ */
+function serverNeedsApproval(amount = 5_000_000n): void {
+	const first = replies.agentPrepare;
+	let leg = 0;
+	replies.agentPrepare = async () => {
+		leg += 1;
+		if (leg > 1) return await first();
+		return {
+			ok: true,
+			stage: "approve",
+			approve: { to: USDC as `0x${string}`, data: approveData(BOOK, amount) as `0x${string}`, value: "0" as const },
+			allowance: {
+				amount: amount.toString(),
+				spender: BOOK,
+				tokenAddress: USDC,
+				tokenSymbol: "USDC",
+				tokenDecimals: 6,
+			},
+			expected: { ...RAW, debit: amount.toString() },
+			note: "",
+		};
+	};
+}
+
 describe("C#5: the approval card shows what the approval will allow, and cannot send more", () => {
 	test("APPROVE_BEFORE_GATE — calldata that allows 20 USDC under a 5 USDC card sends NOTHING", async () => {
 		reset();
@@ -251,11 +282,14 @@ describe("C#5: the approval card shows what the approval will allow, and cannot 
 			preparedAt: new Date().toISOString(),
 			note: "",
 		});
+		// C-4: the server is asked FIRST, and here it says the allowance is short.
+		serverNeedsApproval();
 		const h = mount(TradeExecution, { trade: approveTrade() });
 		press(h);
 		await h.settle();
 		expect(calls.sends.map((s) => s.to)).toEqual([USDC, BOOK]);
-		expect(calls.agentPrepares).toBe(1);
+		// C-4: two round trips now — the pre-approval fence, then the fill leg.
+		expect(calls.agentPrepares).toBe(2);
 	});
 });
 
@@ -390,13 +424,26 @@ describe("C#8: fill calldata is never broadcast past PRD 14's 30-second window",
  */
 describe("C-R1: a second mounted card must not send a second fill", () => {
 	/**
-	 * `prepareTradeFor`'s own rule, modelled: while the wallet holds a `pending`
-	 * row (written by `recordTrade`), preparation is refused with
-	 * `UNRECORDED_FILL` (`lib/trade/prepare.ts:84`).
+	 * K-1 (pass-4 lane C BLOCKER-1). `prepareTradeFor`'s rule, modelled
+	 * FAITHFULLY.
+	 *
+	 * It used to be `calls.records.length > 0` — the CLIENT's mock of
+	 * `recordTrade` pushes that array (`src/test/trade-mocks.ts`), so it counted
+	 * the browser having ATTEMPTED the call. `NO_STORAGE_REMOUNT` then set
+	 * `replies.record` to `{ok:false, code:"LOST"}` — a request that by its own
+	 * name never arrived — and had the server refuse BECAUSE it arrived. The
+	 * check was self-fulfilling in exactly the case it is named for.
+	 *
+	 * The real server has two kinds of evidence, and neither is the browser's:
+	 *  - the CHAIN: every broadcast the wallet answered for is an `OrderFilled`
+	 *    log (`lib/trade/chain-fills.ts`);
+	 *  - its own `positions` rows, written only when the `recordTrade` handler
+	 *    RAN and succeeded (`lib/trade/record.ts`).
+	 * A fill on the chain with no row of its own refuses the preparation.
 	 */
 	function serverWithUnrecordedFence(): void {
 		replies.agentPrepare = async () => {
-			if (calls.records.length > 0) {
+			if (calls.broadcast.some((hash) => !calls.recorded.includes(hash))) {
 				return { ok: false, code: "UNRECORDED_FILL", reason: "Your last fill is not recorded yet." };
 			}
 			return {
@@ -514,6 +561,36 @@ describe("C-R1: a second mounted card must not send a second fill", () => {
 			sends: ["0xFRESH"],
 		});
 	});
+
+	/**
+	 * K-1. The other half of the fence, and the half that tells a FAITHFUL server
+	 * model from the old `calls.records.length > 0` one: a fill that WAS recorded
+	 * releases the ticket. Both models refuse after a lost recording; only the
+	 * client-evidence model keeps refusing after a successful one, because it
+	 * counts the attempt rather than the row.
+	 */
+	test("a fill whose recording SUCCEEDED releases the fence, and the next card trades", async () => {
+		reset();
+		serverWithUnrecordedFence();
+		const first = mount(TradeExecution, { trade: fillTrade() });
+		press(first);
+		await first.settle();
+		const afterFirst = {
+			sends: calls.sends.length,
+			broadcast: calls.broadcast.length,
+			recorded: calls.recorded.length,
+		};
+
+		first.unmount();
+		const second = mount(TradeExecution, { trade: fillTrade() });
+		press(second);
+		await second.settle();
+
+		expect({ afterFirst, afterSecond: { sends: calls.sends.length, prepares: calls.agentPrepares } }).toEqual({
+			afterFirst: { sends: 1, broadcast: 1, recorded: 1 },
+			afterSecond: { sends: 2, prepares: 2 },
+		});
+	});
 });
 
 /**
@@ -524,6 +601,7 @@ describe("C-R1: a second mounted card must not send a second fill", () => {
 describe("M5: the agent card stops waiting for an approval and says so", () => {
 	test("a receipt that never arrives ends in a usable card with one sentence", async () => {
 		reset();
+		serverNeedsApproval();
 		neverLandingReceipt();
 		const h = mount(TradeExecution, { trade: approveTrade() });
 		press(h);
@@ -535,11 +613,12 @@ describe("M5: the agent card stops waiting for an approval and says so", () => {
 			prepares: calls.agentPrepares,
 			says: h.text().includes("has not confirmed on Base yet"),
 			claimsFailure: h.text().includes("did not succeed"),
-		}).toEqual({ disabled: false, sends: 1, prepares: 0, says: true, claimsFailure: false });
+		}).toEqual({ disabled: false, sends: 1, prepares: 1, says: true, claimsFailure: false });
 	});
 
 	test("a REVERTED approval still reads as a failure", async () => {
 		reset();
+		serverNeedsApproval();
 		replies.receiptStatus = "reverted";
 		const h = mount(TradeExecution, { trade: approveTrade() });
 		press(h);
@@ -561,9 +640,10 @@ describe("M5: the agent card stops waiting for an approval and says so", () => {
  * to this component.
  */
 describe("C-P2-1: a second TAB cannot bypass the server's unrecorded-fill fence", () => {
+	/** K-1. The same faithful model as above: chain evidence minus recorded rows. */
 	function serverFence(): void {
 		replies.agentPrepare = async () => {
-			if (calls.records.length > 0) {
+			if (calls.broadcast.some((hash) => !calls.recorded.includes(hash))) {
 				return { ok: false, code: "UNRECORDED_FILL", reason: "Your last fill is not recorded yet." };
 			}
 			return {
@@ -629,5 +709,139 @@ describe("C-P2-1: a second TAB cannot bypass the server's unrecorded-fill fence"
 		} finally {
 			restore();
 		}
+	});
+});
+
+/**
+ * C-4 (lane C pass 3, MINOR). The approval branch broadcast BEFORE the server
+ * was asked anything. Its only pre-approval check was `sessionStorage`, which is
+ * per browsing context, so a card in a second tab (or a private window, or a
+ * browser with site data blocked) spent approval gas while this wallet already
+ * had an unrecorded fill on chain. The reviewer's measurement on the unfixed
+ * component, `prepareAgentTrade` returning `UNRECORDED_FILL`:
+ *
+ *   {"stage":"fill","sends":0,"prepares":1,"data":[],"message":true}
+ *   {"stage":"approve","sends":1,"prepares":1,"data":["0x095ea7b3"],"message":true}
+ *
+ * `prepareTradeFor` runs `findUnrecordedFill` FIRST (`lib/trade/prepare.ts:84`),
+ * so one round trip before the approval is the whole fix — and it is the shape
+ * the market ticket already had (`take-a-side.tsx`: prepare, then approve).
+ */
+describe("C-4: nothing is broadcast before the server's unrecorded-fill fence", () => {
+	function refusesWithUnrecordedFill(): void {
+		replies.agentPrepare = async () => ({
+			ok: false,
+			code: "UNRECORDED_FILL",
+			reason: "Your last fill is not recorded yet.",
+		});
+	}
+
+	test("UNRECORDED_FILL — zero sends at BOTH stages, one round trip each", async () => {
+		const measured: Array<Record<string, unknown>> = [];
+		for (const trade of [fillTrade(), approveTrade()]) {
+			reset();
+			refusesWithUnrecordedFill();
+			const h = mount(TradeExecution, { trade });
+			press(h);
+			await h.settle();
+			measured.push({
+				stage: trade.stage,
+				sends: calls.sends.length,
+				prepares: calls.agentPrepares,
+				data: calls.sends.map((s) => s.data.slice(0, 10)),
+				says: h.text().includes("not recorded yet"),
+			});
+		}
+		expect(measured).toEqual([
+			{ stage: "fill", sends: 0, prepares: 1, data: [], says: true },
+			{ stage: "approve", sends: 0, prepares: 1, data: [], says: true },
+		]);
+	});
+
+	test("a card whose STORE is empty still cannot approve past the server", async () => {
+		// The exact context the local hold cannot see: a second tab, private
+		// browsing, or site data blocked.
+		reset();
+		refusesWithUnrecordedFill();
+		const real = (globalThis as { sessionStorage?: unknown }).sessionStorage;
+		(globalThis as { sessionStorage?: unknown }).sessionStorage = undefined;
+		try {
+			const h = mount(TradeExecution, { trade: approveTrade() });
+			press(h);
+			await h.settle();
+			expect({ sends: calls.sends.length, prepares: calls.agentPrepares }).toEqual({ sends: 0, prepares: 1 });
+		} finally {
+			(globalThis as { sessionStorage?: unknown }).sessionStorage = real;
+		}
+	});
+
+	test("when the allowance already covers the fill, the approval is skipped entirely", async () => {
+		// The server's answer is authoritative: it says `fill`, so there is nothing
+		// to approve and no gas is spent on one.
+		reset();
+		const h = mount(TradeExecution, { trade: approveTrade() });
+		press(h);
+		await h.settle();
+		expect(calls.sends.map((s) => s.to)).toEqual([BOOK]);
+	});
+
+	test("the FRESH approval is what gets signed, and only if it equals the printed allowance", async () => {
+		reset();
+		// The server re-prepares and the price has moved: its approval allows 20
+		// USDC while this card printed 5. Nothing is sent.
+		replies.agentPrepare = async () => ({
+			ok: true,
+			stage: "approve",
+			approve: { to: USDC as `0x${string}`, data: approveData(BOOK, 20_000_000n) as `0x${string}`, value: "0" as const },
+			allowance: { amount: "20000000", spender: BOOK, tokenAddress: USDC, tokenSymbol: "USDC", tokenDecimals: 6 },
+			expected: { ...RAW, debit: "20000000" },
+			note: "",
+		});
+		const h = mount(TradeExecution, { trade: approveTrade({ printedAmount: "5000000" }) });
+		press(h);
+		await h.settle();
+		expect({ sends: calls.sends, prepares: calls.agentPrepares }).toEqual({ sends: [], prepares: 1 });
+		expect(h.text()).toContain("this fill needs exactly 5000000");
+	});
+
+	test("an unchanged approval IS sent — with the server's own fresh bytes", async () => {
+		reset();
+		let leg = 0;
+		replies.agentPrepare = async () => {
+			leg += 1;
+			if (leg === 1) {
+				return {
+					ok: true,
+					stage: "approve",
+					approve: {
+						to: USDC as `0x${string}`,
+						data: approveData(BOOK, 5_000_000n) as `0x${string}`,
+						value: "0" as const,
+					},
+					allowance: { amount: "5000000", spender: BOOK, tokenAddress: USDC, tokenSymbol: "USDC", tokenDecimals: 6 },
+					expected: { ...RAW, debit: "5000000" },
+					note: "",
+				};
+			}
+			return {
+				ok: true,
+				stage: "fill",
+				fill: { to: BOOK as `0x${string}`, data: "0xFRESH" as const, value: "0" as const },
+				token: "tok2",
+				thesisId: null,
+				expected: RAW,
+				signatureExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+				preparedAt: new Date().toISOString(),
+				note: "",
+			};
+		};
+		const h = mount(TradeExecution, { trade: approveTrade({ printedAmount: "5000000" }) });
+		press(h);
+		await h.settle();
+		expect({ to: calls.sends.map((s) => s.to), data: calls.sends.map((s) => s.data), prepares: calls.agentPrepares }).toEqual({
+			to: [USDC, BOOK],
+			data: [approveData(BOOK, 5_000_000n), "0xFRESH"],
+			prepares: 2,
+		});
 	});
 });

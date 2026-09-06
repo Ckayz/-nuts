@@ -222,30 +222,15 @@ export function positionInstrument(snapshot: OrderSnapshotLike): PositionInstrum
 }
 
 /**
- * Which way a position is betting: the market direction, not whose side of a
- * thesis it is.
+ * D-R3-1 / C-1 (pass 3). The market-direction rule MOVED to
+ * `./lifecycle.ts` and is re-exported here so every existing import keeps
+ * working.
  *
- * These are two different facts and conflating them was a real defect. A
- * `PositionSide` is "back" or "counter" — did you back the author's thesis, or
- * take the other side of it. That says nothing about the market: BACKING a BEAR
- * thesis is a bear position. `lib/display.ts` printed `side === "back"` as
- * "Bull", so every position card read Bull, bear positions included.
- *
- * The market direction is a property of the OPTION, and it is standard options
- * semantics:
- *
- *   buy a call   long upside          bull
- *   sell a put   short downside       bull   (you are paid to accept the strike)
- *   buy a put    long downside        bear
- *   sell a call  short upside         bear
- *
- * `takerSide` is already the MEASURED taker side from `measuredTakerSide()`,
- * which is derived from the maker's `isLong` flag against chain bytes — see
- * `lib/market/taker-side.ts`. This function only reads it; it does not re-derive
- * the side, so the chain-verified rule stays in one place.
+ * It had to move because `lib/display.ts` — which client components import —
+ * needs it, and THIS file imports `@thetanuts-finance/thetanuts-client`, whose
+ * bundle reaches for `fs/promises` (`lib/display-bundle.test.ts` is the guard).
+ * A list row therefore could not read the same rule the position page reads, so
+ * it kept mapping `side === "back"` to "Bull" and the same position rendered
+ * Bull in a list and Bear on its own page.
  */
-export function marketDirection(option: { readonly isCall: boolean; readonly takerSide: "buy" | "sell" }): "bull" | "bear" {
-	const longTheOption = option.takerSide === "buy";
-	// buy call / sell put are bullish; buy put / sell call are bearish.
-	return option.isCall === longTheOption ? "bull" : "bear";
-}
+export { marketDirection, positionDirection } from "./lifecycle";

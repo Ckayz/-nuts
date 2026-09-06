@@ -16,14 +16,39 @@ export const USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 export const HASH = `0x${"1".repeat(64)}` as const;
 
 export interface Calls {
-	quotes: Array<{ side: string; budgetInput: string }>;
-	prepares: Array<{ side: string; budgetInput: string }>;
+	quotes: Array<{ structureId?: string; side: string; budgetInput: string; taker?: string }>;
+	/** I-1: `taker` is the side of the BOOK the ticket resolved for its button. */
+	prepares: Array<{ side: string; budgetInput: string; taker?: string }>;
 	agentPrepares: number;
 	sends: Array<{ to: string; data: string }>;
 	records: Array<{ token: string; txHash: string }>;
+	/**
+	 * K-1 (pass-4 lane C BLOCKER-1). The two facts a SERVER-side fence could
+	 * actually see, kept apart from the two above, which are what the BROWSER
+	 * did.
+	 *
+	 * `broadcast` — hashes the wallet ANSWERED for, i.e. what is on chain and
+	 * therefore in `OrderFilled` logs (`lib/trade/chain-fills.ts`).
+	 * `recorded` — hashes whose `recordTrade` call REACHED the server and came
+	 * back `ok`, i.e. what has a `positions` row (`lib/trade/record.ts`).
+	 *
+	 * `records` counts the browser having ATTEMPTED the call, which is not
+	 * evidence of anything server-side: a probe that fenced on it passed
+	 * vacuously in exactly the lost-request case it was named for.
+	 */
+	broadcast: string[];
+	recorded: string[];
 }
 
-export const calls: Calls = { quotes: [], prepares: [], agentPrepares: 0, sends: [], records: [] };
+export const calls: Calls = {
+	quotes: [],
+	prepares: [],
+	agentPrepares: 0,
+	sends: [],
+	records: [],
+	broadcast: [],
+	recorded: [],
+};
 
 /** M5. What the mocked `waitForTransactionReceipt` answers, given its parameters. */
 export type ReceiptReply = (params: {
@@ -82,6 +107,8 @@ export function resetTradeMocks(): void {
 	calls.agentPrepares = 0;
 	calls.sends = [];
 	calls.records = [];
+	calls.broadcast = [];
+	calls.recorded = [];
 	replies.receiptStatus = "success";
 	replies.receipt = async () => ({ status: replies.receiptStatus });
 	replies.connection = { address: WALLET, isConnected: true, chainId: 8453 };
@@ -108,9 +135,13 @@ mock.module("wagmi", () => ({
 	useConfig: () => ({}),
 	useConnection: () => replies.connection,
 	useSendTransaction: () => ({
-		mutateAsync: (input: { to: string; data: string }) => {
+		mutateAsync: async (input: { to: string; data: string }) => {
 			calls.sends.push({ to: input.to, data: input.data });
-			return replies.send(input);
+			const hash = await replies.send(input);
+			// K-1. Recorded only after the wallet ANSWERED: a broadcast that threw
+			// put nothing on chain, so no log would exist for it either.
+			calls.broadcast.push(hash);
+			return hash;
 		},
 	}),
 	useSwitchChain: () => ({ switchChain: () => {}, isPending: false }),
@@ -138,17 +169,21 @@ export function neverLandingReceipt(): void {
 }
 
 mock.module("@/lib/trade/actions", () => ({
-	quoteTicket: (input: { side: string; budgetInput: string }) => {
+	quoteTicket: (input: { structureId?: string; side: string; budgetInput: string; taker?: string }) => {
 		calls.quotes.push(input);
 		return replies.quote(input);
 	},
-	prepareTrade: (input: { side: string; budgetInput: string }) => {
-		calls.prepares.push({ side: input.side, budgetInput: input.budgetInput });
+	prepareTrade: (input: { side: string; budgetInput: string; taker?: string }) => {
+		calls.prepares.push({ side: input.side, budgetInput: input.budgetInput, taker: input.taker });
 		return replies.prepare(input);
 	},
-	recordTrade: (input: { token: string; txHash: string }) => {
+	recordTrade: async (input: { token: string; txHash: string }) => {
 		calls.records.push(input);
-		return replies.record(input);
+		const result = await replies.record(input);
+		// K-1. A row exists only when the handler RAN and succeeded. An `ok:false`
+		// answer the client invented for a request that never arrived is not one.
+		if (result.ok) calls.recorded.push(input.txHash);
+		return result;
 	},
 }));
 

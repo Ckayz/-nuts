@@ -68,6 +68,24 @@ export function orderImpliedVol(order: unknown): number | null {
  * The median implied vol across a set of orders, as a fraction (0.385 = 38.5%).
  * Null when no order carries a usable one — the tile then shows nothing rather
  * than a zero that would read as "this market has no volatility".
+ *
+ * D-R3-3 (Astra lane D, pass 3). Two product choices live in this one line and
+ * NEITHER is the owner's:
+ *
+ *   TODO-OWNER: the COHORT. The caller passes every live order for the asset —
+ *   every strike and every expiry together. An option's implied vol is a
+ *   property of a STRIKE and an EXPIRY, not of an asset: a one-week 20%-out put
+ *   and a three-month at-the-money call quote different numbers for the same
+ *   asset, and this mixes them. A market-wide figure normally names its cohort
+ *   (at-the-money, a fixed tenor, the front expiry).
+ *
+ *   TODO-OWNER: the STATISTIC. The median of the quoted ivs, unweighted: an
+ *   asset with forty thin far-dated orders and two large near-dated ones is
+ *   described by the forty. Size-, delta- or expiry-weighting are all defensible
+ *   and all say something different.
+ *
+ * Neither is changed here — a formula nobody approved must not be replaced by a
+ * second formula nobody approved. The tile that prints it carries the marker.
  */
 export function medianImpliedVol(orders: readonly unknown[]): number | null {
 	const values: number[] = [];

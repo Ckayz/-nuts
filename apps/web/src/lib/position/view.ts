@@ -18,7 +18,7 @@ import type * as Domain from "@/types";
 import type * as View from "@/lib/display-types";
 import { amount, expiryLabel, marketSlug, percentLabel, pnlCard, quantity, strikeSide, strikesLabel, tx } from "@/lib/display";
 import { decimalFromBaseUnits } from "@/lib/data/decimal";
-import { STRIKE_DECIMALS, type PositionInstrument, marketDirection } from "./instrument";
+import { STRIKE_DECIMALS, type PositionInstrument } from "./instrument";
 import type { LivePriceBook, PositionPageDetail } from "./types";
 import {
 	USD_DECIMALS,
@@ -27,6 +27,7 @@ import {
 	derivedRisk,
 	derivePnlAtSpot,
 	lifecycleStatus,
+	positionDirection,
 	resolvePnl,
 } from "./pnl";
 
@@ -264,7 +265,7 @@ export function positionPage(input: PositionViewInput): View.PositionPage {
 		// "back"/"counter" — whose side of a thesis this is — and says nothing
 		// about which way the position bets. Null when the order snapshot could
 		// not be decoded, which prints no direction rather than a wrong one.
-		direction: instrument === null ? null : marketDirection(instrument),
+		direction: positionDirection(instrument),
 		pnl: { usd: pnl.pnlUsd, detail: pnl.detail, basis: pnl.basis },
 		entryLabel,
 		entryUsd,

@@ -55,7 +55,7 @@ export function StructuresList({
 							<th className="r">Premium / ct</th>
 							<th className="r">Max payout</th>
 							<th className="r">Liquidity left</th>
-							<th>
+							<th className="sel-col">
 								<span className="sr-only">Select</span>
 							</th>
 						</tr>
@@ -65,11 +65,11 @@ export function StructuresList({
 							<tr aria-selected={row.selected} key={row.id}>
 								<td className="num mut">{row.expiryLabel}</td>
 								<td className="struct">{row.productType}</td>
-								<td className="num mut">{row.strikesLabel}</td>
+								<td className="num mut strikes">{row.strikesLabel}</td>
 								<td className="r num">{usd2(row.premiumPerContractUsd)}</td>
 								<td className="r num">{row.maxPayoutLabel}</td>
 								<td className="r num">{usd(row.liquidityLeftUsd)}</td>
-								<td className="r">
+								<td className="r sel-col">
 									{row.selected ? (
 										<button type="button" className="sel-btn" aria-pressed="true">
 											Selected

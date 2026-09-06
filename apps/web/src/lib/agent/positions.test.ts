@@ -34,7 +34,7 @@ import { positionInstrument } from "@/lib/position/instrument";
 import { decimalFromUsd8, derivePnlAtSpot, derivedRisk } from "@/lib/position/pnl";
 import type { LivePriceBook } from "@/lib/position/types";
 import { listRowPnl } from "@/lib/position/view";
-import { createPositionTools, fillDerivationInputs, positionSummary } from "./positions";
+import { createPositionTools, fillDerivationInputs, positionSummary, rfqOptionsFor } from "./positions";
 
 const CTX = { toolCallId: "test", messages: [], context: {} } as never;
 
@@ -484,5 +484,83 @@ describe("a hypothetical fill refuses what it cannot justify, and names the piec
 				raw: USDC_FILL,
 			}).inputs,
 		).toBeNull();
+	});
+});
+
+/* ------------------------------------------------------------------ *
+ * 4. Options an RFQ settled into.
+ *
+ * They have no `positions` row: an RFQ mints its option at SETTLEMENT, by
+ * whoever sends `settleQuotation`, so this app never saw a fill for one. The
+ * Thetanuts indexer lists them and that is all that can be said, which is why
+ * every figure is absent rather than estimated.
+ * ------------------------------------------------------------------ */
+
+describe("rfqOptionsFor", () => {
+	/** `StateOption` as the indexer publishes it (`dist/index.d.ts:1101`). */
+	const indexed = [
+		{
+			address: "0x4444444444444444444444444444444444444444",
+			quotationId: "4242",
+			collateral: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+			strikes: ["230000000000"],
+			expiry: 1_789_113_600,
+			optionType: 3,
+		},
+	];
+
+	test("maps the indexer's rows and never invents a P&L for one", async () => {
+		const { options, note } = await rfqOptionsFor("0x1111111111111111111111111111111111111111", {
+			api: { getUserOptionsFromRfq: async () => indexed },
+		});
+		expect(options).toEqual([
+			{
+				optionAddress: indexed[0]!.address,
+				quotationId: "4242",
+				strikesUsd: ["2300"],
+				expiryAt: "2026-09-11T08:00:00.000Z",
+				optionType: 3,
+				collateralAddress: indexed[0]!.collateral,
+				basis: "indexer",
+				note: expect.stringContaining("no premium, no maximum loss and no profit or loss figure"),
+			},
+		]);
+		expect(String(note)).toContain("minted at settlement");
+		// No P&L field of any kind reaches the model for these.
+		const text = JSON.stringify(options);
+		expect(text).not.toContain("pnl");
+		expect(text).not.toContain("maxLoss");
+	});
+
+	test("an empty list is an empty list, with no note to repeat", async () => {
+		const { options, note } = await rfqOptionsFor("0x1111111111111111111111111111111111111111", {
+			api: { getUserOptionsFromRfq: async () => [] },
+		});
+		expect(options).toEqual([]);
+		expect(note).toBeNull();
+	});
+
+	/**
+	 * "You have none" and "we could not look" are different answers, and only one
+	 * of them is ever true. Mutant: `catch { return { options: [], note: null } }`.
+	 */
+	test("an unreadable indexer returns null, not an empty list", async () => {
+		const { options, note } = await rfqOptionsFor("0x1111111111111111111111111111111111111111", {
+			api: {
+				getUserOptionsFromRfq: async () => {
+					throw new Error("indexer down");
+				},
+			},
+		});
+		expect(options).toBeNull();
+		expect(String(note)).toContain("Do not say they have none");
+	});
+
+	test("the answer is bounded", async () => {
+		const many = Array.from({ length: 40 }, (_value, index) => ({ ...indexed[0]!, quotationId: String(index) }));
+		const { options } = await rfqOptionsFor("0x1111111111111111111111111111111111111111", {
+			api: { getUserOptionsFromRfq: async () => many },
+		});
+		expect(options?.length).toBe(10);
 	});
 });

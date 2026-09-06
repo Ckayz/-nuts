@@ -137,7 +137,7 @@ export interface RfqToolsParams {
 }
 
 /** Two decimal strings naming the same number: "2450" and "2450.00" are one strike. */
-function sameDecimal(left: string, right: string): boolean {
+export function sameDecimal(left: string, right: string): boolean {
 	const canonical = (value: string): string => {
 		const [whole = "0", fraction = ""] = value.trim().split(".");
 		const trimmed = fraction.replace(/0+$/, "");
@@ -168,11 +168,142 @@ function decimalOf(value: number, places: number): string | null {
  * Rounded UP to the USDC unit: a reserve price is a CEILING on what the buyer
  * pays, so rounding it down would price the request under the ask it came from.
  */
-function reserveFromMmPrice(mmPrice: number, spot: number): string | null {
+export function reserveFromMmPrice(mmPrice: number, spot: number): string | null {
 	if (!Number.isFinite(mmPrice) || !Number.isFinite(spot) || mmPrice <= 0 || spot <= 0) return null;
 	const units = Math.ceil(mmPrice * spot * 1_000_000);
 	if (!Number.isSafeInteger(units) || units <= 0) return null;
 	return decimalFromBaseUnits(String(units), 6);
+}
+
+/** The market-maker rows this matcher reads. `MMVanillaPricing` satisfies it. */
+export interface VanillaPutRow {
+	readonly ticker: string;
+	readonly strike: number;
+	readonly expiry: number;
+	readonly isCall: boolean;
+}
+
+/**
+ * The vanilla PUT the surface lists for a strike and an expiry, or the nearest
+ * ones when it lists none.
+ *
+ * MEASURED on the live surface 2026-09-06: tickers read `ETH-6SEP26-2460-P` and
+ * `expiry` is unix SECONDS at 08:00 UTC (1788681600 = 2026-09-06T08:00:00Z).
+ * People say dates, not 08:00 instants, so a request whose instant falls on the
+ * same UTC day as a listed expiry is matched and LABELLED `same_utc_day` —
+ * never silently rounded into an `exact`.
+ * TODO-OWNER: whether the same-day match should be offered at all.
+ *
+ * The strike must match EXACTLY as a decimal ("2450" and "2450.00000000" are one
+ * strike; "2450.1" and "2450.01" are not). No tolerance, no nearest-strike
+ * substitution: the alternatives are RETURNED for the user to choose, never
+ * chosen for them.
+ */
+export function matchVanillaPut<Row extends VanillaPutRow>(
+	rows: readonly Row[],
+	want: { strikeUsd: string; expiry: number },
+): {
+	match: Row | null;
+	expiryMatch: "exact" | "same_utc_day";
+	nearest: { ticker: string; strikeUsd: string | null; expiryAt: string }[];
+} {
+	const puts = rows.filter((row) => row.isCall === false);
+	const sameStrike = puts.filter((row) => sameDecimal(String(row.strike), want.strikeUsd));
+	const exact = sameStrike.find((row) => row.expiry === want.expiry) ?? null;
+	const utcDay = (seconds: number) => Math.floor(seconds / 86_400);
+	const sameDay = exact ?? sameStrike.find((row) => utcDay(row.expiry) === utcDay(want.expiry)) ?? null;
+	if (sameDay !== null) {
+		return { match: sameDay, expiryMatch: exact === null ? "same_utc_day" : "exact", nearest: [] };
+	}
+	const wantedStrike = Number(want.strikeUsd);
+	const nearest = [...puts]
+		.sort(
+			(left, right) =>
+				Math.abs(left.expiry - want.expiry) - Math.abs(right.expiry - want.expiry) ||
+				Math.abs(left.strike - wantedStrike) - Math.abs(right.strike - wantedStrike),
+		)
+		.slice(0, 5)
+		.map((row) => ({
+			ticker: row.ticker,
+			strikeUsd: decimalOf(row.strike, 8),
+			expiryAt: new Date(row.expiry * 1000).toISOString(),
+		}));
+	return { match: null, expiryMatch: "exact", nearest };
+}
+
+/** The request the card re-prepares from. `expiry` is `rfq-contract.ts`'s name for `expiryAt`. */
+export interface RfqCreateRequestEcho {
+	readonly underlying: "ETH" | "BTC";
+	readonly strikesUsd: string[];
+	readonly expiry: string;
+	readonly numContracts: string;
+	readonly reservePricePerContract: string;
+	readonly offerDeadlineMinutes: number;
+}
+
+/**
+ * `requestRfqCreation`'s envelope.
+ *
+ * THE PREPARE RESULT IS SPREAD, not nested: `ok`, `stage`, `note` and the
+ * stage's own payload (`approve` + `allowance`, or `create` + `token` +
+ * `preparedAt` + `rfqRequestId`) all sit at the TOP level, which is what
+ * `components/agent/rfq-execution.tsx` reads. `transactions` repeats the
+ * calldata in `requestOptionBookExecution`'s shape so the chat can branch on
+ * `kind` the same way for both venues.
+ *
+ * THE REQUEST IS HANDED BACK because this tool may return the APPROVAL stage,
+ * and the create it belongs to cannot be built until that approval is mined:
+ * the card calls the server again with these fields rather than signing calldata
+ * it could not rebuild. Nested AND flat, because `rfq-contract.ts`'s
+ * `rfqCreateRequestOf` reads the nested object first and the flat fields as a
+ * fallback.
+ *
+ * Pure, so the shape is provable without a chain or a database.
+ */
+export function rfqCreateToolOutput(
+	prepared: Extract<Awaited<ReturnType<typeof prepareRfqCreateFor>>, { ok: true }>,
+	context: { account: string | null; request: RfqCreateRequestEcho },
+) {
+	return {
+		...prepared,
+		prepared: true as const,
+		kind: "rfq_create" as const,
+		account: context.account,
+		chainId: 8453 as const,
+		request: context.request,
+		...context.request,
+		transactions: prepared.stage === "approve" ? { approve: prepared.approve } : { create: prepared.create },
+		escrowNote: COPY.escrow,
+		feeNote: COPY.feeNote,
+		instruction:
+			prepared.stage === "approve"
+				? `Tell the user their wallet will first ask them to approve exactly ${prepared.expected.deposit} USDC to the Thetanuts OptionFactory, and that nothing is escrowed until they sign the request itself. Do not claim the request exists yet.`
+				: `Show the user the deposit (${prepared.expected.deposit} USDC, which is the most this can cost and is their maximum loss), the strikes, the expiry and when offers close, then tell them their wallet will ask them to confirm. Do not claim the request is made until their wallet reports a confirmed transaction, and never call it a filled trade — it is filled only once its status is settled.`,
+	};
+}
+
+/** The same envelope for a prepared cancel or settle: spread, plus `transactions`. */
+export function rfqActionToolOutput(
+	prepared:
+		| Extract<Awaited<ReturnType<typeof prepareRfqCancelFor>>, { ok: true }>
+		| Extract<Awaited<ReturnType<typeof prepareRfqSettleFor>>, { ok: true }>,
+	kind: "rfq_cancel" | "rfq_settle",
+	account: string | null,
+) {
+	const isCancel = "cancel" in prepared;
+	return {
+		...prepared,
+		prepared: true as const,
+		kind,
+		account,
+		chainId: 8453 as const,
+		stage: isCancel ? ("cancel" as const) : ("settle" as const),
+		transactions: isCancel ? { cancel: prepared.cancel } : { settle: prepared.settle },
+		...(isCancel ? {} : { bestPriceBaseUnits: prepared.bestPrice }),
+		instruction: isCancel
+			? "Tell the user their wallet will ask them to confirm, and that cancelling returns the escrowed deposit. Do not claim it is cancelled until their wallet reports a confirmed transaction."
+			: "Tell the user their wallet will ask them to confirm, and that settling is permissionless — a market maker may settle it first, which is normal and costs them nothing. Do not claim the option exists until their wallet reports a confirmed transaction.",
+	};
 }
 
 export function createRfqTools({ session, account }: RfqToolsParams) {
@@ -311,48 +442,24 @@ export function createRfqTools({ session, account }: RfqToolsParams) {
 					reason: `The market-maker pricing surface could not be read: ${error instanceof Error ? error.message : "unknown error"}.`,
 				};
 			}
-			const puts = Object.values(pricing).filter((row) => row.isCall === false);
-			if (puts.length === 0) return { found: false as const, asOf, reason: COPY.noPricing };
-
-			const sameStrike = puts.filter((row) => sameDecimal(String(row.strike), strikeUsd));
-			const exact = sameStrike.find((row) => row.expiry === expiry);
-			// The Thetanuts surface expires at 08:00 UTC while people say dates, so a
-			// request that lands on the same UTC day as a listed expiry is matched and
-			// LABELLED as such rather than silently rounded.
-			// TODO-OWNER: whether a same-day match should be offered at all.
-			const utcDay = (seconds: number) => Math.floor(seconds / 86_400);
-			const sameDay = exact ?? sameStrike.find((row) => utcDay(row.expiry) === utcDay(expiry));
-			const match = exact ?? sameDay ?? null;
-
-			if (match === null) {
-				// The nearest listed puts, so the model can offer real alternatives
-				// instead of inventing one. Sorted by distance from what was asked.
-				const nearest = [...puts]
-					.sort(
-						(left, right) =>
-							Math.abs(left.expiry - expiry) - Math.abs(right.expiry - expiry) ||
-							Math.abs(left.strike - Number(strikeUsd)) - Math.abs(right.strike - Number(strikeUsd)),
-					)
-					.slice(0, 5)
-					.map((row) => ({
-						ticker: row.ticker,
-						strikeUsd: decimalOf(row.strike, 8),
-						expiryAt: new Date(row.expiry * 1000).toISOString(),
-					}));
+			const matched = matchVanillaPut(Object.values(pricing), { strikeUsd, expiry });
+			if (matched.match === null) {
+				if (matched.nearest.length === 0) return { found: false as const, asOf, reason: COPY.noPricing };
 				return {
 					found: false as const,
 					asOf,
 					reason:
 						"No market-maker quote is listed for that exact strike and expiry. Offer the nearest listed ones, or ask the user for the most they will pay per contract.",
-					nearest,
+					nearest: matched.nearest,
 				};
 			}
+			const match = matched.match;
 
 			return {
 				found: true as const,
 				asOf,
 				ticker: match.ticker,
-				expiryMatch: exact ? ("exact" as const) : ("same_utc_day" as const),
+				expiryMatch: matched.expiryMatch,
 				expiryAt: new Date(match.expiry * 1000).toISOString(),
 				strikeUsd: decimalOf(match.strike, 8),
 				/** As the surface publishes it: a price per contract in units of the UNDERLYING. */
@@ -452,29 +559,17 @@ export function createRfqTools({ session, account }: RfqToolsParams) {
 					reason: `The request could not be prepared (${prepared.code}): ${prepared.reason}`,
 				};
 			}
-			return {
-				prepared: true as const,
-				kind: "rfq_create" as const,
+			return rfqCreateToolOutput(prepared, {
 				account: session?.walletAddress ?? null,
-				chainId: 8453 as const,
-				stage: prepared.stage,
-				expected: prepared.expected,
-				transactions:
-					prepared.stage === "approve" ? { approve: prepared.approve } : { create: prepared.create },
-				...(prepared.stage === "approve"
-					? { allowance: prepared.allowance }
-					: {
-							token: prepared.token,
-							rfqRequestId: prepared.rfqRequestId,
-							preparedAt: prepared.preparedAt,
-						}),
-				escrowNote: COPY.escrow,
-				feeNote: COPY.feeNote,
-				instruction:
-					prepared.stage === "approve"
-						? `Tell the user their wallet will first ask them to approve exactly ${prepared.expected.deposit} USDC to the Thetanuts OptionFactory, and that nothing is escrowed until they sign the request itself. Do not claim the request exists yet.`
-						: `Show the user the deposit (${prepared.expected.deposit} USDC, which is the most this can cost and is their maximum loss), the strikes, the expiry and when offers close, then tell them their wallet will ask them to confirm. Do not claim the request is made until their wallet reports a confirmed transaction, and never call it a filled trade — it is filled only once its status is settled.`,
-			};
+				request: {
+					underlying: input.underlying,
+					strikesUsd: input.strikesUsd,
+					expiry: input.expiryAt,
+					numContracts: input.numContracts,
+					reservePricePerContract: input.reservePricePerContract,
+					offerDeadlineMinutes: input.offerDeadlineMinutes,
+				},
+			});
 		},
 	});
 
@@ -495,20 +590,7 @@ export function createRfqTools({ session, account }: RfqToolsParams) {
 					reason: `The cancellation could not be prepared (${prepared.code}): ${prepared.reason}`,
 				};
 			}
-			return {
-				prepared: true as const,
-				kind: "rfq_cancel" as const,
-				account: session?.walletAddress ?? null,
-				chainId: 8453 as const,
-				stage: "cancel" as const,
-				rfqRequestId: prepared.rfqRequestId,
-				quotationId: prepared.quotationId,
-				transactions: { cancel: prepared.cancel },
-				token: prepared.token,
-				preparedAt: prepared.preparedAt,
-				instruction:
-					"Tell the user their wallet will ask them to confirm, and that cancelling returns the escrowed deposit. Do not claim it is cancelled until their wallet reports a confirmed transaction.",
-			};
+			return rfqActionToolOutput(prepared, "rfq_cancel", session?.walletAddress ?? null);
 		},
 	});
 
@@ -529,22 +611,7 @@ export function createRfqTools({ session, account }: RfqToolsParams) {
 					reason: `The settlement could not be prepared (${prepared.code}): ${prepared.reason}`,
 				};
 			}
-			return {
-				prepared: true as const,
-				kind: "rfq_settle" as const,
-				account: session?.walletAddress ?? null,
-				chainId: 8453 as const,
-				stage: "settle" as const,
-				rfqRequestId: prepared.rfqRequestId,
-				quotationId: prepared.quotationId,
-				transactions: { settle: prepared.settle },
-				token: prepared.token,
-				preparedAt: prepared.preparedAt,
-				/** USDC base units of the winning offer the factory currently holds. */
-				bestPriceBaseUnits: prepared.bestPrice,
-				instruction:
-					"Tell the user their wallet will ask them to confirm, and that settling is permissionless — a market maker may settle it first, which is normal and costs them nothing. Do not claim the option exists until their wallet reports a confirmed transaction.",
-			};
+			return rfqActionToolOutput(prepared, "rfq_settle", session?.walletAddress ?? null);
 		},
 	});
 

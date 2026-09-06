@@ -172,6 +172,8 @@ export type RfqRecordResult =
 			readonly status: string;
 			/** Present on settle when the `QuotationSettled` log could be decoded. */
 			readonly optionAddress?: string | null;
+			/** One sentence when the transaction reverted, or when nothing changed. */
+			readonly note?: string;
 	  };
 
 export interface PrepareRfqCreateInput {
@@ -181,7 +183,13 @@ export interface PrepareRfqCreateInput {
 	readonly expiry: number | string;
 	readonly numContracts: string;
 	readonly reservePricePerContract: string;
-	readonly offerDeadlineMinutes: number;
+	/**
+	 * OPTIONAL on the wire because W3's `RfqCreateRequest` makes it optional, and
+	 * REFUSED here when it is absent: nothing in this build picks a default offer
+	 * deadline. TODO-OWNER — the Thetanuts docs use 60 in their examples, which is
+	 * theirs, not the owner's.
+	 */
+	readonly offerDeadlineMinutes?: number;
 }
 
 /** What `rfq_requests.params` holds. Nothing here is key material. */
@@ -390,6 +398,14 @@ export async function prepareRfqCreateFor(
 	if (input.underlying !== "ETH" && input.underlying !== "BTC") {
 		return fail("RFQ_UNSUPPORTED_UNDERLYING", `Requests are built for ETH and BTC only, not ${String(input.underlying)}.`);
 	}
+	const offerDeadlineMinutes = input.offerDeadlineMinutes;
+	if (offerDeadlineMinutes === undefined) {
+		return fail(
+			"RFQ_INVALID_DEADLINE",
+			// TODO-OWNER: there is no default offer deadline in this build.
+			"How many minutes market makers have to answer has to be chosen; nothing here picks a default.",
+		);
+	}
 
 	// PRD 14's freshness clock, stamped BEFORE the reads so the age this reports
 	// is never younger than the truth.
@@ -435,7 +451,7 @@ export async function prepareRfqCreateFor(
 				expiry,
 				numContracts: input.numContracts,
 				reservePricePerContract: input.reservePricePerContract,
-				offerDeadlineMinutes: input.offerDeadlineMinutes,
+				offerDeadlineMinutes,
 				requesterPublicKey,
 			},
 		});
@@ -513,7 +529,7 @@ export async function prepareRfqCreateFor(
 			build.expected.reservePriceBaseUnits.toString(),
 			build.expected.collateral.decimals,
 		),
-		offerDeadlineMinutes: input.offerDeadlineMinutes,
+		offerDeadlineMinutes,
 		implementation: build.expected.implementation,
 		collateralDecimals: build.expected.collateral.decimals,
 	};
@@ -787,8 +803,18 @@ export async function recordRfqCreateFor(
 		return fail("CHAIN_UNAVAILABLE", `Base could not be read to confirm this request. Nothing was recorded; try again. Transaction ${txHash}.`);
 	}
 	if (receipt.status !== "success") {
+		// A DURABLE record of the failure, returned as `ok` with `status: "failed"`.
+		// The browser must be able to let go of its held transaction: a refusal
+		// would leave the card holding a reverted hash and retrying forever.
 		await markFailed(deps, row.id, ticket.wallet, "transaction_reverted");
-		return fail("RFQ_REVERTED", `That transaction reverted, so no request was created and nothing was escrowed. Transaction ${txHash}.`);
+		return {
+			ok: true,
+			rfqRequestId: row.id,
+			quotationId: null,
+			status: "failed",
+			// TODO-OWNER: wording.
+			note: `That transaction reverted, so no request was created and nothing was escrowed. Transaction ${txHash}.`,
+		};
 	}
 	if (!sameAddress(transaction.to, row.factoryAddress)) {
 		await markFailed(deps, row.id, ticket.wallet, "receipt_not_the_factory");
@@ -871,8 +897,18 @@ async function recordIdCall(
 	}
 	if (receipt.status !== "success") {
 		// The REQUEST is untouched by a reverted cancel or settle: it is still on
-		// chain and still active, so the row stays active rather than failing.
-		return fail("RFQ_REVERTED", `That transaction reverted, so the request is unchanged. Transaction ${txHash}.`);
+		// chain and still active, so the row stays as it is. Returned as `ok` for
+		// the same reason a reverted create is: the browser has to be able to stop
+		// holding the transaction, and the status it reads back is the truth.
+		return {
+			ok: true,
+			rfqRequestId: row.id,
+			quotationId: row.quotationId,
+			status: row.status,
+			optionAddress: row.optionAddress,
+			// TODO-OWNER: wording.
+			note: `That transaction reverted, so the request is unchanged. Transaction ${txHash}.`,
+		};
 	}
 	if (!sameAddress(transaction.to, row.factoryAddress)) {
 		return fail(
@@ -982,6 +1018,7 @@ export async function rfqRowView(
 	const params = parseRfqRowParams(row.params);
 	let indexer: RfqIndexerView | null = null;
 	let chain: RfqChainView | null = null;
+	let chainBestPrice: string | null = null;
 	if (row.quotationId !== null) {
 		const [indexed, quotation] = await Promise.all([
 			client.api.getRfq(row.quotationId).then(indexerView).catch(() => null),
@@ -989,6 +1026,7 @@ export async function rfqRowView(
 		]);
 		indexer = indexed;
 		chain = quotation?.chain ?? null;
+		chainBestPrice = quotation?.bestPrice ?? null;
 	}
 	return {
 		rfqRequestId: row.id,
@@ -1016,11 +1054,77 @@ export async function rfqRowView(
 			revealWindowSeconds,
 			now,
 		}),
-		currentBestPriceBaseUnits: indexer?.currentBestPrice ?? null,
+		/**
+		 * The indexer's figure first — it is the one the RFQ page shows — and the
+		 * factory's `currentBestPriceOrReserve` when the indexer could not be read.
+		 * NOT the same quantity when no offer has won: the chain returns the
+		 * RESERVE in that case, which is why `status.hasWinner` is beside it.
+		 */
+		currentBestPriceBaseUnits: indexer?.currentBestPrice ?? chainBestPrice,
 	};
 }
 
 export { readRevealWindow };
+
+/**
+ * The card's status view of ONE request: `rfqStatusFor`'s plain-words answer
+ * plus the three identifiers the card renders beside it.
+ *
+ * Its own shape rather than `RfqRowView`'s, because this is what the card polls
+ * while it waits and it must stay small: `components/agent/rfq-contract.ts`
+ * (W3) declares the same fields.
+ */
+export interface RfqStatusReadout {
+	readonly status: string;
+	readonly nextAction: string;
+	readonly sentence: string;
+	readonly quotationId: string | null;
+	readonly optionAddress: string | null;
+	/** The winning (or reserve) price the factory holds, in USDC base units. */
+	readonly bestPrice: string | null;
+	readonly offerEndAt: string | null;
+	readonly settleReadyAt: string | null;
+	readonly hasWinner: boolean;
+}
+
+export type RfqStatusResult =
+	| RfqFailure
+	| { readonly ok: true; readonly rfqRequestId: string; readonly status: RfqStatusReadout };
+
+/**
+ * Where one of the signed-in wallet's requests stands right now.
+ *
+ * Scoped by wallet in the store, so "no such request" and "not yours" are one
+ * answer. Both remote reads are best effort and `rfqStatusFor` fails closed on
+ * what they could not supply.
+ */
+export async function rfqStatusForRequest(
+	session: { userId: string; walletAddress: string } | null,
+	input: { rfqRequestId: string },
+	deps: RfqDeps = defaultRfqDeps(),
+): Promise<RfqStatusResult> {
+	if (session === null) return fail("NO_SESSION", COPY.signIn, true);
+	const row = await loadOwnRow(session, input.rfqRequestId, deps);
+	if (row === null) return fail("RFQ_NOT_FOUND", COPY.notYours);
+	const client = deps.clientFor(session.walletAddress.toLowerCase());
+	const now = deps.now();
+	const view = await rfqRowView(row, client, now, await readRevealWindow(client));
+	return {
+		ok: true,
+		rfqRequestId: row.id,
+		status: {
+			status: view.status.status,
+			nextAction: view.status.nextAction,
+			sentence: view.status.sentence,
+			quotationId: view.quotationId,
+			optionAddress: view.optionAddress,
+			bestPrice: view.currentBestPriceBaseUnits,
+			offerEndAt: view.status.offerEndAt,
+			settleReadyAt: view.status.settleReadyAt,
+			hasWinner: view.status.hasWinner,
+		},
+	};
+}
 
 /* ─────────────────────────── cookie-session entry points ─────────────────────────── */
 
@@ -1041,4 +1145,7 @@ export async function recordRfqCancel(input: { token: string; txHash: string }):
 }
 export async function recordRfqSettle(input: { token: string; txHash: string }): Promise<RfqRecordResult> {
 	return recordRfqSettleFor(await getSession(), input);
+}
+export async function rfqStatus(input: { rfqRequestId: string }): Promise<RfqStatusResult> {
+	return rfqStatusForRequest(await getSession(), input);
 }

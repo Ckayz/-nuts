@@ -279,6 +279,45 @@ describe("buildCustomRfqPreview", () => {
 		expect((result.expected as { strikesUsd: string[] }).strikesUsd).toEqual(["2100", "2300"]);
 	});
 
+	/**
+	 * WHY A PREVIEW MAY USE A THROWAWAY KEY. The key travels in its own
+	 * `requesterPublicKey` field and nothing in `expected` is derived from it, so
+	 * a preview can price a request without minting one. Measured through
+	 * `buildRfqCreate` with two different valid keys.
+	 */
+	test("the previewed economics do not depend on which key they were built against", async () => {
+		const { buildRfqCreate } = await import("@nuts/thetanuts");
+		const { rfqClientFor } = await import("@/lib/rfq/prepare");
+		const client = rfqClientFor("0x0000000000000000000000000000000000000000");
+		const build = (requesterPublicKey: string) =>
+			buildRfqCreate({
+				client,
+				allowance: 0n,
+				params: {
+					requester: "0x0000000000000000000000000000000000000000",
+					underlying: "ETH",
+					strikesUsd: ["2300"],
+					expiry: Math.floor(Date.parse(EXPIRY) / 1000),
+					numContracts: "1",
+					reservePricePerContract: "0.5",
+					offerDeadlineMinutes: 60,
+					requesterPublicKey,
+				},
+			});
+		const a = build(`0x02${"11".repeat(32)}`);
+		const b = build(`0x03${"ab".repeat(32)}`);
+		expect(a.expected.requesterPublicKey).not.toBe(b.expected.requesterPublicKey);
+		const economics = (built: ReturnType<typeof build>) => ({
+			deposit: built.expected.depositBaseUnits.toString(),
+			contracts: built.expected.numContracts.toString(),
+			strikes: built.expected.strikesUsd8.map(String),
+			expiry: built.expected.expiryTimestamp.toString(),
+			implementation: built.expected.implementation,
+			reserve: built.expected.reservePriceBaseUnits.toString(),
+		});
+		expect(economics(a)).toEqual(economics(b));
+	});
+
 	test("every sentence it returns carries the escrow and fee notes", async () => {
 		const result = (await preview()) as unknown as Record<string, unknown>;
 		expect(String(result.escrowNote)).toContain("returned in full if it is cancelled");

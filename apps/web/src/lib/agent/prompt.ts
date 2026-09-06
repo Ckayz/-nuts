@@ -98,11 +98,56 @@ The LAST line of every reply is exactly:
 
 SUGGEST: ["…","…"]
 
-A JSON array of two or three short questions the user could ask you next AND THAT YOUR TOOLS CAN ANSWER HERE. Plain words, no jargon, each under 80 characters. Never a trade above 10 USD, never a prediction, never anything your tools cannot do.
+A JSON array of two or three short things the user could say next. Each one is THE NEXT STEP FOR THIS PERSON after the reply you just wrote, in plain words, and each must be something your own tools can do here. Under 80 characters. Never a trade above 10 USD, never a prediction, never anything your tools cannot do.
 
-- After you priced a trade, one of them is about the risk.
-- After you listed positions, one of them offers protection on an asset where a put is quoted.
+- Move it forward. When you have just shown a trade, one of them commits to it or prices it — "Preview the 2540 call for $10", "Prepare it for my wallet".
+- After a preview, one is the commitment and one is the risk.
+- After you listed positions, one is about a SPECIFIC position — "What if ETH settles at 2300 on my put?" — and one offers protection on an asset where a put is quoted.
+- After a listing or a search, one names an instrument that was actually in the result.
+- Read the Session line. When they are signed in, "Show my positions" is a good follow-up. When they are not, never offer anything that needs a wallet: positions, portfolio, what they are risking, or a custom request.
+- Never repeat a follow-up an earlier reply already offered — the whole conversation is in front of you.
+- Never restate the question you just answered.
 
 Prefer these wordings when they fit: "What needs to happen for this position to profit?", "What is the maximum loss?", "Explain the strikes in simple terms.", "What happens at expiry?", "How is the Counter side different?".
 
 Write nothing after that line.`;
+
+/**
+ * The one runtime line appended to the system prompt, per request.
+ *
+ * The model writes the follow-up chips, and the chips it wrote were offering
+ * things a guest cannot do ("Show my positions" to somebody with no wallet
+ * connected, which `getUserPositions` refuses by design). It had no way to know:
+ * the session is a cookie the route reads and the prompt is a constant.
+ *
+ * Two properties this must keep:
+ *
+ * 1. **The full address never enters model context.** It is truncated to the
+ *    first 6 and last 4 characters — the same shape the wallet chip shows — and
+ *    only when it is exactly a 20-byte hex address. Anything else is treated as
+ *    "signed in", with no address at all.
+ * 2. **Nothing here is free text.** `asset` arrives in the REQUEST BODY, so it
+ *    is re-checked against the ticker grammar before it is written into a
+ *    system instruction, even though `agentChatBodySchema` already fenced it.
+ *
+ * TODO-OWNER: both sentences.
+ */
+export function sessionLine(input: {
+	readonly walletAddress?: string | null;
+	readonly asset?: string | null;
+}): string {
+	const lines: string[] = [];
+	const address = typeof input.walletAddress === "string" ? input.walletAddress.trim() : "";
+	if (address === "") {
+		lines.push(
+			"Session: not signed in — position, portfolio and RFQ tools will refuse until they sign in; do not offer them as follow-ups.",
+		);
+	} else if (/^0x[0-9a-fA-F]{40}$/.test(address)) {
+		lines.push(`Session: signed in with wallet ${address.slice(0, 6)}…${address.slice(-4)}.`);
+	} else {
+		lines.push("Session: signed in.");
+	}
+	const asset = typeof input.asset === "string" ? input.asset.trim().toUpperCase() : "";
+	if (/^[A-Z0-9]{1,12}$/.test(asset)) lines.push(`Market in context: ${asset}.`);
+	return `\n\n## Session\n\n${lines.join("\n")}`;
+}

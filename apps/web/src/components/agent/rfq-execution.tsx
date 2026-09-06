@@ -156,6 +156,12 @@ const COPY = {
 	cancelledTitle: "Cancelled. Your escrow is refunded.",
 	/** TODO-OWNER: the failed state, printed before the server's own reason. */
 	failedTitle: "This request failed.",
+	/**
+	 * TODO-OWNER: D-1 — the offer deadline and the reveal window both passed with
+	 * no offer on chain. The request is over, the escrow is not: it comes back
+	 * when the requester cancels, which is what the control under this line does.
+	 */
+	expiredTitle: "No maker answered. Cancel to get your deposit back.",
 	/** TODO-OWNER: link to the confirmed transaction. */
 	viewOnExplorer: "View on BaseScan",
 	/** TODO-OWNER: link to a sent-but-unconfirmed transaction. */
@@ -856,7 +862,12 @@ export function RfqExecution({
 								? COPY.cancelledTitle
 								: status.status === "failed"
 									? COPY.failedTitle
-									: COPY.watchingTitle}{" "}
+									: // D-1: "Your request is live" was printed over an expired,
+										// unfilled request, directly above the server's own sentence
+										// saying no offer exists and the deposit needs cancelling.
+										status.status === "expired_unfilled"
+										? COPY.expiredTitle
+										: COPY.watchingTitle}{" "}
 						<TodoOwner />
 					</p>
 					{/* The server's own sentence, never reworded here. */}

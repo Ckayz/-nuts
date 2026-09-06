@@ -609,6 +609,22 @@ describe("the watching stage", () => {
 		h.unmount();
 	});
 
+	test("D-1: an expired, unfilled request offers the refund and does not call itself live", async () => {
+		// The server's own answer for this state, verbatim from `lib/rfq/status.ts`.
+		const h = await watching({
+			status: "expired_unfilled",
+			nextAction: "cancel",
+			sentence:
+				"The reveal window has passed and no offer is on chain, so there is nothing to settle. Cancelling returns the escrowed deposit.",
+		});
+		console.log("EXPIRED", JSON.stringify({ controls: controls(h).map((c) => c.text), text: h.text().slice(0, 420) }));
+		// The escrow is still with the factory, so the refund must be reachable.
+		expect(controls(h).map((c) => c.text)).toContain("Cancel the request");
+		expect(h.text()).toContain("No maker answered");
+		expect(h.text()).not.toContain("Your request is live");
+		h.unmount();
+	});
+
 	test("a cancelled request says the escrow is refunded", async () => {
 		const h = await watching({ status: "cancelled", nextAction: "none", sentence: "Cancelled before any offer was accepted." });
 		expect(h.text()).toContain("escrow is refunded");

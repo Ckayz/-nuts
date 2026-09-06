@@ -153,11 +153,27 @@ describe("which controls a status earns", () => {
 		...over,
 	});
 
-	test("cancel while the quotation is live, never after", () => {
-		const live: RfqStatusView["status"][] = ["waiting_for_offers", "reveal_window", "ready_to_settle"];
-		const over: RfqStatusView["status"][] = ["settled", "cancelled", "expired_unfilled", "failed"];
+	test("cancel while the escrow can still come back, never after", () => {
+		// D-1. An expired, UNFILLED request still holds the deposit, and the
+		// server asks for a cancel on it by name: `lib/rfq/status.ts:164` answers
+		// `{ status: "expired_unfilled", nextAction: "cancel" }`. Leaving it out of
+		// this list left the escrow with no refund control anywhere in the UI.
+		const live: RfqStatusView["status"][] = [
+			"waiting_for_offers",
+			"reveal_window",
+			"ready_to_settle",
+			"expired_unfilled",
+		];
+		const over: RfqStatusView["status"][] = ["settled", "cancelled", "failed", "pending_create"];
+		console.log("CANCEL_GATE", JSON.stringify({
+			live: live.map((status) => rfqCanCancel(view({ status }))),
+			over: over.map((status) => rfqCanCancel(view({ status }))),
+		}));
 		expect(live.map((status) => rfqCanCancel(view({ status })))).toEqual(live.map(() => true));
 		expect(over.map((status) => rfqCanCancel(view({ status })))).toEqual(over.map(() => false));
+		// The server's own instruction is sufficient on its own, so a status this
+		// card has no opinion about that asks for a cancel still offers one.
+		expect(rfqCanCancel(view({ status: "pending_create", nextAction: "cancel" }))).toBe(true);
 		expect(rfqCanCancel(null)).toBe(false);
 	});
 

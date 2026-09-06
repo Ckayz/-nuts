@@ -289,14 +289,35 @@ export function rfqCreateRequestOf(out: PreparedRfqCreate): RfqCreateRequest | n
 	};
 }
 
-/** Cancel is the requester's, and only while the quotation is still live. */
+/**
+ * The states in which the escrow is still with the factory and the requester
+ * can take it back.
+ *
+ * `expired_unfilled` belongs here (D-1). The reveal window has passed with no
+ * offer on chain, so nothing can be settled — but the deposit has NOT come back
+ * on its own, and `lib/rfq/status.ts:164` answers that state with
+ * `nextAction: "cancel"` and a sentence telling the reader that cancelling
+ * returns it. Leaving it out left a real escrow with no refund control in the
+ * whole UI.
+ */
+const CANCELLABLE: ReadonlySet<RfqStatusKind> = new Set<RfqStatusKind>([
+	"waiting_for_offers",
+	"reveal_window",
+	"ready_to_settle",
+	"expired_unfilled",
+]);
+
+/**
+ * Cancel is the requester's, and only while the deposit is still escrowed.
+ *
+ * Two ways in, the server's instruction first: if `lib/rfq/status.ts` asks for
+ * a cancel, the card offers one even for a status this file has no opinion
+ * about. The set is the second reading, so a status label that arrives with a
+ * stale `nextAction` still shows the control while the escrow is out.
+ */
 export function rfqCanCancel(status: RfqStatusView | null): boolean {
 	if (status === null) return false;
-	return (
-		status.status === "waiting_for_offers" ||
-		status.status === "reveal_window" ||
-		status.status === "ready_to_settle"
-	);
+	return status.nextAction === "cancel" || CANCELLABLE.has(status.status);
 }
 
 /**

@@ -774,10 +774,15 @@ async function markFailed(deps: RfqDeps, id: string, wallet: string, reason: str
 /**
  * Binds a mined create to its row.
  *
- * THREE things are required of the transaction, and none of them comes from the
- * browser: it succeeded; its `to` is the OptionFactory this ticket names; and it
- * emitted `QuotationRequested` FROM that factory WITH this wallet as the indexed
- * requester. The quotation id is read out of that log's own topic.
+ * TWO things are required of the transaction, and neither comes from the
+ * browser: it succeeded, and it emitted `QuotationRequested` FROM the
+ * OptionFactory this ticket names WITH this wallet as the indexed requester.
+ * The quotation id is read out of that log's own topic.
+ *
+ * The transaction's own `to` is deliberately NOT a condition (C-1): a smart
+ * account or a multisig wraps the call, so `to` is an entry point while the
+ * factory still emits the event. It only chooses the wording of the refusal
+ * when no such log exists.
  */
 export async function recordRfqCreateFor(
 	session: { userId: string; walletAddress: string } | null,
@@ -816,13 +821,16 @@ export async function recordRfqCreateFor(
 			note: `That transaction reverted, so no request was created and nothing was escrowed. Transaction ${txHash}.`,
 		};
 	}
-	if (!sameAddress(transaction.to, row.factoryAddress)) {
-		await markFailed(deps, row.id, ticket.wallet, "receipt_not_the_factory");
-		return fail(
-			"RECEIPT_MISMATCH",
-			`That transaction does not call the OptionFactory, so it cannot be the request that was prepared. Nothing was recorded. Transaction ${txHash}.`,
-		);
-	}
+	// THE LOG IS READ FIRST, and it — not the transaction's `to` — is what binds.
+	//
+	// A `QuotationRequested` emitted BY this factory naming THIS wallet as the
+	// indexed requester is proof the create happened, whatever address sits at the
+	// top of the transaction. A smart account sends this call through an entry
+	// point (`lib/wagmi.ts` offers Coinbase Smart Wallet with `preference: "all"`,
+	// and ERC-4337 puts the EntryPoint in `to`), a multisig through its own
+	// `execute`. Refusing on `to` first wrote those real, escrowed requests off as
+	// `failed`, told the user nothing had been escrowed, and left no cancel path
+	// to the deposit — the money statement was false and unrecoverable.
 	const requesterTopic = `0x${ticket.wallet.slice(2).padStart(64, "0")}`;
 	const mine = receipt.logs.filter(
 		(log) =>
@@ -832,10 +840,16 @@ export async function recordRfqCreateFor(
 	);
 	const decoded = decodeQuotationRequested(mine, row.factoryAddress);
 	if (decoded === null) {
-		await markFailed(deps, row.id, ticket.wallet, "no_quotation_requested_log");
+		// NO PROOF EITHER WAY, so the row is refused and LEFT `pending_create`.
+		// A successful receipt that this build cannot read is not evidence that
+		// nothing was escrowed, and a retry with the right hash must still find
+		// the row. `to` only sharpens the sentence here; it decides nothing.
+		// TODO-OWNER: wording.
 		return fail(
 			"RECEIPT_MISMATCH",
-			`That transaction carries no QuotationRequested event from the OptionFactory for this wallet, so nothing was recorded. Transaction ${txHash}.`,
+			sameAddress(transaction.to, row.factoryAddress)
+				? `That transaction carries no QuotationRequested event from the OptionFactory for this wallet, so nothing was recorded and the request is still waiting for its transaction. Transaction ${txHash}.`
+				: `That transaction does not call the OptionFactory and carries none of its request events for this wallet, so nothing was recorded and the request is still waiting for its transaction. Transaction ${txHash}.`,
 		);
 	}
 

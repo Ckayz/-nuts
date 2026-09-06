@@ -489,20 +489,50 @@ describe("recordRfqCreateFor", () => {
 		expect(state.rows.get(rowId)?.failureReason).toBe("transaction_reverted");
 	});
 
-	test("a transaction that does not call the factory records nothing", async () => {
+	/**
+	 * C-1. THE LOG IS THE PROOF, NOT `to`. A Coinbase Smart Wallet or any other
+	 * ERC-4337 account sends this call through an entry point, so the receipt's
+	 * top-level `to` is the entry point while the factory still emits
+	 * `QuotationRequested` naming the smart account as the requester. The escrow
+	 * moved; the request exists; it must be bound.
+	 *
+	 * Mutant: put the `transaction.to` comparison back in front of the log read.
+	 */
+	test("a wrapped call (ERC-4337 entry point) carrying the factory's own log is bound", async () => {
+		const ENTRY_POINT = "0x0000000071727De22E5E9d8BAf0edAc6f37da032";
 		const { deps, state, token, rowId } = await preparedCreate({
-			transaction: { to: OPTION_BOOK, input: "0x" },
+			transaction: { to: ENTRY_POINT, input: "0x" },
 			receipt: {
 				status: "success",
-				logs: [requestedLog({ factory: FACTORY, id: 900n, requester: WALLET })],
+				logs: [requestedLog({ factory: FACTORY, id: 4242n, requester: WALLET })],
 			},
+		});
+		const result = await recordRfqCreateFor(SESSION, { token, txHash: TX }, deps);
+		expect(result).toEqual({ ok: true, rfqRequestId: rowId, quotationId: "4242", status: "active" });
+		const row = state.rows.get(rowId);
+		expect(row?.status).toBe("active");
+		expect(row?.quotationId).toBe("4242");
+		expect(row?.createTx).toBe(TX);
+	});
+
+	/**
+	 * C-1's fallback. With no `QuotationRequested` for this wallet there is no
+	 * proof either way, so the row is REFUSED but LEFT `pending_create`: a
+	 * success receipt this build cannot read is not evidence that nothing was
+	 * escrowed, and a retry with the right hash must still find the row.
+	 */
+	test("a transaction that does not call the factory and carries no log records nothing, and leaves the row recoverable", async () => {
+		const { deps, state, token, rowId } = await preparedCreate({
+			transaction: { to: OPTION_BOOK, input: "0x" },
+			receipt: { status: "success", logs: [] },
 		});
 		const result = await recordRfqCreateFor(SESSION, { token, txHash: TX }, deps);
 		expect(result.ok).toBe(false);
 		if (result.ok) throw new Error("unreachable");
 		expect(result.code).toBe("RECEIPT_MISMATCH");
 		expect(state.rows.get(rowId)?.quotationId).toBeNull();
-		expect(state.rows.get(rowId)?.status).toBe("failed");
+		expect(state.rows.get(rowId)?.status).toBe("pending_create");
+		expect(state.rows.get(rowId)?.failureReason).toBeNull();
 	});
 
 	test("a QuotationRequested for ANOTHER requester is not this wallet's request", async () => {
@@ -517,10 +547,11 @@ describe("recordRfqCreateFor", () => {
 		if (result.ok) throw new Error("unreachable");
 		expect(result.code).toBe("RECEIPT_MISMATCH");
 		expect(state.rows.get(rowId)?.quotationId).toBeNull();
+		expect(state.rows.get(rowId)?.status).toBe("pending_create");
 	});
 
 	test("a QuotationRequested emitted by another contract is ignored", async () => {
-		const { deps, token } = await preparedCreate({
+		const { deps, state, token, rowId } = await preparedCreate({
 			receipt: {
 				status: "success",
 				logs: [requestedLog({ factory: OPTION_BOOK, id: 900n, requester: WALLET })],
@@ -530,6 +561,7 @@ describe("recordRfqCreateFor", () => {
 		expect(result.ok).toBe(false);
 		if (result.ok) throw new Error("unreachable");
 		expect(result.code).toBe("RECEIPT_MISMATCH");
+		expect(state.rows.get(rowId)?.status).toBe("pending_create");
 	});
 
 	/**

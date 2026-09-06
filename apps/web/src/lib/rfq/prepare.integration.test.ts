@@ -319,7 +319,51 @@ describeLive("the RFQ path against a real database", () => {
 		expect(keys[0]?.publicKey).not.toBe(keys[1]?.publicKey);
 	});
 
-	test("a receipt that is not the factory's marks the row failed and leaves it unbound", async () => {
+	/**
+	 * C-1, against the real database: a create sent through an ERC-4337 entry
+	 * point binds on the factory's own log. Its `to` is the entry point, never
+	 * the factory, and the row must still end up `active` with the quotation id.
+	 */
+	test("a wrapped create (entry point in `to`) binds on the factory's log", async () => {
+		const wallet = newWallet();
+		const session = { userId: crypto.randomUUID(), walletAddress: wallet };
+		const base = liveDeps({});
+		const prepared = await prepareRfqCreateFor(session, input, base.deps);
+		if (!prepared.ok || prepared.stage !== "create") throw new Error("expected the create stage");
+
+		const wrapped = liveDeps({
+			// EntryPoint 0.7, the address an ERC-4337 bundle actually calls.
+			transactionTo: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+			receipt: {
+				status: "success",
+				logs: [
+					{
+						address: base.factory,
+						topics: [QUOTATION_REQUESTED_TOPIC, idTopic(5150n), topicOf(wallet)],
+						data: "0x",
+					},
+				],
+			},
+		});
+		const recorded = await recordRfqCreateFor(session, { token: prepared.token, txHash: TX("5") }, wrapped.deps);
+		expect(recorded).toEqual({
+			ok: true,
+			rfqRequestId: prepared.rfqRequestId,
+			quotationId: "5150",
+			status: "active",
+		});
+		const row = await drizzleRfqStore(db).findOwn(prepared.rfqRequestId, wallet);
+		expect(row?.status).toBe("active");
+		expect(row?.quotationId).toBe("5150");
+	});
+
+	/**
+	 * C-1: a receipt carrying no `QuotationRequested` for this wallet is REFUSED
+	 * and the row is left `pending_create`, whatever its `to` is. A success
+	 * receipt this build cannot read is not proof that nothing was escrowed, and
+	 * the row has to stay bindable so a retry with the right hash still works.
+	 */
+	test("a receipt with no QuotationRequested leaves the row pending and unbound", async () => {
 		const wallet = newWallet();
 		const session = { userId: crypto.randomUUID(), walletAddress: wallet };
 		const base = liveDeps({});
@@ -332,8 +376,9 @@ describeLive("the RFQ path against a real database", () => {
 		if (result.ok) throw new Error("unreachable");
 		expect(result.code).toBe("RECEIPT_MISMATCH");
 		const row = await drizzleRfqStore(db).findOwn(prepared.rfqRequestId, wallet);
-		expect(row?.status).toBe("failed");
+		expect(row?.status).toBe("pending_create");
 		expect(row?.quotationId).toBeNull();
+		expect(row?.failureReason).toBeNull();
 	});
 });
 

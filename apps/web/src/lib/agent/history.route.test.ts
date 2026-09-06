@@ -343,3 +343,74 @@ live(
 	},
 	TIMEOUT_MS,
 );
+
+/**
+ * PRD 10.4 names `GET /api/agent/conversations` and `/:id`. Nothing in this app
+ * calls them — `/agent` reads the same functions server-side — so they are
+ * driven here directly, in the same child harness, with the SESSION stubbed and
+ * everything else real.
+ */
+live(
+	"the two read routes answer only for the session's own wallet",
+	() => {
+		const result = probe(`
+			const mine = wallet();
+			const theirs = wallet();
+			const list = (await import("@/app/api/agent/conversations/route")).GET;
+			const one = (await import("@/app/api/agent/conversations/[id]/route")).GET;
+			const req = () => new Request("https://thesis.fun/api/agent/conversations");
+
+			// Signed out.
+			globalThis.__session = null;
+			const outList = await list();
+			const outOne = await one(req(), { params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }) });
+
+			// Two wallets, one conversation each.
+			globalThis.__session = { userId: randomUUID(), walletAddress: theirs, expiresAt: new Date(Date.now() + 3600_000) };
+			const opened = await post({ messages: [text("their question", "x-1")] });
+			const theirId = opened.headers.get("x-agent-conversation");
+			await opened.text();
+
+			globalThis.__session = { userId: randomUUID(), walletAddress: mine, expiresAt: new Date(Date.now() + 3600_000) };
+			const openedMine = await post({ messages: [text("my question", "y-1")] });
+			const myId = openedMine.headers.get("x-agent-conversation");
+			await openedMine.text();
+
+			const myList = await (await list()).json();
+			const mineOne = await one(req(), { params: Promise.resolve({ id: myId }) });
+			const mineBody = await mineOne.json();
+			const theirsOne = await one(req(), { params: Promise.resolve({ id: theirId }) });
+			const malformed = await one(req(), { params: Promise.resolve({ id: "not-a-uuid" }) });
+
+			await db.execute(sql\`delete from agent_conversations where wallet_address in (\${mine}, \${theirs})\`);
+			console.log("RESULT:" + JSON.stringify({
+				signedOutList: outList.status,
+				signedOutOne: outOne.status,
+				listStatus: 200,
+				listIds: myList.conversations.map((c) => c.id),
+				listTitles: myList.conversations.map((c) => c.title),
+				mineStatus: mineOne.status,
+				mineRoles: mineBody.messages.map((m) => m.role),
+				mineText: mineBody.messages[0]?.parts?.[0]?.text ?? null,
+				theirsStatus: theirsOne.status,
+				theirsBody: await theirsOne.json(),
+				malformedStatus: malformed.status,
+			}));
+		`);
+
+		expect(result.signedOutList).toBe(401);
+		expect(result.signedOutOne).toBe(401);
+		// The list holds this wallet's conversation and nothing else.
+		expect(result.listIds).toHaveLength(1);
+		expect(result.listTitles).toEqual(["my question"]);
+		expect(result.mineStatus).toBe(200);
+		expect(result.mineRoles).toEqual(["user", "assistant"]);
+		expect(result.mineText).toBe("my question");
+		// Another wallet's conversation is a 404 — the same answer an id that does
+		// not exist gets, so the route never confirms one is there.
+		expect(result.theirsStatus).toBe(404);
+		expect(result.theirsBody).toEqual({ error: "No such conversation." });
+		expect(result.malformedStatus).toBe(404);
+	},
+	TIMEOUT_MS,
+);

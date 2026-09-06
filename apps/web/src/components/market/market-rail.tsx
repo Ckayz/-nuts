@@ -1,17 +1,25 @@
 "use client";
 
 /**
- * The market page's right rail in database mode: the live ticket, and the
- * "Post about <asset>" panel beside it.
+ * The market page's TICKET in database mode: the live ticket and the one line
+ * it prints when a signed-out visitor presses Trade.
  *
- * They are no longer one journey. Owner 2026-09-05: "trade is just trade.
- * post(thesis) is it's own thing. doesn't have to be tied." A fill from this
- * ticket belongs to no post unless the visitor arrived from one, and the panel
- * is a plain link to the composer with this market preselected.
+ * The "Post about <asset>" panel that used to be returned beside it now lives
+ * with the page's other right-hand panels (`app/m/[asset]/page.tsx`). K-2: the
+ * ticket is its own frame slot, so that panel — which is not the ticket and is
+ * not part of its state — belongs after the centre column when the page stacks,
+ * where every other trailing panel is. Nothing about the panel's markup, copy
+ * or link changed; only which file renders it.
+ *
+ * The sign-in line stays HERE because it is the ticket's own feedback: it is set
+ * by `TakeASide`'s `onSignedIn` and reading it 7,000px below the button that
+ * produced it (which is where the old stacking order put it) is not an answer.
+ *
+ * Trading and posting are not one journey. Owner 2026-09-05: "trade is just
+ * trade. post(thesis) is it's own thing. doesn't have to be tied." A fill from
+ * this ticket belongs to no post unless the visitor arrived from one.
  */
 import { useCallback, useState } from "react";
-import Link from "next/link";
-import { TodoOwner } from "@/components/primitives";
 import { TakeASide } from "@/components/market/take-a-side";
 import type { TradePanelContext } from "@/lib/trade/types";
 
@@ -43,20 +51,6 @@ export function MarketRail({
 					<p className="fine first">{message}</p>
 				</section>
 			) : null}
-			<section className="card pad mkt-panel">
-				<h3 style={{ fontSize: "15px" }}>Post about {trade.asset}</h3>
-				<p className="fine">
-					{/* TODO-OWNER: standalone trades cannot confer a verified post badge. */}
-					Write your read on this market. You can tag the market or link a trade. Linking a standalone trade does not add a verified badge. <TodoOwner />
-				</p>
-				<Link
-					className="btn sec block"
-					style={{ marginTop: "14px" }}
-					href={{ pathname: "/new", query: { asset: trade.asset } }}
-				>
-					Write a post
-				</Link>
-			</section>
 		</>
 	);
 }

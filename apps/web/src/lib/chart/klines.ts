@@ -40,7 +40,19 @@
  *   DOGEUSDT [[1788649200000,"0.09010000",...
  *   PAXGUSDT [[1788649200000,"4432.75000000",...
  */
-const BINANCE_KLINES = "https://api.binance.com/api/v3/klines";
+/*
+ * Binance's PUBLIC market-data host, not `api.binance.com`. MEASURED
+ * 2026-09-06 09:1x: production (Vercel) answered `{"candles":[]}` for BTC and
+ * ETH while the same route on a Malaysian machine returned candles and
+ * `api.binance.com` answered it 200 — `api.binance.com` refuses US-hosted
+ * callers (HTTP 451), which is where Vercel's default region runs; that refusal
+ * was NOT read from Vercel's logs (no project link here), it is inferred from
+ * the two measurements. `data-api.binance.vision` serves the identical
+ * `/api/v3/klines` shape (measured from here: 200, same rows) and Binance
+ * documents it as the market-data endpoint without the geo restriction. The
+ * data is still Binance spot, so the chart's label stays true.
+ */
+const BINANCE_KLINES = "https://data-api.binance.vision/api/v3/klines";
 
 /** TODO-OWNER: the window and granularity the chart opens on. */
 export const CHART_INTERVAL = "1h";

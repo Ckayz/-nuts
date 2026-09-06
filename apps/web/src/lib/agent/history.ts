@@ -96,7 +96,25 @@ export function conversationTitle(text: string): string {
 	return `${collapsed.slice(0, TITLE_MAX_CHARS - 1).trimEnd()}…`;
 }
 
-/** The envelope written into `agent_messages.parts`. */
+/**
+ * The envelope written into `agent_messages.parts`.
+ *
+ * The generated fallback is NOT decoration. MEASURED on the installed SDK — a
+ * real `streamText(...).toUIMessageStreamResponse({ onFinish })` against
+ * `MockLanguageModelV3`:
+ *
+ *   {"header":"abc","contentType":"text/event-stream",
+ *    "seen":{"id":"","keys":["isAborted","isContinuation","outcome",
+ *            "responseMessage","messages","finishReason"],
+ *            "parts":["step-start","text"]}}
+ *
+ * `responseMessage.id` is the EMPTY STRING when the route passes neither
+ * `originalMessages` nor `generateMessageId` (`ai@7.0.92` dist/index.js:8038 →
+ * :7596, `messageId != null ? messageId : ""`). Without the fallback every
+ * assistant row in a conversation would carry the same id and the dedupe below
+ * would collapse them into one. The USER message's id is the client's own and
+ * is stable across a resumed approval turn, which is what dedupe is for.
+ */
 export function messageEnvelope(message: {
 	readonly id?: unknown;
 	readonly parts?: unknown;

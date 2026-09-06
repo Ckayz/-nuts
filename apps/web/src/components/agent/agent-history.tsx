@@ -26,15 +26,24 @@ export interface HistoryEntry {
 }
 
 /**
- * TODO-OWNER: every sentence and label in this component. The mockup draws no
- * agent view at all, so none of this has provenance.
+ * Every sentence and label this component prints, in ONE block, each documented
+ * as the owner's — the same fence `agent-chat.tsx` and `trade-execution.tsx`
+ * carry, and `copy.test.ts` covers this block too. The mockup draws no agent
+ * view at all, so none of this has provenance.
  */
 export const HISTORY_COPY = {
+	/** TODO-OWNER: what this row of saved chats is called. */
 	heading: "Your chats",
+	/** TODO-OWNER: the label on the link that starts a fresh conversation. */
 	newChat: "New chat",
+	/**
+	 * TODO-OWNER: what a signed-out visitor is told. PRD 10.2 sets the RULE
+	 * ("Wallet authentication is required for persistence"), not the wording.
+	 */
 	signedOut: "Sign in with a wallet to keep your chats.",
+	/** TODO-OWNER: what a signed-in wallet with no saved chats yet is told. */
 	empty: "Chats you have here are saved to your wallet.",
-	/** A conversation whose first message carried no text to title it with. */
+	/** TODO-OWNER: a conversation whose first message carried no text to title it with. */
 	untitled: "Untitled chat",
 } as const;
 

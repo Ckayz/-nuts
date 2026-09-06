@@ -161,8 +161,34 @@ describe("D-C2: the agent's copy is tagged", () => {
 	 * a chromatic red (`--destructive: oklch(0.58 0.22 27)` in
 	 * `packages/ui/src/styles/globals.css`). No agent surface may reach for it.
 	 */
+	/**
+	 * W5. The saved-chat rail is one more agent surface with no provenance: the
+	 * mockup draws no agent view, so its five labels are the owner's to word and
+	 * every one carries its own tag.
+	 */
+	test("agent-history.tsx holds every sentence in one tagged block", async () => {
+		const source = await read("./agent-history.tsx");
+		expect(source).toContain("export const HISTORY_COPY = {");
+		expect(source).toContain("<TodoOwner />");
+		const block = source.slice(source.indexOf("export const HISTORY_COPY = {"), source.indexOf("} as const;"));
+		const entries = [...block.matchAll(/^\t(\w+):/gm)];
+		expect(entries.length).toBe(5);
+		const undocumented: string[] = [];
+		let previousEnd = block.indexOf("{") + 1;
+		for (const entry of entries) {
+			const at = entry.index ?? 0;
+			if (!block.slice(previousEnd, at).includes("TODO-OWNER")) undocumented.push(entry[1] ?? "?");
+			previousEnd = at + entry[0].length;
+		}
+		expect(undocumented).toEqual([]);
+		// Every rendered sentence reaches through the block, never as a literal.
+		const afterBlock = source.slice(source.indexOf("} as const;"));
+		expect(afterBlock).not.toContain("Sign in with a wallet");
+		expect(afterBlock).not.toContain("New chat<");
+	});
+
 	test("no agent component paints an error red", async () => {
-		for (const name of ["./agent-chat.tsx", "./trade-execution.tsx", "./trade-approval.tsx", "./tool-activity.tsx", "./agent-launcher.tsx", "./agent-markdown.tsx", "./rfq-execution.tsx", "./rfq-approval.tsx"]) {
+		for (const name of ["./agent-chat.tsx", "./agent-history.tsx", "./trade-execution.tsx", "./trade-approval.tsx", "./tool-activity.tsx", "./agent-launcher.tsx", "./agent-markdown.tsx", "./rfq-execution.tsx", "./rfq-approval.tsx"]) {
 			expect(await read(name), name).not.toContain("text-destructive");
 		}
 		// The neutral replacement exists and is the ticket's own idiom.

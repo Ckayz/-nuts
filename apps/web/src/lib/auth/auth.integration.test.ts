@@ -140,11 +140,22 @@ if (!databaseUrl) {
 		});
 
 		probe("handle collision retries through the real Drizzle error wrapper", async (tx) => {
-			const first = await createOrFetchUser(tx, WALLET, { randomInt: () => 7 });
+			// Pass-5 lane B (2026-09-06): the digits were hardcoded (7 and 8), and other
+			// integration files leave `thesis_NNNN` rows behind on a reused database,
+			// so a leaked `thesis_0007`/`thesis_0008` made this probe red for a reason
+			// that had nothing to do with sign-in. The two digits are now the first
+			// two values whose handle is NOT taken, read from the database itself.
+			const taken = new Set((await tx.select({ handle: users.handle }).from(users)).map((row) => row.handle));
+			const free: number[] = [];
+			for (let n = 0; n < 10_000 && free.length < 2; n++) {
+				if (!taken.has(`thesis_${String(n).padStart(4, "0")}`)) free.push(n);
+			}
+			const [a, b] = free as [number, number];
+			const first = await createOrFetchUser(tx, WALLET, { randomInt: () => a });
 			let calls = 0;
-			const second = await createOrFetchUser(tx, OTHER_WALLET, { randomInt: () => calls++ === 0 ? 7 : 8 });
-			expect(first.handle).toBe("thesis_0007");
-			expect(second.handle).toBe("thesis_0008");
+			const second = await createOrFetchUser(tx, OTHER_WALLET, { randomInt: () => calls++ === 0 ? a : b });
+			expect(first.handle).toBe(`thesis_${String(a).padStart(4, "0")}`);
+			expect(second.handle).toBe(`thesis_${String(b).padStart(4, "0")}`);
 			expect(calls).toBe(2);
 		});
 

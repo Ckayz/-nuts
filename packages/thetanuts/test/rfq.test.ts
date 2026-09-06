@@ -34,7 +34,11 @@ const FACTORY = client.chainConfig.contracts.optionFactory as string;
 const USDC = client.chainConfig.tokens.USDC?.address as string;
 const OPTION_BOOK = client.chainConfig.contracts.optionBook as string;
 const REQUESTER = "0x1111111111111111111111111111111111111111" as const;
-const PUBLIC_KEY = `0x02${"11".repeat(32)}`;
+/**
+ * A real point on secp256k1 (measured: `0x02` + 32 `11` bytes is NOT one, and
+ * `buildRfqCreate` now decompresses the key rather than trusting its shape).
+ */
+const PUBLIC_KEY = `0x02${"22".repeat(32)}`;
 
 const nowSeconds = () => Math.floor(Date.now() / 1_000);
 
@@ -50,6 +54,17 @@ function params(overrides: Partial<RfqCreateParams> = {}): RfqCreateParams {
     requesterPublicKey: PUBLIC_KEY,
     ...overrides,
   };
+}
+
+/** The error `buildRfqCreate` throws for these overrides, or a failure if it does not throw. */
+function buildRefusal(overrides: Partial<RfqCreateParams>): ThetanutsLogicError {
+  try {
+    buildRfqCreate({ client, params: params(overrides), allowance: 0n });
+  } catch (error) {
+    if (error instanceof ThetanutsLogicError) return error;
+    throw error;
+  }
+  throw new Error(`buildRfqCreate accepted ${JSON.stringify(overrides)}`);
 }
 
 /** Reads the create calldata back with the factory ABI — the test's own decode, not the module's. */
@@ -216,6 +231,66 @@ describe("rfq create calldata", () => {
         expect.objectContaining({ code, name: "ThetanutsLogicError" }),
       );
     }
+  });
+
+  /**
+   * A-3. The shape is not the key: `0x02` followed by 32 bytes is well-formed
+   * and may still be no point at all, and the SDK's own gate is shape-only
+   * (`isValidPublicKey`, dist/index.js:11975-11991). A request carrying one
+   * produces an RFQ no market maker could encrypt an offer to.
+   *
+   * Mutant: drop the decompression and keep only the regex.
+   */
+  test("a well-formed public key that is not on the curve is refused", () => {
+    // MEASURED with ethers: an x of 32 `ff` bytes is above the field prime, and
+    // 32 `11` bytes has no square root — neither is a point. 32 `22` bytes is.
+    for (const offCurve of [`0x02${"ff".repeat(32)}`, `0x02${"11".repeat(32)}`, `0x03${"11".repeat(32)}`, `0x02${"00".repeat(32)}`]) {
+      expect(() => buildRfqCreate({ client, params: params({ requesterPublicKey: offCurve }), allowance: 0n })).toThrowError(
+        expect.objectContaining({ code: "RFQ_INVALID_PUBLIC_KEY" }),
+      );
+    }
+    // Both parities of a real point still build.
+    for (const onCurve of [`0x02${"22".repeat(32)}`, `0x03${"22".repeat(32)}`, `0x03${"ab".repeat(32)}`]) {
+      expect(buildRfqCreate({ client, params: params({ requesterPublicKey: onCurve }), allowance: 0n }).expected.requesterPublicKey).toBe(
+        onCurve,
+      );
+    }
+  });
+
+  /**
+   * A-4. `expiry` was bounded only from below, so a value in MILLISECONDS — the
+   * agent tool takes "an ISO instant or unix seconds", so the mistake is a
+   * realistic one — encoded happily and the user was shown an option expiring in
+   * the year 58651. Past ~2.8e14 seconds the same value stops being a date at
+   * all and threw `RangeError` out of the caller instead of a refusal.
+   *
+   * Mutant: drop the upper bounds.
+   */
+  test("an expiry beyond any plausible date is refused, milliseconds by name", () => {
+    const ms = Date.now() + 30 * 86_400_000;
+    const inMilliseconds = buildRefusal({ expiry: ms });
+    expect(inMilliseconds.code).toBe("RFQ_INVALID_DEADLINE");
+    expect(inMilliseconds.message).toContain("milliseconds");
+
+    // Every one of these used to build.
+    expect(buildRefusal({ expiry: nowSeconds() + 401 * 86_400 }).code).toBe("RFQ_INVALID_DEADLINE");
+    expect(buildRefusal({ expiry: 1e20 }).code).toBe("RFQ_INVALID_DEADLINE");
+    expect(buildRefusal({ expiry: Number.MAX_SAFE_INTEGER + 2 }).code).toBe("RFQ_INVALID_DEADLINE");
+
+    // And the horizon this build does request still builds, both sides of it.
+    expect(buildRfqCreate({ client, params: params({ expiry: nowSeconds() + 399 * 86_400 }), allowance: 0n }).expected.expiryTimestamp).toBe(
+      BigInt(nowSeconds() + 399 * 86_400),
+    );
+  });
+
+  test("an absurd contract count is refused rather than encoded", () => {
+    expect(buildRefusal({ numContracts: "1000001" }).code).toBe("RFQ_INVALID_AMOUNT");
+    expect(buildRefusal({ numContracts: "999999999999999" }).code).toBe("RFQ_INVALID_AMOUNT");
+    // The ceiling itself still builds.
+    expect(
+      buildRfqCreate({ client, params: params({ numContracts: "1000000", reservePricePerContract: "0.000001" }), allowance: 0n })
+        .expected.numContracts,
+    ).toBe(1_000_000_000_000n);
   });
 
   test("a client with no factory configured refuses instead of guessing an address", () => {

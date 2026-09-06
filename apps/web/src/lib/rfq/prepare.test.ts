@@ -35,6 +35,7 @@ import {
 	type RfqDeps,
 	type RfqSdkClient,
 } from "./prepare";
+import { RFQ_PENDING_TTL_MINUTES } from "./limits";
 import type { RfqRowStore } from "./store";
 import { decodeRfqTicket } from "./ticket";
 
@@ -111,15 +112,48 @@ function memoryStore(state: Recorded): RfqRowStore {
 			const row = state.rows.get(id);
 			return row && row.walletAddress === wallet ? row : null;
 		},
-		async listForWallet(wallet, limit) {
-			return [...state.rows.values()].filter((row) => row.walletAddress === wallet).slice(0, limit);
+		async listForWallet(wallet, limit, now = new Date(NOW_MS)) {
+			const fresh = now.getTime() - RFQ_PENDING_TTL_MINUTES * 60_000;
+			return [...state.rows.values()]
+				.filter((row) => row.walletAddress === wallet)
+				.filter((row) => row.status !== "pending_create" || row.updatedAt.getTime() >= fresh)
+				.sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+				.slice(0, limit);
 		},
-		async bindQuotation({ id, wallet, quotationId, createTx, at }) {
+		async listUnboundPending(wallet, limit) {
+			return [...state.rows.values()]
+				.filter((row) => row.walletAddress === wallet && row.status === "pending_create" && row.quotationId === null)
+				.sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+				.slice(0, limit);
+		},
+		async touchPending({ id, wallet, at }) {
 			const row = state.rows.get(id);
-			if (!row || row.walletAddress !== wallet || row.quotationId !== null) return null;
-			const updated = { ...row, status: "active" as const, quotationId, createTx, failureReason: null, updatedAt: at };
+			if (!row || row.walletAddress !== wallet) return null;
+			if (row.status !== "pending_create" || row.quotationId !== null) return null;
+			const updated = { ...row, updatedAt: at };
 			state.rows.set(id, updated);
 			return updated;
+		},
+		/**
+		 * The real store's three answers, including the partial unique index over
+		 * (factory_address, quotation_id) that migration 0010 creates: one
+		 * quotation belongs to exactly one row, whichever wallet owns it.
+		 */
+		async bindQuotation({ id, wallet, quotationId, createTx, at }) {
+			const row = state.rows.get(id);
+			if (!row || row.walletAddress !== wallet || row.quotationId !== null) {
+				return { kind: "already_bound" as const };
+			}
+			const taken = [...state.rows.values()].some(
+				(other) =>
+					other.id !== id &&
+					other.quotationId === quotationId &&
+					other.factoryAddress.toLowerCase() === row.factoryAddress.toLowerCase(),
+			);
+			if (taken) return { kind: "quotation_taken" as const };
+			const updated = { ...row, status: "active" as const, quotationId, createTx, failureReason: null, updatedAt: at };
+			state.rows.set(id, updated);
+			return { kind: "bound" as const, row: updated };
 		},
 		async markTerminal({ id, wallet, status, cancelTx, settleTx, optionAddress, at }) {
 			const row = state.rows.get(id);
@@ -135,10 +169,14 @@ function memoryStore(state: Recorded): RfqRowStore {
 			state.rows.set(id, updated);
 			return updated;
 		},
+		/** Conditional exactly as the SQL is: an unbound `pending_create` row only. */
 		async markFailed({ id, wallet, reason, at }) {
 			const row = state.rows.get(id);
-			if (!row || row.walletAddress !== wallet) return;
-			state.rows.set(id, { ...row, status: "failed" as const, failureReason: reason, updatedAt: at });
+			if (!row || row.walletAddress !== wallet) return null;
+			if (row.status !== "pending_create" || row.quotationId !== null) return null;
+			const updated = { ...row, status: "failed" as const, failureReason: reason, updatedAt: at };
+			state.rows.set(id, updated);
+			return updated;
 		},
 	};
 }
@@ -440,6 +478,145 @@ describe("prepareRfqCreateFor", () => {
 	});
 });
 
+/* ─────────────────────────── expiry bounds (A-4) ─────────────────────────── */
+
+describe("an expiry that is not a plausible date", () => {
+	/**
+	 * A-4. `PrepareRfqCreateInput.expiry` is `number | string` with no runtime
+	 * parse, and this is a server action: a millisecond timestamp used to be
+	 * accepted and encoded (the user was shown the year 58651), and a larger one
+	 * reached an uncaught `RangeError` out of `new Date(...).toISOString()`.
+	 * Every one of these must be a REFUSAL with a sentence, and no row.
+	 */
+	test("milliseconds, and anything past the horizon, are refused with a sentence and write no row", async () => {
+		const cases: (number | string)[] = [
+			NOW_MS, // the classic: seconds asked for, milliseconds given
+			NOW_S + 401 * 86_400,
+			1e20,
+			Number.MAX_SAFE_INTEGER + 2,
+			-1,
+			0,
+			1.5,
+			"not-a-date",
+		];
+		for (const expiry of cases) {
+			const { deps, state } = makeDeps({ allowance: 500_000n });
+			const result = await prepareRfqCreateFor(SESSION, createInput({ expiry }), deps);
+			expect(result.ok, String(expiry)).toBe(false);
+			if (result.ok) throw new Error("unreachable");
+			expect(result.code, String(expiry)).toBe("RFQ_INVALID_DEADLINE");
+			expect(result.reason.length, String(expiry)).toBeGreaterThan(0);
+			expect(state.rows.size, String(expiry)).toBe(0);
+		}
+	});
+
+	test("a millisecond expiry says so, rather than naming a year nobody asked for", async () => {
+		const { deps } = makeDeps({ allowance: 500_000n });
+		const result = await prepareRfqCreateFor(SESSION, createInput({ expiry: NOW_MS }), deps);
+		if (result.ok) throw new Error("expected a refusal");
+		expect(result.reason).toContain("milliseconds");
+	});
+
+	test("an absurd contract count is refused before any calldata is built", async () => {
+		const { deps, state } = makeDeps({ allowance: 500_000n });
+		const result = await prepareRfqCreateFor(SESSION, createInput({ numContracts: "1000001" }), deps);
+		expect(result.ok).toBe(false);
+		if (result.ok) throw new Error("unreachable");
+		expect(result.code).toBe("RFQ_INVALID_AMOUNT");
+		expect(state.rows.size).toBe(0);
+		expect(state.dryRuns).toEqual([]);
+	});
+});
+
+/* ───────────────────────── phantom pending rows ───────────────────────── */
+
+describe("re-preparing the same request", () => {
+	/**
+	 * C-5. The card prepares more than once per press by design, and a wallet
+	 * rejection leaves its row behind. Identical terms must land on ONE row, or a
+	 * capped "my requests" list fills with scaffolding that names no quotation
+	 * and moved no money — and a live escrow drops off the end of it.
+	 *
+	 * Mutant: insert unconditionally instead of reusing.
+	 */
+	test("identical terms reuse the wallet's unbound pending row instead of writing another", async () => {
+		const { deps, state } = makeDeps({ allowance: 500_000n });
+		const first = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		const second = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		const third = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		if (!first.ok || first.stage !== "create") throw new Error("expected a create stage");
+		if (!second.ok || second.stage !== "create") throw new Error("expected a create stage");
+		if (!third.ok || third.stage !== "create") throw new Error("expected a create stage");
+
+		expect(second.rfqRequestId).toBe(first.rfqRequestId);
+		expect(third.rfqRequestId).toBe(first.rfqRequestId);
+		expect(state.rows.size).toBe(1);
+
+		// An earlier ticket still resolves to that row, so a broadcast made before
+		// the last re-prepare can still be recorded.
+		expect(decodeRfqTicket(first.token)?.rfqRequestId).toBe(first.rfqRequestId);
+	});
+
+	test("different terms get their own row", async () => {
+		const { deps, state } = makeDeps({ allowance: 500_000n });
+		const first = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		const other = await prepareRfqCreateFor(SESSION, createInput({ strikesUsd: ["1800"] }), deps);
+		if (!first.ok || first.stage !== "create") throw new Error("expected a create stage");
+		if (!other.ok || other.stage !== "create") throw new Error("expected a create stage");
+		expect(other.rfqRequestId).not.toBe(first.rfqRequestId);
+		expect(state.rows.size).toBe(2);
+	});
+
+	test("a bound row is never reused: a second request of the same shape starts its own", async () => {
+		const { deps, state } = makeDeps({
+			allowance: 500_000n,
+			receipt: { status: "success", logs: [requestedLog({ factory: FACTORY, id: 4141n, requester: WALLET })] },
+		});
+		const first = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		if (!first.ok || first.stage !== "create") throw new Error("expected a create stage");
+		expect((await recordRfqCreateFor(SESSION, { token: first.token, txHash: TX }, deps)).ok).toBe(true);
+
+		const again = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		if (!again.ok || again.stage !== "create") throw new Error("expected a create stage");
+		expect(again.rfqRequestId).not.toBe(first.rfqRequestId);
+		expect(state.rows.size).toBe(2);
+		expect(state.rows.get(first.rfqRequestId)?.quotationId).toBe("4141");
+	});
+
+	/**
+	 * The listing side of C-5: a pending row nothing has touched for the TTL is
+	 * abandoned scaffolding and drops out of the list, while a real, escrowed
+	 * request never does — however old it is.
+	 *
+	 * Mutant: drop the freshness clause from `listForWallet`.
+	 */
+	test("a stale pending row leaves the listing; an old ACTIVE one never does", async () => {
+		const { deps, state } = makeDeps({ allowance: 500_000n });
+		const stale = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		if (!stale.ok || stale.stage !== "create") throw new Error("expected a create stage");
+		const staleRow = state.rows.get(stale.rfqRequestId);
+		if (!staleRow) throw new Error("fixture: no row");
+		const longAgo = new Date(NOW_MS - (RFQ_PENDING_TTL_MINUTES + 1) * 60_000);
+		state.rows.set(staleRow.id, { ...staleRow, createdAt: longAgo, updatedAt: longAgo });
+
+		const live = await prepareRfqCreateFor(SESSION, createInput({ strikesUsd: ["1800"] }), deps);
+		if (!live.ok || live.stage !== "create") throw new Error("expected a create stage");
+		const liveRow = state.rows.get(live.rfqRequestId);
+		if (!liveRow) throw new Error("fixture: no row");
+		// An escrowed request that has been open for hours.
+		state.rows.set(liveRow.id, {
+			...liveRow,
+			status: "active",
+			quotationId: "606",
+			createdAt: longAgo,
+			updatedAt: longAgo,
+		});
+
+		const listed = await deps.store.listForWallet(WALLET, 10, new Date(NOW_MS));
+		expect(listed.map((row) => row.id)).toEqual([live.rfqRequestId]);
+	});
+});
+
 /* ───────────────────────────── record create ───────────────────────────── */
 
 const requestedLog = (input: { factory: string; id: bigint; requester: string }) => ({
@@ -489,20 +666,50 @@ describe("recordRfqCreateFor", () => {
 		expect(state.rows.get(rowId)?.failureReason).toBe("transaction_reverted");
 	});
 
-	test("a transaction that does not call the factory records nothing", async () => {
+	/**
+	 * C-1. THE LOG IS THE PROOF, NOT `to`. A Coinbase Smart Wallet or any other
+	 * ERC-4337 account sends this call through an entry point, so the receipt's
+	 * top-level `to` is the entry point while the factory still emits
+	 * `QuotationRequested` naming the smart account as the requester. The escrow
+	 * moved; the request exists; it must be bound.
+	 *
+	 * Mutant: put the `transaction.to` comparison back in front of the log read.
+	 */
+	test("a wrapped call (ERC-4337 entry point) carrying the factory's own log is bound", async () => {
+		const ENTRY_POINT = "0x0000000071727De22E5E9d8BAf0edAc6f37da032";
 		const { deps, state, token, rowId } = await preparedCreate({
-			transaction: { to: OPTION_BOOK, input: "0x" },
+			transaction: { to: ENTRY_POINT, input: "0x" },
 			receipt: {
 				status: "success",
-				logs: [requestedLog({ factory: FACTORY, id: 900n, requester: WALLET })],
+				logs: [requestedLog({ factory: FACTORY, id: 4242n, requester: WALLET })],
 			},
+		});
+		const result = await recordRfqCreateFor(SESSION, { token, txHash: TX }, deps);
+		expect(result).toEqual({ ok: true, rfqRequestId: rowId, quotationId: "4242", status: "active" });
+		const row = state.rows.get(rowId);
+		expect(row?.status).toBe("active");
+		expect(row?.quotationId).toBe("4242");
+		expect(row?.createTx).toBe(TX);
+	});
+
+	/**
+	 * C-1's fallback. With no `QuotationRequested` for this wallet there is no
+	 * proof either way, so the row is REFUSED but LEFT `pending_create`: a
+	 * success receipt this build cannot read is not evidence that nothing was
+	 * escrowed, and a retry with the right hash must still find the row.
+	 */
+	test("a transaction that does not call the factory and carries no log records nothing, and leaves the row recoverable", async () => {
+		const { deps, state, token, rowId } = await preparedCreate({
+			transaction: { to: OPTION_BOOK, input: "0x" },
+			receipt: { status: "success", logs: [] },
 		});
 		const result = await recordRfqCreateFor(SESSION, { token, txHash: TX }, deps);
 		expect(result.ok).toBe(false);
 		if (result.ok) throw new Error("unreachable");
 		expect(result.code).toBe("RECEIPT_MISMATCH");
 		expect(state.rows.get(rowId)?.quotationId).toBeNull();
-		expect(state.rows.get(rowId)?.status).toBe("failed");
+		expect(state.rows.get(rowId)?.status).toBe("pending_create");
+		expect(state.rows.get(rowId)?.failureReason).toBeNull();
 	});
 
 	test("a QuotationRequested for ANOTHER requester is not this wallet's request", async () => {
@@ -517,10 +724,11 @@ describe("recordRfqCreateFor", () => {
 		if (result.ok) throw new Error("unreachable");
 		expect(result.code).toBe("RECEIPT_MISMATCH");
 		expect(state.rows.get(rowId)?.quotationId).toBeNull();
+		expect(state.rows.get(rowId)?.status).toBe("pending_create");
 	});
 
 	test("a QuotationRequested emitted by another contract is ignored", async () => {
-		const { deps, token } = await preparedCreate({
+		const { deps, state, token, rowId } = await preparedCreate({
 			receipt: {
 				status: "success",
 				logs: [requestedLog({ factory: OPTION_BOOK, id: 900n, requester: WALLET })],
@@ -530,6 +738,7 @@ describe("recordRfqCreateFor", () => {
 		expect(result.ok).toBe(false);
 		if (result.ok) throw new Error("unreachable");
 		expect(result.code).toBe("RECEIPT_MISMATCH");
+		expect(state.rows.get(rowId)?.status).toBe("pending_create");
 	});
 
 	/**
@@ -586,6 +795,86 @@ describe("recordRfqCreateFor", () => {
 		expect(result.ok).toBe(false);
 		if (result.ok) throw new Error("unreachable");
 		expect(result.code).toBe("BAD_TX_HASH");
+	});
+
+	/**
+	 * C-2. `markFailed` is conditional on an unbound `pending_create` row. Here a
+	 * concurrent recording binds the row in the window between this call's read
+	 * and its write; the reverted branch must not paint "nothing was escrowed"
+	 * over a row that now names a real, escrowed quotation.
+	 *
+	 * Mutant: drop `status = 'pending_create'` / `quotation_id IS NULL` from the
+	 * store's `markFailed`.
+	 */
+	test("a reverted receipt never overwrites a row another recording has bound", async () => {
+		const { deps, state, token, rowId } = await preparedCreate({ receipt: { status: "reverted", logs: [] } });
+		// THE INTERLEAVE, in the only window that matters: the row is read as
+		// `pending_create` (so the idempotent early return does not fire) and a
+		// concurrent recording binds it before this call reaches its write.
+		let reads = 0;
+		const racing: RfqDeps = {
+			...deps,
+			store: {
+				...deps.store,
+				async findOwn(id, wallet) {
+					const row = await deps.store.findOwn(id, wallet);
+					reads += 1;
+					if (reads === 1 && row !== null) {
+						state.rows.set(id, { ...row, status: "active", quotationId: "555", createTx: TX });
+					}
+					return row;
+				},
+			},
+		};
+
+		const result = await recordRfqCreateFor(SESSION, { token, txHash: TX }, racing);
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("unreachable");
+		expect(result.status).toBe("active");
+		expect(result.quotationId).toBe("555");
+		expect(String(result.note)).not.toContain("nothing was escrowed");
+		const row = state.rows.get(rowId);
+		expect(row?.status).toBe("active");
+		expect(row?.quotationId).toBe("555");
+	});
+
+	/**
+	 * C-3. One quotation belongs to exactly one row — the partial unique index
+	 * `rfq_requests_factory_quotation_key` (migration 0010) says so. A ticket for
+	 * row A handed the transaction that created row B's quotation must be
+	 * REPORTED, not recorded: binding it would show A the deposit and strikes of
+	 * a request that is really B's, and would leave B unable to ever bind its own.
+	 *
+	 * Mutant: let `bindQuotation` bind a quotation another row already owns.
+	 */
+	test("a receipt whose quotation another of my requests already owns records nothing", async () => {
+		const { deps, state } = makeDeps({
+			allowance: 500_000n,
+			receipt: {
+				status: "success",
+				logs: [requestedLog({ factory: FACTORY, id: 8888n, requester: WALLET })],
+			},
+		});
+		const first = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		if (!first.ok || first.stage !== "create") throw new Error("fixture: expected a create stage");
+		const second = await prepareRfqCreateFor(SESSION, createInput({ strikesUsd: ["1800"] }), deps);
+		if (!second.ok || second.stage !== "create") throw new Error("fixture: expected a create stage");
+
+		expect((await recordRfqCreateFor(SESSION, { token: first.token, txHash: TX }, deps)).ok).toBe(true);
+
+		const replay = await recordRfqCreateFor(SESSION, { token: second.token, txHash: TX }, deps);
+		expect(replay.ok).toBe(false);
+		if (replay.ok) throw new Error("unreachable");
+		expect(replay.code).toBe("RECEIPT_MISMATCH");
+		expect(replay.reason).toContain("already recorded on another");
+
+		// The first row keeps the quotation; the second is untouched and still
+		// able to bind its own create later.
+		expect(state.rows.get(first.rfqRequestId)?.quotationId).toBe("8888");
+		const other = state.rows.get(second.rfqRequestId);
+		expect(other?.quotationId).toBeNull();
+		expect(other?.status).toBe("pending_create");
+		expect(other?.failureReason).toBeNull();
 	});
 
 	test("a second recording of the same create returns the stored row rather than a second bind", async () => {

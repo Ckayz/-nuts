@@ -319,7 +319,110 @@ describeLive("the RFQ path against a real database", () => {
 		expect(keys[0]?.publicKey).not.toBe(keys[1]?.publicKey);
 	});
 
-	test("a receipt that is not the factory's marks the row failed and leaves it unbound", async () => {
+	/**
+	 * C-5 against the real database and the real jsonb round trip: two identical
+	 * prepares land on one row. `params` comes back from Postgres with its keys
+	 * re-ordered, so this is also the test that the comparison is field-by-field
+	 * rather than a string compare.
+	 */
+	test("re-preparing identical terms reuses the row rather than writing another", async () => {
+		const wallet = newWallet();
+		const session = { userId: crypto.randomUUID(), walletAddress: wallet };
+		const { deps } = liveDeps({});
+		const first = await prepareRfqCreateFor(session, input, deps);
+		const second = await prepareRfqCreateFor(session, input, deps);
+		if (!first.ok || first.stage !== "create") throw new Error("expected the create stage");
+		if (!second.ok || second.stage !== "create") throw new Error("expected the create stage");
+		expect(second.rfqRequestId).toBe(first.rfqRequestId);
+		expect((await drizzleRfqStore(db).listForWallet(wallet, 10)).map((row) => row.id)).toEqual([first.rfqRequestId]);
+
+		// Different terms are a different request.
+		const other = await prepareRfqCreateFor(session, { ...input, strikesUsd: ["1800"] }, deps);
+		if (!other.ok || other.stage !== "create") throw new Error("expected the create stage");
+		expect(other.rfqRequestId).not.toBe(first.rfqRequestId);
+		expect((await drizzleRfqStore(db).listForWallet(wallet, 10)).length).toBe(2);
+	});
+
+	/**
+	 * The listing side of C-5, in SQL: the freshness clause hides an untouched
+	 * `pending_create` row and never hides a bound one.
+	 *
+	 * Mutant: drop the `or(ne(status,'pending_create'), gte(updated_at, fresh))`
+	 * clause from `listForWallet`.
+	 */
+	test("listForWallet hides stale pending scaffolding and never hides an escrowed request", async () => {
+		const wallet = newWallet();
+		const session = { userId: crypto.randomUUID(), walletAddress: wallet };
+		const { deps, factory } = liveDeps({});
+		const stale = await prepareRfqCreateFor(session, input, deps);
+		if (!stale.ok || stale.stage !== "create") throw new Error("expected the create stage");
+		const live = await prepareRfqCreateFor(session, { ...input, strikesUsd: ["1800"] }, deps);
+		if (!live.ok || live.stage !== "create") throw new Error("expected the create stage");
+
+		const recording = liveDeps({
+			receipt: {
+				status: "success",
+				logs: [{ address: factory, topics: [QUOTATION_REQUESTED_TOPIC, idTopic(6060n), topicOf(wallet)], data: "0x" }],
+			},
+		});
+		expect((await recordRfqCreateFor(session, { token: live.token, txHash: TX("6") }, recording.deps)).ok).toBe(true);
+
+		const store = drizzleRfqStore(db);
+		// Both are current now.
+		expect((await store.listForWallet(wallet, 10)).length).toBe(2);
+		// An hour later the untouched pending row is scaffolding; the escrowed one
+		// is still the answer to "did my request fill?".
+		const later = new Date(Date.now() + 60 * 60_000);
+		expect((await store.listForWallet(wallet, 10, later)).map((row) => row.id)).toEqual([live.rfqRequestId]);
+		// And it is still readable by id, and still bindable.
+		expect((await store.findOwn(stale.rfqRequestId, wallet))?.status).toBe("pending_create");
+	});
+
+	/**
+	 * C-1, against the real database: a create sent through an ERC-4337 entry
+	 * point binds on the factory's own log. Its `to` is the entry point, never
+	 * the factory, and the row must still end up `active` with the quotation id.
+	 */
+	test("a wrapped create (entry point in `to`) binds on the factory's log", async () => {
+		const wallet = newWallet();
+		const session = { userId: crypto.randomUUID(), walletAddress: wallet };
+		const base = liveDeps({});
+		const prepared = await prepareRfqCreateFor(session, input, base.deps);
+		if (!prepared.ok || prepared.stage !== "create") throw new Error("expected the create stage");
+
+		const wrapped = liveDeps({
+			// EntryPoint 0.7, the address an ERC-4337 bundle actually calls.
+			transactionTo: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+			receipt: {
+				status: "success",
+				logs: [
+					{
+						address: base.factory,
+						topics: [QUOTATION_REQUESTED_TOPIC, idTopic(5150n), topicOf(wallet)],
+						data: "0x",
+					},
+				],
+			},
+		});
+		const recorded = await recordRfqCreateFor(session, { token: prepared.token, txHash: TX("5") }, wrapped.deps);
+		expect(recorded).toEqual({
+			ok: true,
+			rfqRequestId: prepared.rfqRequestId,
+			quotationId: "5150",
+			status: "active",
+		});
+		const row = await drizzleRfqStore(db).findOwn(prepared.rfqRequestId, wallet);
+		expect(row?.status).toBe("active");
+		expect(row?.quotationId).toBe("5150");
+	});
+
+	/**
+	 * C-1: a receipt carrying no `QuotationRequested` for this wallet is REFUSED
+	 * and the row is left `pending_create`, whatever its `to` is. A success
+	 * receipt this build cannot read is not proof that nothing was escrowed, and
+	 * the row has to stay bindable so a retry with the right hash still works.
+	 */
+	test("a receipt with no QuotationRequested leaves the row pending and unbound", async () => {
 		const wallet = newWallet();
 		const session = { userId: crypto.randomUUID(), walletAddress: wallet };
 		const base = liveDeps({});
@@ -332,8 +435,9 @@ describeLive("the RFQ path against a real database", () => {
 		if (result.ok) throw new Error("unreachable");
 		expect(result.code).toBe("RECEIPT_MISMATCH");
 		const row = await drizzleRfqStore(db).findOwn(prepared.rfqRequestId, wallet);
-		expect(row?.status).toBe("failed");
+		expect(row?.status).toBe("pending_create");
 		expect(row?.quotationId).toBeNull();
+		expect(row?.failureReason).toBeNull();
 	});
 });
 
@@ -374,7 +478,8 @@ describeLive("the rfq_requests store's own conditions", () => {
 			createTx: TX("7"),
 			at: new Date(),
 		});
-		expect(first?.quotationId).toBe(bound);
+		expect(first.kind).toBe("bound");
+		expect(first.kind === "bound" ? first.row.quotationId : null).toBe(bound);
 		const second = await store().bindQuotation({
 			id: row.id,
 			wallet,
@@ -382,8 +487,65 @@ describeLive("the rfq_requests store's own conditions", () => {
 			createTx: TX("8"),
 			at: new Date(),
 		});
-		expect(second).toBeNull();
+		expect(second.kind).toBe("already_bound");
 		expect((await store().findOwn(row.id, wallet))?.quotationId).toBe(bound);
+	});
+
+	/**
+	 * C-3, against the real partial unique index. One quotation belongs to
+	 * exactly one row of one factory, so a second row asking for it is REPORTED
+	 * rather than allowed to raise out of the server action.
+	 *
+	 * Mutant: drop the catch in `bindQuotation` and the call throws instead.
+	 */
+	test("bindQuotation reports a quotation another row already owns", async () => {
+		const wallet = newWallet();
+		const mine = await seed(wallet);
+		const other = await seed(wallet);
+		const shared = quotationId();
+
+		const first = await store().bindQuotation({ id: mine.id, wallet, quotationId: shared, createTx: TX("d"), at: new Date() });
+		expect(first.kind).toBe("bound");
+
+		const clash = await store().bindQuotation({ id: other.id, wallet, quotationId: shared, createTx: TX("e"), at: new Date() });
+		expect(clash.kind).toBe("quotation_taken");
+
+		// The loser is untouched: still pending, still unbound, still bindable.
+		const row = await store().findOwn(other.id, wallet);
+		expect(row?.status).toBe("pending_create");
+		expect(row?.quotationId).toBeNull();
+		expect(row?.failureReason).toBeNull();
+	});
+
+	/**
+	 * C-2. `WHERE status = 'pending_create' AND quotation_id IS NULL`. Mutant:
+	 * drop either clause and a late "that transaction reverted" can write
+	 * `failed` -- and its "nothing was escrowed" sentence -- over a row that
+	 * names a real, escrowed quotation.
+	 */
+	test("markFailed writes only on a row that is still unbound and pending", async () => {
+		const wallet = newWallet();
+		const row = await seed(wallet);
+
+		const failed = await store().markFailed({ id: row.id, wallet, reason: "transaction_reverted", at: new Date() });
+		expect(failed?.status).toBe("failed");
+
+		// A failed row is not `pending_create`, so it cannot be re-failed...
+		expect(await store().markFailed({ id: row.id, wallet, reason: "again", at: new Date() })).toBeNull();
+		expect((await store().findOwn(row.id, wallet))?.failureReason).toBe("transaction_reverted");
+
+		// ...but it IS still bindable, which is how a retry with the right hash
+		// recovers a row a wrong hash wrote off.
+		const bound = quotationId();
+		const rebound = await store().bindQuotation({ id: row.id, wallet, quotationId: bound, createTx: TX("f"), at: new Date() });
+		expect(rebound.kind).toBe("bound");
+		expect((await store().findOwn(row.id, wallet))?.status).toBe("active");
+
+		// And once bound, a reverted recording can no longer paint over it.
+		expect(await store().markFailed({ id: row.id, wallet, reason: "transaction_reverted", at: new Date() })).toBeNull();
+		const after = await store().findOwn(row.id, wallet);
+		expect(after?.status).toBe("active");
+		expect(after?.quotationId).toBe(bound);
 	});
 
 	/**
@@ -429,10 +591,11 @@ describeLive("the rfq_requests store's own conditions", () => {
 		const row = await seed(wallet);
 		expect(await store().findOwn(row.id, stranger)).toBeNull();
 		expect(
-			await store().bindQuotation({ id: row.id, wallet: stranger, quotationId: quotationId(), createTx: TX("d"), at: new Date() }),
-		).toBeNull();
-		await store().markFailed({ id: row.id, wallet: stranger, reason: "not_yours", at: new Date() });
+			(await store().bindQuotation({ id: row.id, wallet: stranger, quotationId: quotationId(), createTx: TX("d"), at: new Date() })).kind,
+		).toBe("already_bound");
+		expect(await store().markFailed({ id: row.id, wallet: stranger, reason: "not_yours", at: new Date() })).toBeNull();
 		expect((await store().findOwn(row.id, wallet))?.status).toBe("pending_create");
+		expect((await store().findOwn(row.id, wallet))?.quotationId).toBeNull();
 	});
 
 	/** A malformed id is answered, not sent to Postgres as a broken `uuid` cast. */

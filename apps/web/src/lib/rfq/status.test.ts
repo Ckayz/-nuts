@@ -153,6 +153,26 @@ describe("rfqStatusFor, on terminal states", () => {
 	});
 
 	/**
+	 * C-4. "Was my money returned?" is the one axis where a guess costs the most,
+	 * and this branch used to answer it for ANY value the indexer sent: anything
+	 * that was neither `active` nor `settled` read as "cancelled and its escrowed
+	 * deposit was returned". The SDK types the field as a plain `string`
+	 * (`dist/index.d.ts:1018-1019` names three values in a comment, nothing more),
+	 * so a fourth one is a shape this build has never seen — and it must say so.
+	 *
+	 * Mutant: fold the unknown case back into the cancelled branch.
+	 */
+	test("an indexer status this build does not know never claims the deposit came back", () => {
+		for (const unknown of ["expired", "pending", "revealing", "UNKNOWN", ""]) {
+			const view = call({ chain: null, indexer: indexer({ status: unknown }), now: OFFER_END });
+			expect(view.status).toBe("unknown");
+			expect(view.nextAction).toBe("none");
+			expect(view.sentence).not.toContain("returned");
+			expect(view.sentence).not.toContain("cancelled");
+		}
+	});
+
+	/**
 	 * PRECEDENCE. The chain is the factory itself and the indexer lags it, so a
 	 * settled indexer row cannot override a chain that still says active.
 	 */

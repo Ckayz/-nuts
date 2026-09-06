@@ -304,7 +304,7 @@ describe("buildCustomRfqPreview", () => {
 					requesterPublicKey,
 				},
 			});
-		const a = build(`0x02${"11".repeat(32)}`);
+		const a = build(`0x02${"22".repeat(32)}`);
 		const b = build(`0x03${"ab".repeat(32)}`);
 		expect(a.expected.requesterPublicKey).not.toBe(b.expected.requesterPublicKey);
 		const economics = (built: ReturnType<typeof build>) => ({

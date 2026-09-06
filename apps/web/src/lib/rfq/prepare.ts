@@ -305,9 +305,15 @@ const quotationSettledTopic: Hex = (() => {
 	return encodeEventTopics({ abi: [events[0] as Abi[number]] })[0] as Hex;
 })();
 
-/** Unix seconds from either an ISO instant or a number, or null. */
+/**
+ * Unix seconds from either an ISO instant or a number, or null.
+ *
+ * `isSafeInteger`, not `isInteger` (A-4): past 2^53 the number is no longer the
+ * one that was written, and `buildRfqCreate` bounds the plausible range from
+ * both ends after this.
+ */
 export function unixSecondsFrom(value: number | string): number | null {
-	if (typeof value === "number") return Number.isInteger(value) && value > 0 ? value : null;
+	if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? value : null;
 	const trimmed = value.trim();
 	if (/^\d+$/.test(trimmed)) {
 		const seconds = Number(trimmed);
@@ -376,6 +382,37 @@ export function parseRfqRowParams(value: unknown): RfqRowParams | null {
 		collateralDecimals,
 	};
 }
+
+/**
+ * Are these two rows' terms the same request?
+ *
+ * Every field of `RfqRowParams`, compared as the strings and numbers they are —
+ * `JSON.stringify` would not do, because Postgres normalises a `jsonb` object's
+ * key order and a round-tripped row therefore serialises differently from the
+ * object that was written.
+ */
+export function sameRfqParams(left: RfqRowParams, right: RfqRowParams): boolean {
+	const sameList = (a: readonly string[], b: readonly string[]) =>
+		a.length === b.length && a.every((value, index) => value === b[index]);
+	return (
+		left.underlying === right.underlying &&
+		sameList(left.strikesUsd, right.strikesUsd) &&
+		sameList(left.strikesUsd8, right.strikesUsd8) &&
+		left.expiryTimestamp === right.expiryTimestamp &&
+		left.numContracts === right.numContracts &&
+		left.numContractsBaseUnits === right.numContractsBaseUnits &&
+		left.reservePricePerContract === right.reservePricePerContract &&
+		left.offerDeadlineMinutes === right.offerDeadlineMinutes &&
+		left.implementation === right.implementation &&
+		left.collateralDecimals === right.collateralDecimals
+	);
+	// `offerEndTimestamp` is deliberately NOT compared: it is "now + the deadline"
+	// and moves with every prepare, so comparing it would make every re-prepare a
+	// different request and defeat the reuse.
+}
+
+/** How many of a wallet's unbound pending rows a re-prepare will look through. */
+const REUSABLE_PENDING_ROWS = 20;
 
 /* ─────────────────────────────── create ─────────────────────────────── */
 
@@ -470,17 +507,31 @@ export async function prepareRfqCreateFor(
 	});
 	if (!gate.ok) return fail(gate.code, gate.reason);
 
-	const expected: RfqExpected = {
-		depositBaseUnits: build.expected.depositBaseUnits.toString(),
-		deposit: decimalFromBaseUnits(build.expected.depositBaseUnits.toString(), build.expected.collateral.decimals),
-		strikesUsd: ascending(build.expected.strikesUsd8).map((strike) => decimalFromBaseUnits(strike.toString(), 8)),
-		numContracts: decimalFromBaseUnits(build.expected.numContracts.toString(), build.expected.collateral.decimals),
-		expiryAt: new Date(Number(build.expected.expiryTimestamp) * 1000).toISOString(),
-		offerEndAt: new Date(Number(build.expected.offerEndTimestamp) * 1000).toISOString(),
-		factory: build.factory,
-		maxLossUsd: gate.depositUsd,
-		collateralSymbol: "USDC",
-	};
+	// `toISOString` THROWS `RangeError` on a timestamp outside JavaScript's date
+	// range, and it sits outside the try that wraps `buildRfqCreate`, so an
+	// out-of-range value used to escape a server action as an unclassified error
+	// instead of a refusal (A-4). `buildRfqCreate` now bounds the expiry, which
+	// makes this unreachable through the product; it is caught anyway, because
+	// "unreachable" is an argument and a refusal is a fact.
+	let expected: RfqExpected;
+	try {
+		expected = {
+			depositBaseUnits: build.expected.depositBaseUnits.toString(),
+			deposit: decimalFromBaseUnits(build.expected.depositBaseUnits.toString(), build.expected.collateral.decimals),
+			strikesUsd: ascending(build.expected.strikesUsd8).map((strike) => decimalFromBaseUnits(strike.toString(), 8)),
+			numContracts: decimalFromBaseUnits(build.expected.numContracts.toString(), build.expected.collateral.decimals),
+			expiryAt: new Date(Number(build.expected.expiryTimestamp) * 1000).toISOString(),
+			offerEndAt: new Date(Number(build.expected.offerEndTimestamp) * 1000).toISOString(),
+			factory: build.factory,
+			maxLossUsd: gate.depositUsd,
+			collateralSymbol: "USDC",
+		};
+	} catch {
+		return fail(
+			"RFQ_INVALID_DEADLINE",
+			"The expiry or the offer deadline is not a date this build can express, so nothing was prepared.",
+		);
+	}
 
 	if (build.approve !== undefined) {
 		const approve = asTx(build.approve);
@@ -534,15 +585,33 @@ export async function prepareRfqCreateFor(
 		collateralDecimals: build.expected.collateral.decimals,
 	};
 
-	const row = await deps.store.insertPending({
-		walletAddress: wallet,
-		status: "pending_create",
-		params,
-		deposit: expected.depositBaseUnits,
-		collateralSymbol: "USDC",
-		factoryAddress: build.factory.toLowerCase(),
-		requesterPublicKey,
+	// REUSE BEFORE INSERT. The card prepares more than once per press by design
+	// (re-prepare, the pre-approval fence, the staleness re-check) and a wallet
+	// rejection leaves its row behind, so identical terms used to pile up rows
+	// that name no quotation and moved no money (C-5). An unbound `pending_create`
+	// row of this wallet with exactly these terms IS this request: it is made
+	// current again and its id handed back, so an earlier ticket still resolves.
+	// Nothing is deleted — deleting a row a broadcast ticket points at would
+	// strand a real escrow with no row to record it against.
+	const factoryAddress = build.factory.toLowerCase();
+	const reusable = (await deps.store.listUnboundPending(wallet, REUSABLE_PENDING_ROWS)).find((candidate) => {
+		if (!sameAddress(candidate.factoryAddress, factoryAddress)) return false;
+		if (candidate.deposit !== expected.depositBaseUnits) return false;
+		if (candidate.requesterPublicKey !== requesterPublicKey) return false;
+		const stored = parseRfqRowParams(candidate.params);
+		return stored !== null && sameRfqParams(stored, params);
 	});
+	const row =
+		(reusable === undefined ? null : await deps.store.touchPending({ id: reusable.id, wallet, at: deps.now() })) ??
+		(await deps.store.insertPending({
+			walletAddress: wallet,
+			status: "pending_create",
+			params,
+			deposit: expected.depositBaseUnits,
+			collateralSymbol: "USDC",
+			factoryAddress,
+			requesterPublicKey,
+		}));
 
 	return {
 		ok: true,
@@ -767,17 +836,36 @@ async function verifyForRecord(
 	return { ticket, row, txHash: txHash as `0x${string}` };
 }
 
-async function markFailed(deps: RfqDeps, id: string, wallet: string, reason: string): Promise<void> {
-	await deps.store.markFailed({ id, wallet, reason, at: deps.now() });
+/**
+ * Writes `failed` ONLY on a row that is still an unbound `pending_create` one.
+ *
+ * Returns the row it wrote, or null when someone else had already resolved it —
+ * the caller then reports what the row really says rather than the failure it
+ * was about to record (C-2).
+ */
+async function markFailed(deps: RfqDeps, id: string, wallet: string, reason: string): Promise<RfqRequest | null> {
+	return await deps.store.markFailed({ id, wallet, reason, at: deps.now() });
+}
+
+/** The row as it stands now, for the paths where a conditional write found nothing to do. */
+async function currentRow(deps: RfqDeps, wallet: string, id: string): Promise<RfqRequest> {
+	const current = await loadOwnRow({ walletAddress: wallet }, id, deps);
+	if (current === null) throw new Error(`rfq_requests ${id} vanished while confirming`);
+	return current;
 }
 
 /**
  * Binds a mined create to its row.
  *
- * THREE things are required of the transaction, and none of them comes from the
- * browser: it succeeded; its `to` is the OptionFactory this ticket names; and it
- * emitted `QuotationRequested` FROM that factory WITH this wallet as the indexed
- * requester. The quotation id is read out of that log's own topic.
+ * TWO things are required of the transaction, and neither comes from the
+ * browser: it succeeded, and it emitted `QuotationRequested` FROM the
+ * OptionFactory this ticket names WITH this wallet as the indexed requester.
+ * The quotation id is read out of that log's own topic.
+ *
+ * The transaction's own `to` is deliberately NOT a condition (C-1): a smart
+ * account or a multisig wraps the call, so `to` is an entry point while the
+ * factory still emits the event. It only chooses the wording of the refusal
+ * when no such log exists.
  */
 export async function recordRfqCreateFor(
 	session: { userId: string; walletAddress: string } | null,
@@ -806,7 +894,24 @@ export async function recordRfqCreateFor(
 		// A DURABLE record of the failure, returned as `ok` with `status: "failed"`.
 		// The browser must be able to let go of its held transaction: a refusal
 		// would leave the card holding a reverted hash and retrying forever.
-		await markFailed(deps, row.id, ticket.wallet, "transaction_reverted");
+		//
+		// The write is conditional on the row still being an unbound
+		// `pending_create` one (C-2). If another recording bound it in the window
+		// between the read above and this write, that row now names a real,
+		// escrowed quotation and must NOT be overwritten with "nothing was
+		// escrowed"; what the row actually says is returned instead.
+		const failed = await markFailed(deps, row.id, ticket.wallet, "transaction_reverted");
+		if (failed === null) {
+			const current = await currentRow(deps, ticket.wallet, row.id);
+			return {
+				ok: true,
+				rfqRequestId: current.id,
+				quotationId: current.quotationId,
+				status: current.status,
+				// TODO-OWNER: wording.
+				note: `That transaction reverted, but this request has since been recorded from another transaction. Transaction ${txHash}.`,
+			};
+		}
 		return {
 			ok: true,
 			rfqRequestId: row.id,
@@ -816,13 +921,16 @@ export async function recordRfqCreateFor(
 			note: `That transaction reverted, so no request was created and nothing was escrowed. Transaction ${txHash}.`,
 		};
 	}
-	if (!sameAddress(transaction.to, row.factoryAddress)) {
-		await markFailed(deps, row.id, ticket.wallet, "receipt_not_the_factory");
-		return fail(
-			"RECEIPT_MISMATCH",
-			`That transaction does not call the OptionFactory, so it cannot be the request that was prepared. Nothing was recorded. Transaction ${txHash}.`,
-		);
-	}
+	// THE LOG IS READ FIRST, and it — not the transaction's `to` — is what binds.
+	//
+	// A `QuotationRequested` emitted BY this factory naming THIS wallet as the
+	// indexed requester is proof the create happened, whatever address sits at the
+	// top of the transaction. A smart account sends this call through an entry
+	// point (`lib/wagmi.ts` offers Coinbase Smart Wallet with `preference: "all"`,
+	// and ERC-4337 puts the EntryPoint in `to`), a multisig through its own
+	// `execute`. Refusing on `to` first wrote those real, escrowed requests off as
+	// `failed`, told the user nothing had been escrowed, and left no cancel path
+	// to the deposit — the money statement was false and unrecoverable.
 	const requesterTopic = `0x${ticket.wallet.slice(2).padStart(64, "0")}`;
 	const mine = receipt.logs.filter(
 		(log) =>
@@ -832,29 +940,46 @@ export async function recordRfqCreateFor(
 	);
 	const decoded = decodeQuotationRequested(mine, row.factoryAddress);
 	if (decoded === null) {
-		await markFailed(deps, row.id, ticket.wallet, "no_quotation_requested_log");
+		// NO PROOF EITHER WAY, so the row is refused and LEFT `pending_create`.
+		// A successful receipt that this build cannot read is not evidence that
+		// nothing was escrowed, and a retry with the right hash must still find
+		// the row. `to` only sharpens the sentence here; it decides nothing.
+		// TODO-OWNER: wording.
 		return fail(
 			"RECEIPT_MISMATCH",
-			`That transaction carries no QuotationRequested event from the OptionFactory for this wallet, so nothing was recorded. Transaction ${txHash}.`,
+			sameAddress(transaction.to, row.factoryAddress)
+				? `That transaction carries no QuotationRequested event from the OptionFactory for this wallet, so nothing was recorded and the request is still waiting for its transaction. Transaction ${txHash}.`
+				: `That transaction does not call the OptionFactory and carries none of its request events for this wallet, so nothing was recorded and the request is still waiting for its transaction. Transaction ${txHash}.`,
 		);
 	}
 
 	const quotationId = decoded.quotationId.toString();
 	// Conditional on the row still being unbound (`./store.ts`), so two concurrent
 	// recordings of the same hash cannot both write it.
-	const updated = await deps.store.bindQuotation({
+	const bind = await deps.store.bindQuotation({
 		id: row.id,
 		wallet: ticket.wallet,
 		quotationId,
 		createTx: txHash,
 		at: deps.now(),
 	});
-	if (updated === null) {
-		const current = await loadOwnRow({ walletAddress: ticket.wallet }, row.id, deps);
-		if (current === null) throw new Error(`rfq_requests ${row.id} vanished while confirming`);
+	if (bind.kind === "already_bound") {
+		const current = await currentRow(deps, ticket.wallet, row.id);
 		return { ok: true, rfqRequestId: current.id, quotationId: current.quotationId, status: current.status };
 	}
-	return { ok: true, rfqRequestId: updated.id, quotationId, status: updated.status };
+	if (bind.kind === "quotation_taken") {
+		// One quotation belongs to exactly one row
+		// (`rfq_requests_factory_quotation_key`), so this receipt is a create
+		// ALREADY recorded against a different request of this wallet — a
+		// mispaired ticket and hash, not a failure of this request. Nothing is
+		// written and the row is left `pending_create`, still waiting for its own
+		// transaction (C-3). TODO-OWNER: wording.
+		return fail(
+			"RECEIPT_MISMATCH",
+			`That transaction created request ${quotationId}, which is already recorded on another of your requests, so nothing was recorded here. Transaction ${txHash}.`,
+		);
+	}
+	return { ok: true, rfqRequestId: bind.row.id, quotationId, status: bind.row.status };
 }
 
 /** The quotation id a `cancelQuotation`/`settleQuotation` transaction actually names. */
@@ -950,8 +1075,7 @@ async function recordIdCall(
 		at: deps.now(),
 	});
 	if (updated === null) {
-		const current = await loadOwnRow({ walletAddress: ticket.wallet }, row.id, deps);
-		if (current === null) throw new Error(`rfq_requests ${row.id} vanished while recording`);
+		const current = await currentRow(deps, ticket.wallet, row.id);
 		return { ok: true, rfqRequestId: current.id, quotationId: current.quotationId, status: current.status, optionAddress: current.optionAddress };
 	}
 	return { ok: true, rfqRequestId: updated.id, quotationId: updated.quotationId, status: updated.status, optionAddress: updated.optionAddress };

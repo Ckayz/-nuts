@@ -34,7 +34,9 @@ export type RfqStatusName =
 	| "settled"
 	| "cancelled"
 	| "expired_unfilled"
-	| "failed";
+	| "failed"
+	/** The indexer answered with a state this build does not model. Nothing is claimed about the escrow. */
+	| "unknown";
 
 export type RfqNextAction = "wait" | "settle" | "cancel" | "none";
 
@@ -96,6 +98,8 @@ const COPY = {
 	revealUnknown: "The offer period has closed. How long the reveal window still has to run could not be read from Base, so it is too early to say this can be settled.",
 	ready: "The reveal window has passed and a winning offer is on chain, so this request can now be settled. Settling is permissionless: anyone can send it, and market makers often settle their own winning requests.",
 	unfilled: "The reveal window has passed and no offer is on chain, so there is nothing to settle. Cancelling returns the escrowed deposit.",
+	unknown:
+		"The Thetanuts indexer reports a state this build does not recognise, and Base could not be read, so nothing can be said about this request or its deposit yet. Read it on chain, or try again.",
 } as const;
 
 /**
@@ -134,10 +138,20 @@ export function rfqStatusFor(input: {
 			? { status: "cancelled", nextAction: "none", sentence: COPY.cancelled, ...base }
 			: { status: "settled", nextAction: "none", sentence: COPY.settled, ...base };
 	}
+	// The indexer's own vocabulary, and NOTHING is inferred from a value outside
+	// it. The SDK types this field as a plain `string` and only names
+	// `active | settled | cancelled` in a doc comment (`dist/index.d.ts:1018`),
+	// so a fourth value is a state this build has never seen. It used to read as
+	// "cancelled and its escrowed deposit was returned" — a money claim, made by
+	// default, on the one axis where being wrong costs the most (C-4).
 	if (chain === null && indexer !== null && indexer.status !== "active") {
-		return indexer.status === "settled"
-			? { status: "settled", nextAction: "none", sentence: COPY.settled, ...base }
-			: { status: "cancelled", nextAction: "none", sentence: COPY.cancelled, ...base };
+		if (indexer.status === "settled") {
+			return { status: "settled", nextAction: "none", sentence: COPY.settled, ...base };
+		}
+		if (indexer.status === "cancelled") {
+			return { status: "cancelled", nextAction: "none", sentence: COPY.cancelled, ...base };
+		}
+		return { status: "unknown", nextAction: "none", sentence: COPY.unknown, ...base };
 	}
 	// Neither chain nor indexer could be read: our own row is all there is.
 	if (chain === null && indexer === null) {

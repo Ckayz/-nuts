@@ -290,3 +290,69 @@ test("the market page does not document the absence of a chart it renders", asyn
 	// condition the chart is kept under.
 	expect(page).toContain("Binance");
 });
+
+/**
+ * K-4 item 4 (pass-5 lane C MINOR-1). The proxy's JSON was cast straight to
+ * `Candle[]` after an `Array.isArray` check — element shape unchecked — so a row
+ * the proxy would have rejected became coordinates on the canvas.
+ *
+ * Reachable only if our OWN same-origin proxy answers with rows `parseKlines`
+ * would refuse, which it cannot today: that is why the reviewer filed it MINOR.
+ * It is still the assumption that stops holding the day someone edits the other
+ * end, and the cost of not assuming is one shared function.
+ *
+ * Asserted through the REAL component, not by calling the validator: the thing
+ * that matters is that a bad payload ends in the empty state rather than in
+ * `createChart`.
+ */
+test("a malformed row from the proxy draws the empty state, not NaN coordinates", () => {
+	const result = runChart(String.raw`
+		globalThis.fetch = async () => ({
+			ok: true,
+			json: async () => ({ candles: [{ time: "not a number", open: 1, high: 2, low: 1, close: 2 }] }),
+		});
+	`);
+	expect(result.charts).toBe(0);
+	expect(result.labelledCount).toBe(0);
+	expect(String(result.text)).toContain("Price history is unavailable right now.");
+});
+
+test("rows that go backwards in time are refused on the client too", () => {
+	const result = runChart(String.raw`
+		globalThis.fetch = async () => ({
+			ok: true,
+			json: async () => ({ candles: [
+				{ time: 1788044400, open: 1, high: 2, low: 1, close: 2 },
+				{ time: 1788040800, open: 2, high: 3, low: 2, close: 3 },
+			] }),
+		});
+	`);
+	expect(result.charts).toBe(0);
+	expect(String(result.text)).toContain("Price history is unavailable right now.");
+});
+
+/**
+ * The validator itself. It is the SAME function `parseKlines` finishes with, so
+ * the two ends cannot drift; `klines.test.ts` still pins the Binance row shape
+ * on top of it, unchanged by this fold.
+ */
+test("asCandles accepts a real series and refuses every broken shape", async () => {
+	const { asCandles } = await import("@/lib/chart/klines");
+	const good = [
+		{ time: 1788040800, open: 1, high: 2, low: 1, close: 2 },
+		{ time: 1788044400, open: 2, high: 3, low: 2, close: 3 },
+	];
+	expect(asCandles(good)).toEqual(good);
+	// One bad row poisons the series: a partial chart is still a wrong chart.
+	expect(asCandles([...good, { time: 1788048000, open: 1, high: 2, low: 1, close: "3" }])).toEqual([]);
+	expect(asCandles(null)).toEqual([]);
+	expect(asCandles({ time: 1 })).toEqual([]);
+	expect(asCandles([[1788040800, 1, 2, 1, 2]])).toEqual([]);
+	expect(asCandles([{ time: 1788040800, open: 1, high: 2, low: 1 }])).toEqual([]);
+	expect(asCandles([{ time: 0, open: 1, high: 2, low: 1, close: 2 }])).toEqual([]);
+	expect(asCandles([{ time: 1788040800, open: -1, high: 2, low: 1, close: 2 }])).toEqual([]);
+	expect(asCandles([{ time: Number.NaN, open: 1, high: 2, low: 1, close: 2 }])).toEqual([]);
+	expect(asCandles([good[0], good[0]])).toEqual([]);
+	// An empty page is a legitimate answer, not a malformed one.
+	expect(asCandles([])).toEqual([]);
+});

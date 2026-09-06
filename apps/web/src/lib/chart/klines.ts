@@ -152,26 +152,71 @@ export interface Candle {
  */
 export function parseKlines(body: unknown): Candle[] {
 	if (!Array.isArray(body)) return [];
-	const candles: Candle[] = [];
+	const candles: unknown[] = [];
 	for (const row of body) {
 		if (!Array.isArray(row) || row.length < 5) return [];
-		const time = Number(row[0]);
-		const open = Number(row[1]);
-		const high = Number(row[2]);
-		const low = Number(row[3]);
-		const close = Number(row[4]);
-		if (![time, open, high, low, close].every((value) => Number.isFinite(value))) return [];
-		if (time <= 0 || open <= 0 || high <= 0 || low <= 0 || close <= 0) return [];
-		// Binance sends milliseconds; lightweight-charts wants seconds.
-		candles.push({ time: Math.floor(time / 1000), open, high, low, close });
+		// Binance sends milliseconds; lightweight-charts wants seconds. The
+		// numbers arrive as decimal STRINGS, so they are converted here and
+		// judged by the shared rule below.
+		//
+		// K-4: one deliberate difference from the loop this replaced. The
+		// positivity test used to run on the RAW millisecond value, so a
+		// timestamp under 1,000 ms passed and was then floored to second 0 and
+		// plotted. It now runs on the SECONDS, so such a row rejects the page.
+		// Binance has never sent one; the old order was simply wrong.
+		candles.push({
+			time: Math.floor(Number(row[0]) / 1000),
+			open: Number(row[1]),
+			high: Number(row[2]),
+			low: Number(row[3]),
+			close: Number(row[4]),
+		});
 	}
-	// Strictly increasing time, which the chart library requires and which a
-	// duplicated or out-of-order page would otherwise break at render time.
-	for (let i = 1; i < candles.length; i++) {
-		const previous = candles[i - 1];
-		const current = candles[i];
-		if (previous === undefined || current === undefined) return [];
-		if (current.time <= previous.time) return [];
+	return asCandles(candles);
+}
+
+/**
+ * K-4 item 4 (pass-5 lane C MINOR-1). The SAME rule, applied to candles that are
+ * already objects — which is what the browser gets back from
+ * `/api/klines/[asset]`.
+ *
+ * `price-chart.tsx` used to cast the proxy's JSON to `Candle[]` after an
+ * `Array.isArray` check and nothing more, so a row shaped `{time:"x"}` would
+ * have been handed to `lightweight-charts` as coordinates. Only our own
+ * same-origin proxy can answer that route and it validates every row, so this
+ * is defence in depth rather than a live defect — but "the other end validates"
+ * is exactly the assumption that stops being true when someone changes the
+ * other end.
+ *
+ * One function for both ends on purpose: two copies of a validation rule drift,
+ * and a client that accepted what the server rejects is worse than no check.
+ *
+ * A single bad row rejects the WHOLE series, matching `parseKlines`: a chart
+ * missing a candle in the middle still reads as a continuous price line, so a
+ * partial series is a wrong picture rather than an incomplete one.
+ */
+export function asCandles(value: unknown): Candle[] {
+	if (!Array.isArray(value)) return [];
+	const candles: Candle[] = [];
+	for (const row of value) {
+		if (typeof row !== "object" || row === null || Array.isArray(row)) return [];
+		const { time, open, high, low, close } = row as Record<string, unknown>;
+		const numbers = [time, open, high, low, close];
+		// Finite AND positive: `Number("")` is 0 and `Number(null)` is 0, so a
+		// zero is far more likely to be a parse failure than a price.
+		if (!numbers.every((entry) => typeof entry === "number" && Number.isFinite(entry) && entry > 0)) return [];
+		const candle: Candle = {
+			time: time as number,
+			open: open as number,
+			high: high as number,
+			low: low as number,
+			close: close as number,
+		};
+		// Strictly increasing time, which the chart library requires and which a
+		// duplicated or out-of-order page would otherwise break at render time.
+		const previous = candles[candles.length - 1];
+		if (previous !== undefined && candle.time <= previous.time) return [];
+		candles.push(candle);
 	}
 	return candles;
 }

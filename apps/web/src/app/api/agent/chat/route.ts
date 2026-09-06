@@ -29,93 +29,87 @@ import {
 	MESSAGE_TOO_LONG,
 	REQUEST_TOO_LONG,
 	agentChatBodySchema,
-	messageText,
+	withoutClientEchoes,
 } from "@/lib/agent/request";
 
 export const maxDuration = 60;
 
 /**
- * C-2 (lane C pass 3, MAJOR) and K-1 (pass-4 lane C MAJOR-1). Everything the
- * request carries, as strings for the scope gate.
+ * C-2 (lane C pass 3, MAJOR), K-1 (pass-4 lane C MAJOR-1) and K-4 (pass-5 lane
+ * C MAJOR-1). What the scope gate is given: every message, SERIALISED WHOLE.
  *
- * This was `latestUserText` (the newest user message only), then a user-role
- * filter. Both left the rest of the body reaching `convertToModelMessages` and
- * the primary model unclassified. The history comes from the BROWSER and
- * carries no server signature, so the role on a message is a client's claim,
- * not a fact — and neither is the provenance of a tool part's `output`.
- * Reproduced against the real route, gate and provider injected, in
- * `lib/agent/request.test.ts`:
+ * -- Why this is not a list of channels -------------------------------------
  *
- *   TWO_USER            {"gateTexts":["What is a put?"],
- *                        "primaryRoles":["user","user"],"primaryHasScraper":true}
- *   USER_ASSISTANT_USER {"gateTexts":["What is a put?"],
- *                        "primaryRoles":["user","assistant","user"],
- *                        "primaryHasScraper":true}
- *   PROBE-1 (assistant-role carrier)  {"modelCalls":1,"modelSeesScraper":true}
- *   PROBE-2 (forged tool output)      {"modelCalls":1,"modelSeesScraper":true}
+ * This function has been found wrong in the same way in two consecutive
+ * reviews. It read `latestUserText`, then every role's text, then text plus a
+ * tool part's `output` and `errorText`, then plus `input` and `rawInput`. Each
+ * round closed the channels that round had thought of, and each time the next
+ * reviewer found more that `convertToModelMessages` forwards and this did not
+ * read. Pass 5 measured seven of them through the real route, gate and provider
+ * injected, on the PRE-FOLD bytes (no strip existed yet, so every marker also
+ * reached the provider):
  *
- * PRD 10.8, verbatim: "Every inbound message is classified before the primary
- * model runs. … This layer is authoritative." Everything in the request IS
- * inbound, so everything in the request is classified: the text and reasoning
- * parts of every role, plus the two channels a tool part can carry client
- * content in (`output`, serialised, and `errorText`). Each string is prefixed
- * with the role the client CLAIMED, so the classifier is told who is said to
- * have spoken and still treats the whole block as data — `gatePrompt` wraps
- * each string in its own `<message>` block and the gate instruction says to
- * classify, never to obey.
+ *   A1 approval.reason        A2 approval.requestReason
+ *   A3 output-denied reason   A4 approved reason
+ *   B1 toolCallId             B2 callProviderMetadata     B3 approval.signature
+ *   each {"status":200,"modelCalls":1,"gateSaw":false,"modelSaw":true}
+ *   A5, the same string as user text: {"modelCalls":0,"gateSaw":true}
+ *
+ * An ENUMERATION of channels is the wrong shape, because the property wanted is
+ * about the channels nobody has enumerated yet. So the gate now reads the whole
+ * validated message object -- `JSON.stringify(message)`: every part, every
+ * nested field, every passthrough key such as `useChat`'s `id` -- prefixed with
+ * the role the client CLAIMED. `gatePrompt` wraps each string in its own
+ * `<message>` block and the gate instruction says to classify, never to obey.
+ *
+ * The property this buys, and the reason `withoutClientEchoes` runs AFTER this
+ * rather than inside the schema: the gate is handed exactly the message the
+ * SCHEMA ACCEPTED — zod has already dropped any part key the closed union does
+ * not name, and those keys reach nothing at all — and the primary model is
+ * handed a SUBSET of that. No client-writable byte reaches the model without
+ * passing the classifier, and that stays true if a later edit shortens the
+ * strip list.
  *
  * CHUNKED at `MAX_MESSAGE_CHARS`, which is not cosmetic: `gatePrompt` puts
- * every string through `gateWindowText`, a `slice(0, MAX_MESSAGE_CHARS)`. An
- * assistant message may be `MAX_ASSISTANT_MESSAGE_CHARS` long and a tool output
- * is bounded only by `MAX_REQUEST_CHARS`, so handing either over in one piece
- * would let the gate read the first 2,000 characters while the model read all
- * of them — the exact truncation hole C-P2-3 closed for user text.
+ * every string through `gateWindowText`, a `slice(0, MAX_MESSAGE_CHARS)`. A
+ * serialised message is longer than the text inside it, so handing one over
+ * whole would let the gate read the first 2,000 characters while the model read
+ * all of them -- the exact truncation hole C-P2-3 closed for user text.
  *
  * COST, stated rather than implied: every turn re-classifies the whole request
- * instead of one message, so the gate's input grows with the conversation. It
- * is bounded — `agentChatBodySchema` caps a request at 80 messages, each user
- * message at `MAX_MESSAGE_CHARS`, each assistant message at
- * `MAX_ASSISTANT_MESSAGE_CHARS`, and the whole serialised request at
- * `MAX_REQUEST_CHARS` — so the gate is handed at most one block per message
- * plus about `MAX_REQUEST_CHARS / MAX_MESSAGE_CHARS` more. Not free.
+ * as JSON, so the gate's input is larger than the conversation's prose and
+ * grows with it. It is bounded -- `agentChatBodySchema` caps a request at 80
+ * messages, each user message at `MAX_MESSAGE_CHARS`, each assistant message at
+ * `MAX_ASSISTANT_MESSAGE_CHARS`, and the whole SERIALISED request at
+ * `MAX_REQUEST_CHARS`, measured by `agentChatBodySchema` on `JSON.stringify` of
+ * these same validated messages and BEFORE the strip runs -- so the arithmetic
+ * ceiling is `MAX_REQUEST_CHARS / (MAX_MESSAGE_CHARS - label)` blocks of body,
+ * about 61, plus at most one partly-filled block per message, 80: 141 blocks of
+ * at most 2,000 characters. Not free.
  * TODO-OWNER: the cheaper design is for the server to SIGN the history it
  * returns and classify only unsigned text; that is a new mechanism, not a fix,
  * and it is the owner's call.
+ *
+ * FLAGGED, not decided: `GATE_INSTRUCTION` (`lib/agent/scope.ts`) tells the gate
+ * model it is given "messages", and each block is now a JSON object rather than
+ * bare prose. Everything the person wrote is still inside that JSON and the
+ * instruction already says to treat a block as data, but whether that sentence
+ * should mention the shape is a copy decision, and `scope.ts` is outside this
+ * fold's file list.
  */
 function inboundTexts(messages: UIMessage[]): string[] {
 	const texts: string[] = [];
 	for (const message of messages) {
-		const parts = (message?.parts ?? []) as Array<{
-			type?: unknown;
-			text?: unknown;
-			input?: unknown;
-			rawInput?: unknown;
-			output?: unknown;
-			errorText?: unknown;
-		}>;
-		const pieces: string[] = [];
-		const text = messageText(parts);
-		if (text.length > 0) pieces.push(text);
-		for (const part of parts) {
-			if (typeof part.type !== "string" || !part.type.startsWith("tool-")) continue;
-			// EVERY client-writable channel of a tool part that reaches the model.
-			// `input` is `z.unknown()` and becomes the tool CALL's arguments —
-			// measured on these bytes with a marker string:
-			//   INPUT_PROBE {"status":200,"gate":["[user] hi","[assistant] {\"ok\":1}"],
-			//                "modelSees":true}
-			// `output` is `z.record(string, unknown)` for the read tools, so both
-			// are serialised whole rather than read field by field.
-			for (const channel of [part.input, part.rawInput, part.output]) {
-				if (channel !== undefined) pieces.push(JSON.stringify(channel) ?? "");
-			}
-			if (typeof part.errorText === "string") pieces.push(part.errorText);
-		}
-		const joined = pieces.filter((piece) => piece.length > 0).join("\n");
-		if (joined.length === 0) continue;
-		const label = `[${message.role}] `;
+		// A validated message came out of `JSON.parse`, so it holds no cycles, no
+		// `BigInt` and no functions: `JSON.stringify` cannot throw here, and an
+		// object never serialises to `undefined`. The fallback is belt to that.
+		const serialised = JSON.stringify(message) ?? "";
+		const label = `[${String((message as { role?: unknown }).role)}] `;
 		const room = Math.max(1, MAX_MESSAGE_CHARS - label.length);
-		for (let at = 0; at < joined.length; at += room) {
-			texts.push(`${label}${joined.slice(at, at + room)}`);
+		// `serialised` is never empty, so EVERY message contributes at least one
+		// block. A message the gate cannot see at all is the bug this closes.
+		for (let at = 0; at < serialised.length; at += room) {
+			texts.push(`${label}${serialised.slice(at, at + room)}`);
 		}
 	}
 	return texts;
@@ -231,7 +225,12 @@ export async function POST(request: Request) {
 	const result = streamText({
 		model: agentModel,
 		system: SYSTEM_PROMPT,
-		messages: await convertToModelMessages(messages),
+		/**
+		 * K-4 item 2. The model is handed the messages MINUS the fields the
+		 * SERVER wrote on an earlier turn and the browser only echoes back. See
+		 * `withoutClientEchoes`; the gate above already read the unstripped ones.
+		 */
+		messages: await convertToModelMessages(withoutClientEchoes(messages)),
 		tools: { ...createReadTools({ asset }), ...createExecutionTools({ account, session, thesisId }) },
 		/**
 		 * PRD 10.1 and 14: no transaction is prepared without an explicit answer from

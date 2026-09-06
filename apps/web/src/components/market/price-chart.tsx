@@ -26,6 +26,7 @@ import {
 	CHART_SOURCE_NOTE,
 	CHART_TIMEOUT_MS,
 	CHART_WINDOW_LABEL,
+	asCandles,
 	type Candle,
 	strikeLevels,
 	whenAborted,
@@ -98,8 +99,12 @@ export function PriceChart({
 				]);
 				if (response.ok) {
 					const body: unknown = await Promise.race([response.json(), whenAborted(signal)]);
-					const list = (body as { candles?: unknown }).candles;
-					if (Array.isArray(list)) candles = list as Candle[];
+					// K-4 item 4. This used to be `list as Candle[]` after an
+					// `Array.isArray` check: the element shape was never looked at, so
+					// a malformed row would have become NaN coordinates on the canvas.
+					// `asCandles` is the proxy's own rule, imported rather than
+					// restated, and an unusable series ends in the empty state below.
+					candles = asCandles((body as { candles?: unknown }).candles);
 				}
 			} catch {
 				candles = [];

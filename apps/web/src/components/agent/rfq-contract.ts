@@ -141,6 +141,8 @@ export interface PreparedRfqAction {
 }
 
 export type RfqStatusKind =
+	/** W2: a row exists from the moment calldata is prepared, before the create mines. */
+	| "pending_create"
 	| "waiting_for_offers"
 	| "reveal_window"
 	| "ready_to_settle"

@@ -53,7 +53,7 @@ import { dbKeyStorage, getOrCreateWalletRfqKey, rfqKeysConfigured, type Database
 import { drizzleRfqStore, type RfqRowStore } from "./store";
 import { withinRfqDepositLimit } from "./limits";
 import { decodeRfqTicket, encodeRfqTicket, type RfqTicketKind, type RfqTicketPayload } from "./ticket";
-import { rfqStatusFor, type RfqChainView, type RfqIndexerView } from "./status";
+import { rfqStatusFor, type RfqChainView, type RfqIndexerView, type RfqStatusName, type RfqNextAction } from "./status";
 
 const HEX_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const TX_HASH = /^0x[0-9a-fA-F]{64}$/;
@@ -1075,8 +1075,9 @@ export { readRevealWindow };
  * (W3) declares the same fields.
  */
 export interface RfqStatusReadout {
-	readonly status: string;
-	readonly nextAction: string;
+	/** Orchestrator (integration): the unions `status.ts` defines, not `string`, so the card's `RfqStatusView` accepts this readout without a cast. */
+	readonly status: RfqStatusName;
+	readonly nextAction: RfqNextAction;
 	readonly sentence: string;
 	readonly quotationId: string | null;
 	readonly optionAddress: string | null;

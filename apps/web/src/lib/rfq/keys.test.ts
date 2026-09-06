@@ -11,10 +11,13 @@ import { randomBytes } from "node:crypto";
 import { SigningKey } from "ethers";
 import {
 	decryptRfqPrivateKey,
+	dbKeyStorage,
 	encryptRfqPrivateKey,
+	getOrCreateWalletRfqKey,
 	normalizeRfqWallet,
 	RfqKeyError,
 	rfqKeysConfigured,
+	type Database,
 } from "./keys";
 
 const key = () => randomBytes(32);
@@ -88,6 +91,111 @@ describe("rfq key envelope", () => {
 		const generated = `0x${randomBytes(32).toString("hex")}`;
 		const recovered = decryptRfqPrivateKey(encryptRfqPrivateKey(generated, master), master);
 		expect(new SigningKey(recovered).compressedPublicKey).toBe(new SigningKey(generated).compressedPublicKey);
+	});
+});
+
+/* ─────────────────────────── the first-mint race ─────────────────────────── */
+
+/**
+ * A-1. `agent_rfq_keys` holds ONE row per wallet, and the SDK's
+ * `getOrCreateKeyPair` is `has()` → `get()` → generate → `set()` with no lock
+ * (`dist/index.js:11760-11773`). Two overlapping FIRST mints for one wallet
+ * therefore both find nothing and both generate; only one private half can be
+ * stored, and the caller left holding the other one has an RFQ whose offers can
+ * never be decrypted — the docs give no recovery.
+ *
+ * The database is injected here (`getOrCreateWalletRfqKey`'s own second
+ * parameter) so the interleaving is exact rather than hoped for: every
+ * operation yields a macrotask, which is what a real connection does. It keeps
+ * the drizzle call shapes the module actually uses, including BOTH conflict
+ * clauses, so the mutant below runs against it unchanged.
+ */
+interface FakeRow {
+	walletAddress: string;
+	publicKey: string;
+	encryptedPrivateKey: string;
+}
+
+function racyDatabase(state: { row: FakeRow | null; inserts: number; updates: number }): Database {
+	const yielded = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+	const fake = {
+		select: () => ({
+			from: () => ({
+				where: () => ({
+					async limit() {
+						await yielded();
+						return state.row === null ? [] : [{ encryptedPrivateKey: state.row.encryptedPrivateKey }];
+					},
+				}),
+			}),
+		}),
+		insert: () => ({
+			values: (values: FakeRow) => ({
+				async onConflictDoNothing() {
+					await yielded();
+					state.inserts += 1;
+					if (state.row === null) state.row = { ...values };
+				},
+				onConflictDoUpdate: async ({ set }: { set: Partial<FakeRow> }) => {
+					await yielded();
+					state.inserts += 1;
+					state.row = state.row === null ? { ...values } : { ...state.row, ...set };
+				},
+			}),
+		}),
+		update: () => ({
+			set: (values: Partial<FakeRow>) => ({
+				async where() {
+					await yielded();
+					state.updates += 1;
+					if (state.row !== null) state.row = { ...state.row, ...values };
+				},
+			}),
+		}),
+		delete: () => ({
+			async where() {
+				await yielded();
+				state.row = null;
+			},
+		}),
+	};
+	return fake as unknown as Database;
+}
+
+describe("the first-mint race", () => {
+	const WALLET = "0xabcabcabcabcabcabcabcabcabcabcabcabcabca";
+
+	test("two concurrent first mints leave one row, and BOTH callers get the stored key", async () => {
+		const state = { row: null as FakeRow | null, inserts: 0, updates: 0 };
+		const database = racyDatabase(state);
+		const [first, second] = await Promise.all([
+			getOrCreateWalletRfqKey(WALLET, database),
+			getOrCreateWalletRfqKey(WALLET, database),
+		]);
+
+		// The race really happened: both callers reached `set` with nothing stored.
+		expect(state.inserts).toBe(2);
+		const row = state.row;
+		if (row === null) throw new Error("no row was written");
+		const storedPublicKey = new SigningKey(decryptRfqPrivateKey(row.encryptedPrivateKey)).compressedPublicKey;
+		// Neither caller may be handed a public key whose private half is gone.
+		expect(first.compressedPublicKey).toBe(storedPublicKey);
+		expect(second.compressedPublicKey).toBe(storedPublicKey);
+		// And the column agrees with the ciphertext beside it.
+		expect(row.publicKey).toBe(storedPublicKey);
+	});
+
+	test("set is insert-only: a second write never replaces a stored key", async () => {
+		const state = { row: null as FakeRow | null, inserts: 0, updates: 0 };
+		const storage = dbKeyStorage(WALLET, racyDatabase(state));
+		const keyId = "thetanuts_rfq_key_8453";
+		const kept = `0x${"11".repeat(32)}`;
+		const loser = `0x${"22".repeat(32)}`;
+
+		await storage.set(keyId, kept);
+		await storage.set(keyId, loser);
+		expect(await storage.get(keyId)).toBe(kept);
+		expect(state.row?.publicKey).toBe(new SigningKey(kept).compressedPublicKey);
 	});
 });
 

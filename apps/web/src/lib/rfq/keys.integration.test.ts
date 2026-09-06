@@ -63,8 +63,12 @@ describeLive("rfq key storage", () => {
 		// The column is a ciphertext, and the plaintext it hides is the private
 		// half of exactly the public key that was returned.
 		expect(row.encryptedPrivateKey.startsWith("v1:")).toBe(true);
-		expect(row.encryptedPrivateKey).not.toContain("0x");
 		const privateKey = decryptRfqPrivateKey(row.encryptedPrivateKey);
+		// The stored column does not carry the key it hides. (It used to assert
+		// `not.toContain("0x")`, which is base64 and therefore contains "0x" by
+		// chance about 3 runs in 100 — measured; the key itself is the fence.)
+		expect(row.encryptedPrivateKey).not.toContain(privateKey);
+		expect(row.encryptedPrivateKey).not.toContain(privateKey.slice(2));
 		expect(new SigningKey(privateKey).compressedPublicKey).toBe(first.compressedPublicKey);
 	});
 
@@ -92,6 +96,29 @@ describeLive("rfq key storage", () => {
 		expect(new SigningKey(readTwo as string).compressedPublicKey).toBe(second.compressedPublicKey);
 	});
 
+	/**
+	 * A-1 against a real connection pool: two overlapping FIRST mints for one
+	 * wallet. Whether they truly interleave is up to the pool, so the mechanism
+	 * is pinned deterministically in `keys.test.ts`; what this proves is that the
+	 * real unique index plus `onConflictDoNothing` leave exactly one row and that
+	 * neither caller is handed a key the database does not hold.
+	 */
+	test("two concurrent first mints leave one row and one usable key", async () => {
+		const wallet = newWallet();
+		const [first, second] = await Promise.all([
+			getOrCreateWalletRfqKey(wallet),
+			getOrCreateWalletRfqKey(wallet),
+		]);
+		const rows = await db.select().from(agentRfqKeys).where(eq(agentRfqKeys.walletAddress, wallet));
+		expect(rows).toHaveLength(1);
+		const row = rows[0];
+		if (!row) throw new Error("row missing");
+		const stored = new SigningKey(decryptRfqPrivateKey(row.encryptedPrivateKey)).compressedPublicKey;
+		expect(first.compressedPublicKey).toBe(stored);
+		expect(second.compressedPublicKey).toBe(stored);
+		expect(row.publicKey).toBe(stored);
+	});
+
 	test("an address in any case reaches one row", async () => {
 		const wallet = newWallet();
 		const lower = await getOrCreateWalletRfqKey(wallet);
@@ -113,14 +140,16 @@ describeLive("rfq key storage", () => {
 		expect(await storage.has(keyId)).toBe(true);
 		expect(await storage.get(keyId)).toBe(privateKey);
 
-		// `set` upserts: a second write replaces the row rather than failing the
-		// unique index, and re-derives the public column from the new key.
-		const replacement = `0x${randomBytes(32).toString("hex")}`;
-		await storage.set(keyId, replacement);
+		// A-1: `set` is INSERT-ONLY. A second write neither fails the unique index
+		// nor replaces the stored key — the private half already on this row is
+		// the only thing that can decrypt offers made to the public key it
+		// published, so losing it is unrecoverable.
+		const loser = `0x${randomBytes(32).toString("hex")}`;
+		await storage.set(keyId, loser);
 		const rows = await db.select().from(agentRfqKeys).where(eq(agentRfqKeys.walletAddress, wallet));
 		expect(rows).toHaveLength(1);
-		expect(rows[0]?.publicKey).toBe(new SigningKey(replacement).compressedPublicKey);
-		expect(await storage.get(keyId)).toBe(replacement);
+		expect(rows[0]?.publicKey).toBe(new SigningKey(privateKey).compressedPublicKey);
+		expect(await storage.get(keyId)).toBe(privateKey);
 
 		await storage.remove(keyId);
 		expect(await storage.has(keyId)).toBe(false);

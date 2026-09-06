@@ -176,6 +176,19 @@ export function dbKeyStorage(walletAddress: string, db: Database = defaultDb): K
 			const payload = await stored();
 			return payload === null ? null : decryptRfqPrivateKey(payload);
 		},
+		/**
+		 * INSERT-ONLY. A wallet's RFQ key is minted once and never replaced: the
+		 * private half is the only thing that can ever decrypt an offer made to
+		 * a public key already published on chain, and the docs give no recovery
+		 * when it is lost. An upsert here made two overlapping FIRST mints
+		 * destructive — the SDK's `getOrCreateKeyPair` is `has()` → `get()` →
+		 * generate → `set()` with no lock, so both callers mint and the second
+		 * write threw the first key away (A-1).
+		 *
+		 * A `set` that loses the conflict is therefore a NO-OP, not a failure:
+		 * `getOrCreateWalletRfqKey` re-reads afterwards and both callers converge
+		 * on whichever key actually persisted.
+		 */
 		async set(_keyId: string, privateKey: string): Promise<void> {
 			const key = masterKey();
 			// Derived here so the public column can never drift from the private
@@ -185,10 +198,7 @@ export function dbKeyStorage(walletAddress: string, db: Database = defaultDb): K
 			await db
 				.insert(agentRfqKeys)
 				.values({ walletAddress: wallet, publicKey, encryptedPrivateKey })
-				.onConflictDoUpdate({
-					target: agentRfqKeys.walletAddress,
-					set: { publicKey, encryptedPrivateKey },
-				});
+				.onConflictDoNothing({ target: agentRfqKeys.walletAddress });
 		},
 		async remove(): Promise<void> {
 			await db.delete(agentRfqKeys).where(eq(agentRfqKeys.walletAddress, wallet));
@@ -214,15 +224,29 @@ export async function getOrCreateWalletRfqKey(
 	// Refuse before touching the database, so an unconfigured deployment cannot
 	// read a row it has no key for and cannot half-write one.
 	masterKey();
+	const storage = dbKeyStorage(wallet, db);
 	const client = createRfqClient({
 		rpcUrl: env.BASE_RPC_URL,
 		referrer: env.THESIS_REFERRER,
-		keyStorageProvider: dbKeyStorage(wallet, db),
+		keyStorageProvider: storage,
 	});
-	const pair = await client.rfqKeys.getOrCreateKeyPair();
-	const compressedPublicKey = compressedPublicKeyOf(pair.privateKey);
+	await client.rfqKeys.getOrCreateKeyPair();
+	// THE STORED KEY IS THE ANSWER, never the one this call generated. Two
+	// concurrent first mints both generate, and only one insert wins; the loser's
+	// key exists nowhere, so returning it would put a public key on chain whose
+	// offers nobody could ever decrypt (A-1). Re-reading makes both callers agree
+	// on the key that actually persisted.
+	// The SDK's key id is per chain, not per wallet, and `dbKeyStorage` ignores it
+	// by design (see the file header); it is passed through so the provider is
+	// driven exactly as the SDK drives it.
+	const storedPrivateKey = await storage.get(client.rfqKeys.getStorageKeyId());
+	if (storedPrivateKey === null) {
+		throw new RfqKeyError("RFQ_KEY_UNREADABLE", "This wallet's RFQ key could not be read back after it was minted");
+	}
+	const compressedPublicKey = compressedPublicKeyOf(storedPrivateKey);
 	// A row written by an older build, or a repaired one, must not keep a public
-	// key that disagrees with the private half now in storage.
+	// key that disagrees with the private half now in storage. Safe because the
+	// value written is derived from the ciphertext that is actually there.
 	await db
 		.update(agentRfqKeys)
 		.set({ publicKey: compressedPublicKey })

@@ -29,16 +29,25 @@ import "server-only";
  * from the server session, so a row can only ever be read or written by the
  * wallet that owns it.
  */
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, ne, or } from "drizzle-orm";
 import { db as defaultDb } from "@nuts/db";
 import { rfqRequests, type NewRfqRequest, type RfqRequest } from "@nuts/db/schema/index";
 import type { Database } from "./keys";
+import { RFQ_PENDING_TTL_MINUTES } from "./limits";
 
 export interface RfqRowStore {
 	insertPending(row: NewRfqRequest): Promise<RfqRequest>;
 	/** The row, only if this wallet owns it. Null otherwise — the two cases are one answer. */
 	findOwn(id: string, wallet: string): Promise<RfqRequest | null>;
-	listForWallet(wallet: string, limit: number): Promise<RfqRequest[]>;
+	/**
+	 * The wallet's newest requests, WITHOUT the stale `pending_create` scaffolding
+	 * (`RFQ_PENDING_TTL_MINUTES`). `now` is injectable so the cut-off can be pinned.
+	 */
+	listForWallet(wallet: string, limit: number, now?: Date): Promise<RfqRequest[]>;
+	/** This wallet's unbound `pending_create` rows, newest first: the candidates a re-prepare can reuse. */
+	listUnboundPending(wallet: string, limit: number): Promise<RfqRequest[]>;
+	/** Marks an unbound pending row current again. Null when it is no longer one. */
+	touchPending(input: { id: string; wallet: string; at: Date }): Promise<RfqRequest | null>;
 	bindQuotation(input: {
 		id: string;
 		wallet: string;
@@ -111,13 +120,52 @@ export function drizzleRfqStore(database: Database = defaultDb): RfqRowStore {
 				.limit(1);
 			return row ?? null;
 		},
-		async listForWallet(wallet, limit) {
+		async listForWallet(wallet, limit, now = new Date()) {
+			// A `pending_create` row nothing has touched for the TTL is scaffolding
+			// from an abandoned prepare: it names no quotation and moved no money.
+			// Listing it ahead of a real, escrowed request inside a capped list is
+			// how a live escrow became invisible (C-5). Hidden, never deleted.
+			const fresh = new Date(now.getTime() - RFQ_PENDING_TTL_MINUTES * 60_000);
 			return await database
 				.select()
 				.from(rfqRequests)
-				.where(eq(rfqRequests.walletAddress, wallet))
+				.where(
+					and(
+						eq(rfqRequests.walletAddress, wallet),
+						or(ne(rfqRequests.status, "pending_create"), gte(rfqRequests.updatedAt, fresh)),
+					),
+				)
 				.orderBy(desc(rfqRequests.createdAt))
 				.limit(limit);
+		},
+		async listUnboundPending(wallet, limit) {
+			return await database
+				.select()
+				.from(rfqRequests)
+				.where(
+					and(
+						eq(rfqRequests.walletAddress, wallet),
+						eq(rfqRequests.status, "pending_create"),
+						isNull(rfqRequests.quotationId),
+					),
+				)
+				.orderBy(desc(rfqRequests.createdAt))
+				.limit(limit);
+		},
+		async touchPending({ id, wallet, at }) {
+			const [row] = await database
+				.update(rfqRequests)
+				.set({ updatedAt: at })
+				.where(
+					and(
+						eq(rfqRequests.id, id),
+						eq(rfqRequests.walletAddress, wallet),
+						eq(rfqRequests.status, "pending_create"),
+						isNull(rfqRequests.quotationId),
+					),
+				)
+				.returning();
+			return row ?? null;
 		},
 		async bindQuotation({ id, wallet, quotationId, createTx, at }) {
 			try {

@@ -377,6 +377,37 @@ export function parseRfqRowParams(value: unknown): RfqRowParams | null {
 	};
 }
 
+/**
+ * Are these two rows' terms the same request?
+ *
+ * Every field of `RfqRowParams`, compared as the strings and numbers they are —
+ * `JSON.stringify` would not do, because Postgres normalises a `jsonb` object's
+ * key order and a round-tripped row therefore serialises differently from the
+ * object that was written.
+ */
+export function sameRfqParams(left: RfqRowParams, right: RfqRowParams): boolean {
+	const sameList = (a: readonly string[], b: readonly string[]) =>
+		a.length === b.length && a.every((value, index) => value === b[index]);
+	return (
+		left.underlying === right.underlying &&
+		sameList(left.strikesUsd, right.strikesUsd) &&
+		sameList(left.strikesUsd8, right.strikesUsd8) &&
+		left.expiryTimestamp === right.expiryTimestamp &&
+		left.numContracts === right.numContracts &&
+		left.numContractsBaseUnits === right.numContractsBaseUnits &&
+		left.reservePricePerContract === right.reservePricePerContract &&
+		left.offerDeadlineMinutes === right.offerDeadlineMinutes &&
+		left.implementation === right.implementation &&
+		left.collateralDecimals === right.collateralDecimals
+	);
+	// `offerEndTimestamp` is deliberately NOT compared: it is "now + the deadline"
+	// and moves with every prepare, so comparing it would make every re-prepare a
+	// different request and defeat the reuse.
+}
+
+/** How many of a wallet's unbound pending rows a re-prepare will look through. */
+const REUSABLE_PENDING_ROWS = 20;
+
 /* ─────────────────────────────── create ─────────────────────────────── */
 
 export async function prepareRfqCreateFor(
@@ -534,15 +565,33 @@ export async function prepareRfqCreateFor(
 		collateralDecimals: build.expected.collateral.decimals,
 	};
 
-	const row = await deps.store.insertPending({
-		walletAddress: wallet,
-		status: "pending_create",
-		params,
-		deposit: expected.depositBaseUnits,
-		collateralSymbol: "USDC",
-		factoryAddress: build.factory.toLowerCase(),
-		requesterPublicKey,
+	// REUSE BEFORE INSERT. The card prepares more than once per press by design
+	// (re-prepare, the pre-approval fence, the staleness re-check) and a wallet
+	// rejection leaves its row behind, so identical terms used to pile up rows
+	// that name no quotation and moved no money (C-5). An unbound `pending_create`
+	// row of this wallet with exactly these terms IS this request: it is made
+	// current again and its id handed back, so an earlier ticket still resolves.
+	// Nothing is deleted — deleting a row a broadcast ticket points at would
+	// strand a real escrow with no row to record it against.
+	const factoryAddress = build.factory.toLowerCase();
+	const reusable = (await deps.store.listUnboundPending(wallet, REUSABLE_PENDING_ROWS)).find((candidate) => {
+		if (!sameAddress(candidate.factoryAddress, factoryAddress)) return false;
+		if (candidate.deposit !== expected.depositBaseUnits) return false;
+		if (candidate.requesterPublicKey !== requesterPublicKey) return false;
+		const stored = parseRfqRowParams(candidate.params);
+		return stored !== null && sameRfqParams(stored, params);
 	});
+	const row =
+		(reusable === undefined ? null : await deps.store.touchPending({ id: reusable.id, wallet, at: deps.now() })) ??
+		(await deps.store.insertPending({
+			walletAddress: wallet,
+			status: "pending_create",
+			params,
+			deposit: expected.depositBaseUnits,
+			collateralSymbol: "USDC",
+			factoryAddress,
+			requesterPublicKey,
+		}));
 
 	return {
 		ok: true,

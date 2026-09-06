@@ -320,6 +320,65 @@ describeLive("the RFQ path against a real database", () => {
 	});
 
 	/**
+	 * C-5 against the real database and the real jsonb round trip: two identical
+	 * prepares land on one row. `params` comes back from Postgres with its keys
+	 * re-ordered, so this is also the test that the comparison is field-by-field
+	 * rather than a string compare.
+	 */
+	test("re-preparing identical terms reuses the row rather than writing another", async () => {
+		const wallet = newWallet();
+		const session = { userId: crypto.randomUUID(), walletAddress: wallet };
+		const { deps } = liveDeps({});
+		const first = await prepareRfqCreateFor(session, input, deps);
+		const second = await prepareRfqCreateFor(session, input, deps);
+		if (!first.ok || first.stage !== "create") throw new Error("expected the create stage");
+		if (!second.ok || second.stage !== "create") throw new Error("expected the create stage");
+		expect(second.rfqRequestId).toBe(first.rfqRequestId);
+		expect((await drizzleRfqStore(db).listForWallet(wallet, 10)).map((row) => row.id)).toEqual([first.rfqRequestId]);
+
+		// Different terms are a different request.
+		const other = await prepareRfqCreateFor(session, { ...input, strikesUsd: ["1800"] }, deps);
+		if (!other.ok || other.stage !== "create") throw new Error("expected the create stage");
+		expect(other.rfqRequestId).not.toBe(first.rfqRequestId);
+		expect((await drizzleRfqStore(db).listForWallet(wallet, 10)).length).toBe(2);
+	});
+
+	/**
+	 * The listing side of C-5, in SQL: the freshness clause hides an untouched
+	 * `pending_create` row and never hides a bound one.
+	 *
+	 * Mutant: drop the `or(ne(status,'pending_create'), gte(updated_at, fresh))`
+	 * clause from `listForWallet`.
+	 */
+	test("listForWallet hides stale pending scaffolding and never hides an escrowed request", async () => {
+		const wallet = newWallet();
+		const session = { userId: crypto.randomUUID(), walletAddress: wallet };
+		const { deps, factory } = liveDeps({});
+		const stale = await prepareRfqCreateFor(session, input, deps);
+		if (!stale.ok || stale.stage !== "create") throw new Error("expected the create stage");
+		const live = await prepareRfqCreateFor(session, { ...input, strikesUsd: ["1800"] }, deps);
+		if (!live.ok || live.stage !== "create") throw new Error("expected the create stage");
+
+		const recording = liveDeps({
+			receipt: {
+				status: "success",
+				logs: [{ address: factory, topics: [QUOTATION_REQUESTED_TOPIC, idTopic(6060n), topicOf(wallet)], data: "0x" }],
+			},
+		});
+		expect((await recordRfqCreateFor(session, { token: live.token, txHash: TX("6") }, recording.deps)).ok).toBe(true);
+
+		const store = drizzleRfqStore(db);
+		// Both are current now.
+		expect((await store.listForWallet(wallet, 10)).length).toBe(2);
+		// An hour later the untouched pending row is scaffolding; the escrowed one
+		// is still the answer to "did my request fill?".
+		const later = new Date(Date.now() + 60 * 60_000);
+		expect((await store.listForWallet(wallet, 10, later)).map((row) => row.id)).toEqual([live.rfqRequestId]);
+		// And it is still readable by id, and still bindable.
+		expect((await store.findOwn(stale.rfqRequestId, wallet))?.status).toBe("pending_create");
+	});
+
+	/**
 	 * C-1, against the real database: a create sent through an ERC-4337 entry
 	 * point binds on the factory's own log. Its `to` is the entry point, never
 	 * the factory, and the row must still end up `active` with the quotation id.

@@ -35,6 +35,7 @@ import {
 	type RfqDeps,
 	type RfqSdkClient,
 } from "./prepare";
+import { RFQ_PENDING_TTL_MINUTES } from "./limits";
 import type { RfqRowStore } from "./store";
 import { decodeRfqTicket } from "./ticket";
 
@@ -111,8 +112,27 @@ function memoryStore(state: Recorded): RfqRowStore {
 			const row = state.rows.get(id);
 			return row && row.walletAddress === wallet ? row : null;
 		},
-		async listForWallet(wallet, limit) {
-			return [...state.rows.values()].filter((row) => row.walletAddress === wallet).slice(0, limit);
+		async listForWallet(wallet, limit, now = new Date(NOW_MS)) {
+			const fresh = now.getTime() - RFQ_PENDING_TTL_MINUTES * 60_000;
+			return [...state.rows.values()]
+				.filter((row) => row.walletAddress === wallet)
+				.filter((row) => row.status !== "pending_create" || row.updatedAt.getTime() >= fresh)
+				.sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+				.slice(0, limit);
+		},
+		async listUnboundPending(wallet, limit) {
+			return [...state.rows.values()]
+				.filter((row) => row.walletAddress === wallet && row.status === "pending_create" && row.quotationId === null)
+				.sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+				.slice(0, limit);
+		},
+		async touchPending({ id, wallet, at }) {
+			const row = state.rows.get(id);
+			if (!row || row.walletAddress !== wallet) return null;
+			if (row.status !== "pending_create" || row.quotationId !== null) return null;
+			const updated = { ...row, updatedAt: at };
+			state.rows.set(id, updated);
+			return updated;
 		},
 		/**
 		 * The real store's three answers, including the partial unique index over
@@ -455,6 +475,95 @@ describe("prepareRfqCreateFor", () => {
 		expect(result.ok).toBe(true);
 		if (!result.ok) throw new Error("unreachable");
 		expect(result.expected.expiryAt).toBe(iso);
+	});
+});
+
+/* ───────────────────────── phantom pending rows ───────────────────────── */
+
+describe("re-preparing the same request", () => {
+	/**
+	 * C-5. The card prepares more than once per press by design, and a wallet
+	 * rejection leaves its row behind. Identical terms must land on ONE row, or a
+	 * capped "my requests" list fills with scaffolding that names no quotation
+	 * and moved no money — and a live escrow drops off the end of it.
+	 *
+	 * Mutant: insert unconditionally instead of reusing.
+	 */
+	test("identical terms reuse the wallet's unbound pending row instead of writing another", async () => {
+		const { deps, state } = makeDeps({ allowance: 500_000n });
+		const first = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		const second = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		const third = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		if (!first.ok || first.stage !== "create") throw new Error("expected a create stage");
+		if (!second.ok || second.stage !== "create") throw new Error("expected a create stage");
+		if (!third.ok || third.stage !== "create") throw new Error("expected a create stage");
+
+		expect(second.rfqRequestId).toBe(first.rfqRequestId);
+		expect(third.rfqRequestId).toBe(first.rfqRequestId);
+		expect(state.rows.size).toBe(1);
+
+		// An earlier ticket still resolves to that row, so a broadcast made before
+		// the last re-prepare can still be recorded.
+		expect(decodeRfqTicket(first.token)?.rfqRequestId).toBe(first.rfqRequestId);
+	});
+
+	test("different terms get their own row", async () => {
+		const { deps, state } = makeDeps({ allowance: 500_000n });
+		const first = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		const other = await prepareRfqCreateFor(SESSION, createInput({ strikesUsd: ["1800"] }), deps);
+		if (!first.ok || first.stage !== "create") throw new Error("expected a create stage");
+		if (!other.ok || other.stage !== "create") throw new Error("expected a create stage");
+		expect(other.rfqRequestId).not.toBe(first.rfqRequestId);
+		expect(state.rows.size).toBe(2);
+	});
+
+	test("a bound row is never reused: a second request of the same shape starts its own", async () => {
+		const { deps, state } = makeDeps({
+			allowance: 500_000n,
+			receipt: { status: "success", logs: [requestedLog({ factory: FACTORY, id: 4141n, requester: WALLET })] },
+		});
+		const first = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		if (!first.ok || first.stage !== "create") throw new Error("expected a create stage");
+		expect((await recordRfqCreateFor(SESSION, { token: first.token, txHash: TX }, deps)).ok).toBe(true);
+
+		const again = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		if (!again.ok || again.stage !== "create") throw new Error("expected a create stage");
+		expect(again.rfqRequestId).not.toBe(first.rfqRequestId);
+		expect(state.rows.size).toBe(2);
+		expect(state.rows.get(first.rfqRequestId)?.quotationId).toBe("4141");
+	});
+
+	/**
+	 * The listing side of C-5: a pending row nothing has touched for the TTL is
+	 * abandoned scaffolding and drops out of the list, while a real, escrowed
+	 * request never does — however old it is.
+	 *
+	 * Mutant: drop the freshness clause from `listForWallet`.
+	 */
+	test("a stale pending row leaves the listing; an old ACTIVE one never does", async () => {
+		const { deps, state } = makeDeps({ allowance: 500_000n });
+		const stale = await prepareRfqCreateFor(SESSION, createInput(), deps);
+		if (!stale.ok || stale.stage !== "create") throw new Error("expected a create stage");
+		const staleRow = state.rows.get(stale.rfqRequestId);
+		if (!staleRow) throw new Error("fixture: no row");
+		const longAgo = new Date(NOW_MS - (RFQ_PENDING_TTL_MINUTES + 1) * 60_000);
+		state.rows.set(staleRow.id, { ...staleRow, createdAt: longAgo, updatedAt: longAgo });
+
+		const live = await prepareRfqCreateFor(SESSION, createInput({ strikesUsd: ["1800"] }), deps);
+		if (!live.ok || live.stage !== "create") throw new Error("expected a create stage");
+		const liveRow = state.rows.get(live.rfqRequestId);
+		if (!liveRow) throw new Error("fixture: no row");
+		// An escrowed request that has been open for hours.
+		state.rows.set(liveRow.id, {
+			...liveRow,
+			status: "active",
+			quotationId: "606",
+			createdAt: longAgo,
+			updatedAt: longAgo,
+		});
+
+		const listed = await deps.store.listForWallet(WALLET, 10, new Date(NOW_MS));
+		expect(listed.map((row) => row.id)).toEqual([live.rfqRequestId]);
 	});
 });
 

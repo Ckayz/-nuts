@@ -31,6 +31,24 @@ import { COLLATERAL_USD_UNAVAILABLE, collateralUsdPrice, usdRisk } from "@/lib/t
 
 export { MAX_LOSS_USD as MAX_RFQ_DEPOSIT_USD };
 
+/**
+ * How long a prepared-but-unconfirmed request stays visible.
+ *
+ * A `pending_create` row exists from the moment calldata is prepared, which the
+ * card does more than once per press (re-prepare, the pre-approval fence, the
+ * staleness re-check) and which a wallet rejection leaves behind. Those rows
+ * name no quotation and moved no money, so after this long with nothing touching
+ * them they are stale scaffolding rather than requests, and listing them first
+ * can push a genuinely live, escrowed request out of a capped list (C-5).
+ *
+ * Nothing is deleted: a stale row is only hidden from listings, and it stays
+ * readable by id and still bindable if its transaction turns up later.
+ *
+ * TODO-OWNER: 30 minutes is a placeholder. Nothing in the PRD or the mockup
+ * words an RFQ, let alone how long a prepared one should linger.
+ */
+export const RFQ_PENDING_TTL_MINUTES = 30;
+
 export type RfqGate =
 	| { readonly ok: true; readonly depositUsd: string }
 	| { readonly ok: false; readonly code: string; readonly reason: string };

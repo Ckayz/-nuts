@@ -10,6 +10,7 @@ import { env } from "@nuts/env/server";
 
 import { getSession } from "@/lib/auth/session";
 import { createReadTools } from "@/lib/agent/tools";
+import { createPositionTools } from "@/lib/agent/positions";
 import { createExecutionTools } from "@/lib/agent/execute";
 import {
 	AGENT_ERROR_SENTENCES,
@@ -146,7 +147,13 @@ export async function POST(request: Request) {
 		model: agentModel,
 		system: SYSTEM_PROMPT,
 		messages: await convertToModelMessages(messages),
-		tools: { ...createReadTools({ asset }), ...createExecutionTools({ account, session, thesisId }) },
+		/**
+		 * Read tools, then the POSITION tools, then the one approval-gated write
+		 * tool. `createPositionTools` binds the session the same way
+		 * `createExecutionTools` binds it: the wallet whose positions are read is
+		 * the cookie's, never a value the model can name.
+		 */
+		tools: { ...createReadTools({ asset }), ...createPositionTools({ session }), ...createExecutionTools({ account, session, thesisId }) },
 		/**
 		 * PRD 10.1 and 14: no transaction is prepared without an explicit answer from
 		 * the user. The runtime suspends the tool call and emits an approval request,

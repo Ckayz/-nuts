@@ -517,10 +517,29 @@ export function cardPriceKeys(
  * instrument, no raw amounts, an unpriceable collateral token or no live spot
  * keeps the recorded-column behaviour and its existing sentence.
  */
-export function listRowPnl(
+/**
+ * The spot this row is valued at, and the risk-model inputs behind it — the ONE
+ * place the `PositionPageDetail` a list row implies is constructed.
+ *
+ * Extracted from `listRowPnl` (behaviour unchanged) because a second caller now
+ * needs the same two things for a different reason: `lib/agent/positions.ts`
+ * answers "what are my positions" and "what if it settles at X", and both need
+ * the `DerivationInputs` this builds, not only the P&L `listRowPnl` returns. Two
+ * copies of the placeholder-owner construction would be two chances for the
+ * agent's number and the portfolio row's number to describe the same fill
+ * differently, which is the exact class of defect B1 was.
+ *
+ * The owner is a placeholder on purpose: `derivationFor` reads the instrument,
+ * the quantities and the collateral price and nothing else, and a list row does
+ * not carry its holder.
+ */
+export function rowDerivation(
 	position: Domain.Position,
 	prices: LivePriceBook,
-): { spotUsd8: string | null; derivedPnlUsd: string | null; derivable: boolean } {
+): {
+	spotUsd8: string | null;
+	derivation: { inputs: DerivationInputs } | { inputs: null; reason: string };
+} {
 	const instrument = position.instrument ?? null;
 	const spotUsd8 = prices.spotUsd8(instrument?.asset ?? position.underlyingAsset);
 	const derivation = derivationFor(
@@ -533,6 +552,14 @@ export function listRowPnl(
 		},
 		prices.collateralUsdPrice8(instrument?.collateralSymbol ?? null),
 	);
+	return { spotUsd8, derivation };
+}
+
+export function listRowPnl(
+	position: Domain.Position,
+	prices: LivePriceBook,
+): { spotUsd8: string | null; derivedPnlUsd: string | null; derivable: boolean } {
+	const { spotUsd8, derivation } = rowDerivation(position, prices);
 	return {
 		spotUsd8,
 		// Whether the risk model HAD its inputs, which is a different fact from

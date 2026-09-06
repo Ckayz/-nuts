@@ -15,7 +15,7 @@ import { isMarketPath, marketLinkParts } from "./market-link";
  *
  * Two properties this must not lose:
  *
- * 1. **Only `/m/<asset>` becomes a link.** `marketLinkParts` is deliberately
+ * 1. **Only `/m/<asset>` and `/p/<uuid>` become links.** `marketLinkParts` is deliberately
  *    narrow so no other text the model produces can become a destination. That
  *    property is the reason it exists, so the renderer never autolinks: every
  *    text node goes through the same function, and the `a` element below is the
@@ -82,6 +82,10 @@ function LinkedText({ children }: { readonly children?: ReactNode }) {
  * A markdown link. The model is only ever told to emit app-relative market
  * URLs, so anything else is rendered as its own text rather than followed —
  * a model-authored destination is not a destination this app offers.
+ *
+ * B2: the grammar now also admits `/p/<uuid>`, the position page
+ * `lib/agent/positions.ts` returns as `path` on every row, so "open it" is a
+ * link. It is exactly a uuid — `/p/x` and `/p/../portfolio` stay text.
  *
  * D-n1: the test used to be `href.startsWith("/m/")`, which is not the grammar.
  * Measured before the fix, both of these became live anchors:

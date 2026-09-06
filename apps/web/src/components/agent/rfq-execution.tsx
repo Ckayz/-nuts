@@ -19,6 +19,7 @@ import {
 	recordRfqCreateFor,
 	recordRfqSettleFor,
 } from "@/lib/rfq/actions";
+import { formatUtcIso } from "./instrument-label";
 import {
 	clearHeldRfq,
 	type HeldRfq,
@@ -31,8 +32,10 @@ import {
 	rfqCreateRequestOf,
 	type RfqExpected,
 	rfqHoldStore,
+	type RfqStatusKind,
 	type RfqStatusView,
 	type RfqTxKind,
+	rfqStillMoves,
 	sameRfqEconomics,
 	strikesAscending,
 	writeHeldRfq,
@@ -141,6 +144,13 @@ const COPY = {
 	transactionFailed: "Transaction failed.",
 	/** TODO-OWNER: shown when no wallet is connected. */
 	connectFirst: "Connect a wallet first.",
+	/**
+	 * TODO-OWNER: D-5 — the tool built this output with no signed-in session, so
+	 * the calldata is bound to no wallet and there is nothing to check the
+	 * connected one against.
+	 */
+	notSignedIn:
+		"This was prepared without a signed-in wallet, so nothing was sent. Sign in and ask the agent to prepare it again.",
 	/** TODO-OWNER: the request is live and this card is waiting on it. */
 	watchingTitle: "Your request is live",
 	/** TODO-OWNER: label above the factory's own id for this request. */
@@ -156,6 +166,18 @@ const COPY = {
 	cancelledTitle: "Cancelled. Your escrow is refunded.",
 	/** TODO-OWNER: the failed state, printed before the server's own reason. */
 	failedTitle: "This request failed.",
+	/**
+	 * TODO-OWNER: D-1 — the offer deadline and the reveal window both passed with
+	 * no offer on chain. The request is over, the escrow is not: it comes back
+	 * when the requester cancels, which is what the control under this line does.
+	 */
+	expiredTitle: "No maker answered. Cancel to get your deposit back.",
+	/**
+	 * TODO-OWNER: an indexer or chain answer this app could not read (lane C's
+	 * `unknown` status). The card must not print "Your request is live" over it:
+	 * it does not know that.
+	 */
+	unknownTitle: "This request's status could not be read.",
 	/** TODO-OWNER: link to the confirmed transaction. */
 	viewOnExplorer: "View on BaseScan",
 	/** TODO-OWNER: link to a sent-but-unconfirmed transaction. */
@@ -184,6 +206,33 @@ const COPY = {
 	/** TODO-OWNER: printed when the card has stopped polling on its own. */
 	pollingStopped: "This card has stopped checking on its own. Press to check again.",
 } as const;
+
+/**
+ * The heading over a recorded request, one per status.
+ *
+ * A lookup rather than a ternary chain because it is a claim about money: the
+ * card printed `watchingTitle` — "Your request is live" — for every status it
+ * had no branch for, which put that sentence over an EXPIRED, unfilled request
+ * (D-1) directly above the server's own line saying no offer exists, and over
+ * a status the app could not read at all. Every member of `RfqStatusKind` is
+ * named here, so adding one to the union without deciding what it says is a
+ * type error rather than a false claim on screen.
+ */
+const WATCHING_TITLES: Readonly<Record<RfqStatusKind, string>> = {
+	pending_create: COPY.watchingTitle,
+	waiting_for_offers: COPY.watchingTitle,
+	reveal_window: COPY.watchingTitle,
+	ready_to_settle: COPY.watchingTitle,
+	settled: COPY.settledTitle,
+	cancelled: COPY.cancelledTitle,
+	expired_unfilled: COPY.expiredTitle,
+	failed: COPY.failedTitle,
+	unknown: COPY.unknownTitle,
+};
+
+function watchingTitle(status: RfqStatusKind): string {
+	return WATCHING_TITLES[status];
+}
 
 type Phase =
 	| "idle"
@@ -216,7 +265,7 @@ const BUSY: ReadonlySet<Phase> = new Set<Phase>([
  * every time, and a changing identity would rebuild every callback below on
  * every render.
  */
-function useRfqSend(boundAccount: string | undefined, boundChainId: 8453 | undefined) {
+function useRfqSend(boundAccount: string | null | undefined, boundChainId: 8453 | undefined) {
 	const { address, isConnected, chainId: walletChainId } = useConnection();
 	const { switchChain } = useSwitchChain();
 	const { mutateAsync: sendTransactionAsync } = useSendTransaction();
@@ -271,6 +320,13 @@ function useRfqSend(boundAccount: string | undefined, boundChainId: 8453 | undef
 
 	/** The whole precondition ladder the market ticket uses, in one place. */
 	const ready = useCallback((): { ok: true; account: `0x${string}` } | { ok: false; message: string } => {
+		// D-5. `!== undefined` admitted `null` — the value the tool's own envelope
+		// carries when there is no session (`rfq-tools.ts`
+		// `{ account: session?.walletAddress ?? null }`) — and the next line
+		// called `.toLowerCase()` on it, crashing a money card on press. A null
+		// binding is refused outright: calldata bound to no wallet cannot be
+		// checked against the connected one.
+		if (boundAccount === null) return { ok: false, message: COPY.notSignedIn };
 		if (boundAccount !== undefined && address !== undefined && boundAccount.toLowerCase() !== address.toLowerCase()) {
 			return { ok: false, message: COPY.walletChanged };
 		}
@@ -816,13 +872,17 @@ export function RfqExecution({
 					<dt className="text-muted-foreground">{COPY.contracts}</dt>
 					<dd className="num">{shown.numContracts}</dd>
 				</div>
+				{/* T-5: a raw ISO instant on the surface a first-time user reads
+				    before approving. The server's value is unchanged; only its
+				    rendering is, and an instant this app cannot parse is printed
+				    exactly as the server sent it rather than dropped. */}
 				<div className="flex justify-between gap-4">
 					<dt className="text-muted-foreground">{COPY.expiry}</dt>
-					<dd className="num">{shown.expiryAt}</dd>
+					<dd className="num">{formatUtcIso(shown.expiryAt) ?? shown.expiryAt}</dd>
 				</div>
 				<div className="flex justify-between gap-4">
 					<dt className="text-muted-foreground">{COPY.offerDeadline}</dt>
-					<dd className="num">{shown.offerEndAt}</dd>
+					<dd className="num">{formatUtcIso(shown.offerEndAt) ?? shown.offerEndAt}</dd>
 				</div>
 			</dl>
 
@@ -850,13 +910,7 @@ export function RfqExecution({
 			{watching && status !== null ? (
 				<div className="mt-4 space-y-3">
 					<p className="font-medium text-sm">
-						{status.status === "settled"
-							? COPY.settledTitle
-							: status.status === "cancelled"
-								? COPY.cancelledTitle
-								: status.status === "failed"
-									? COPY.failedTitle
-									: COPY.watchingTitle}{" "}
+						{watchingTitle(status.status)}{" "}
 						<TodoOwner />
 					</p>
 					{/* The server's own sentence, never reworded here. */}
@@ -909,7 +963,11 @@ export function RfqExecution({
 							</Button>
 						</div>
 					)}
-					{nextPollDelayMs(status, polls) === null && !terminal && (
+					{/* D-11: only where stopping is news. Beside a state nothing will
+				    change on its own — an expired request, a failed one — the line
+				    is noise; beside a request still on chain it is the instruction
+				    to press the control. */}
+				{nextPollDelayMs(status, polls) === null && !terminal && rfqStillMoves(status) && (
 						<p className="text-muted-foreground text-xs">
 							{COPY.pollingStopped} <TodoOwner />
 						</p>
@@ -971,7 +1029,6 @@ export function RfqActionExecution({
 	const [status, setStatus] = useState<RfqStatusView | null>(null);
 
 	const kind: RfqTxKind = action.kind === "rfq_cancel" ? "cancel" : "settle";
-	const tx = action.kind === "rfq_cancel" ? action.cancel : action.settle;
 	const busy = BUSY.has(phase);
 
 	const finishRecording = useCallback(
@@ -994,6 +1051,21 @@ export function RfqActionExecution({
 		[hold, onDone, setMessage, setPhase],
 	);
 
+	/**
+	 * D-4. This card used to broadcast `action.cancel` / `action.settle` — the
+	 * calldata the AGENT's tool built at tool-call time — unchanged, while the
+	 * watching card's own `act()` re-prepared through the server on every press.
+	 * Between the tool call, the approval card and the wallet press, minutes can
+	 * pass; the request can settle, be cancelled by a maker bot, or stop being
+	 * cancellable at all, and `PreparedRfqAction` carries no `preparedAt` for
+	 * this card to test.
+	 *
+	 * So it takes its own timestamp, asks the server to build the transaction
+	 * again from the row id, and refuses anything that came back outside PRD
+	 * 14's 30-second window. One code path for both entry points: what leaves
+	 * the wallet is always what the server built moments ago, and the token the
+	 * receipt is recorded against is that preparation's own.
+	 */
 	const send = useCallback(async () => {
 		setMessage(null);
 		if (held !== null) {
@@ -1004,7 +1076,7 @@ export function RfqActionExecution({
 			}
 			return;
 		}
-		if (tx === undefined) {
+		if (action.rfqRequestId === "") {
 			setPhase("error");
 			setMessage(COPY.cannotRefresh);
 			return;
@@ -1016,11 +1088,29 @@ export function RfqActionExecution({
 			return;
 		}
 		try {
-			if (anotherIsHeld()) return;
 			setPhase(kind === "cancel" ? "cancelling" : "settling");
+			// Taken BEFORE the read that produces the calldata, exactly as the
+			// server stamps `preparedAt` on a create.
+			const preparedAt = new Date().toISOString();
+			const prepared =
+				kind === "cancel"
+					? await prepareRfqCancelFor({ rfqRequestId: action.rfqRequestId })
+					: await prepareRfqSettleFor({ rfqRequestId: action.rfqRequestId });
+			if (!prepared.ok) {
+				setPhase("error");
+				setMessage(prepared.reason);
+				return;
+			}
+			if (fillIsStale(preparedAt, Date.now())) {
+				setPhase("error");
+				setMessage(COPY.tooOldToSend);
+				return;
+			}
+			const tx: TxRequest = "cancel" in prepared ? prepared.cancel : prepared.settle;
+			if (anotherIsHeld()) return;
 			const hash = await broadcast(tx, gate.account);
 			setTxHash(hash);
-			const sent: HeldRfq = { token: action.token, txHash: hash, kind, rfqRequestId: action.rfqRequestId };
+			const sent: HeldRfq = { token: prepared.token, txHash: hash, kind, rfqRequestId: action.rfqRequestId };
 			hold(sent);
 			try {
 				await finishRecording(sent);
@@ -1034,7 +1124,6 @@ export function RfqActionExecution({
 		}
 	}, [
 		action.rfqRequestId,
-		action.token,
 		anotherIsHeld,
 		broadcast,
 		finishRecording,
@@ -1046,7 +1135,6 @@ export function RfqActionExecution({
 		setMessage,
 		setPhase,
 		setTxHash,
-		tx,
 	]);
 
 	const label =

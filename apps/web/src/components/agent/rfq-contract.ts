@@ -110,7 +110,13 @@ export interface RfqCreateRequest {
 export type PreparedRfqCreate = (RfqPrepareApprove | RfqPrepareCreate) & {
 	readonly prepared: true;
 	readonly kind: "rfq_create";
-	readonly account?: string;
+	/**
+	 * D-5. NULLABLE, because the producer's own type is: `lib/agent/rfq-tools.ts`
+	 * builds this envelope with `{ account: session?.walletAddress ?? null }`.
+	 * Declaring it `string | undefined` here hid a `null` the card then called
+	 * `.toLowerCase()` on.
+	 */
+	readonly account?: string | null;
 	readonly chainId?: 8453;
 	readonly label?: string;
 	readonly instruction?: string;
@@ -131,7 +137,8 @@ export interface PreparedRfqAction {
 	readonly rfqRequestId: string;
 	readonly quotationId?: string;
 	readonly token: string;
-	readonly account?: string;
+	/** D-5: nullable for the same reason as `PreparedRfqCreate.account`. */
+	readonly account?: string | null;
 	readonly chainId?: 8453;
 	readonly label?: string;
 	readonly instruction?: string;
@@ -291,14 +298,35 @@ export function rfqCreateRequestOf(out: PreparedRfqCreate): RfqCreateRequest | n
 	};
 }
 
-/** Cancel is the requester's, and only while the quotation is still live. */
+/**
+ * The states in which the escrow is still with the factory and the requester
+ * can take it back.
+ *
+ * `expired_unfilled` belongs here (D-1). The reveal window has passed with no
+ * offer on chain, so nothing can be settled — but the deposit has NOT come back
+ * on its own, and `lib/rfq/status.ts:164` answers that state with
+ * `nextAction: "cancel"` and a sentence telling the reader that cancelling
+ * returns it. Leaving it out left a real escrow with no refund control in the
+ * whole UI.
+ */
+const CANCELLABLE: ReadonlySet<RfqStatusKind> = new Set<RfqStatusKind>([
+	"waiting_for_offers",
+	"reveal_window",
+	"ready_to_settle",
+	"expired_unfilled",
+]);
+
+/**
+ * Cancel is the requester's, and only while the deposit is still escrowed.
+ *
+ * Two ways in, the server's instruction first: if `lib/rfq/status.ts` asks for
+ * a cancel, the card offers one even for a status this file has no opinion
+ * about. The set is the second reading, so a status label that arrives with a
+ * stale `nextAction` still shows the control while the escrow is out.
+ */
 export function rfqCanCancel(status: RfqStatusView | null): boolean {
 	if (status === null) return false;
-	return (
-		status.status === "waiting_for_offers" ||
-		status.status === "reveal_window" ||
-		status.status === "ready_to_settle"
-	);
+	return status.nextAction === "cancel" || CANCELLABLE.has(status.status);
 }
 
 /**
@@ -323,15 +351,56 @@ export const RFQ_POLL_MS = 20_000;
 export const RFQ_MAX_POLLS = 30;
 
 /**
+ * The states nothing will change without the user: the request is over, one way
+ * or another, and no amount of re-reading will move it.
+ *
+ * `expired_unfilled` and `failed` are here with `settled` and `cancelled`
+ * (D-11): both are ends, and the card printed "This card has stopped checking
+ * on its own" beside them, which is noise next to a state that will never
+ * change. `pending_create` is NOT here — the card stops reading it, but saying
+ * so is the instruction to press the control.
+ */
+const FINISHED: ReadonlySet<RfqStatusKind> = new Set<RfqStatusKind>([
+	"settled",
+	"cancelled",
+	"failed",
+	"expired_unfilled",
+]);
+
+/** Could this request still become something else on its own? */
+export function rfqStillMoves(status: RfqStatusView | null): boolean {
+	return status !== null && !FINISHED.has(status.status);
+}
+
+/**
+ * The states the CHAIN can move while the card is watching: the offer deadline
+ * passes, the reveal window closes, or a maker bot settles the winning offer.
+ */
+const WATCHED: ReadonlySet<RfqStatusKind> = new Set<RfqStatusKind>([
+	"waiting_for_offers",
+	"reveal_window",
+	"ready_to_settle",
+]);
+
+/**
  * How long until the next automatic read, or null to stop.
  *
  * Pure, so the cap is pinned by a test rather than by a fake clock: null once
- * the request is terminal, and null once `RFQ_MAX_POLLS` reads have happened.
+ * nothing can change on its own, and null once `RFQ_MAX_POLLS` reads have
+ * happened.
+ *
+ * D-11. This keyed on `nextAction === "wait"`, which stopped the poll on the
+ * two states that most need watching. `lib/rfq/status.ts` answers
+ * `waiting_for_offers` with `nextAction: "cancel"` (the deadline is still
+ * running) and `ready_to_settle` with `"settle"` — and settlement is
+ * permissionless, so a maker bot often settles a winning request first and the
+ * card would never notice. What decides the poll is whether the CHAIN can move
+ * this state, not what the user is being invited to do about it.
  */
 export function nextPollDelayMs(status: RfqStatusView | null, pollsSoFar: number): number | null {
 	if (status === null) return null;
 	if (pollsSoFar >= RFQ_MAX_POLLS) return null;
-	if (status.nextAction !== "wait") return null;
+	if (!WATCHED.has(status.status)) return null;
 	return RFQ_POLL_MS;
 }
 

@@ -18,6 +18,25 @@ import { expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { WagmiProvider } from "wagmi";
 
+import { mount } from "@/test/hook-runner";
+/**
+ * The ONE wagmi registration (its own docblock says why there is only one).
+ *
+ * Imported here so this file's wallet hook is the mocked one whatever order bun
+ * loads the suite in: `@/test/hook-runner` implements no `useContext`, and the
+ * real hook needs one. MEASURED in this wagmi build: `useAccount` and
+ * `useConnection` are the SAME function object
+ * (`import("wagmi").useAccount === useConnection` -> true), so the existing
+ * `useConnection` override already answers `useAccount`, and the wallet a probe
+ * sees is `replies.connection`.
+ */
+import { replies, resetTradeMocks } from "@/test/trade-mocks";
+
+/** No wallet — what a provider with `reconnectOnMount={false}` used to answer. */
+function signedOut(): void {
+	replies.connection = { address: undefined, isConnected: false, chainId: 8453 };
+}
+
 process.env.DATABASE_URL ??= "postgresql://localhost/offline";
 process.env.OPENROUTER_API_KEY ??= "offline-test";
 
@@ -27,14 +46,33 @@ type Message = { id: string; role: "user" | "assistant"; parts: Part[] };
 /** What the mocked `useChat` will hand back on the next render. */
 const chat: { messages: Message[]; status: string } = { messages: [], status: "ready" };
 
+/**
+ * The transport the component built, kept so a test can ask it what it would
+ * SEND. `useChat` is the only thing that ever receives it (`agent-chat.tsx`
+ * holds it in a `useState` initialiser), and `prepareSendMessagesRequest` is a
+ * public field on `DefaultChatTransport` (`ai@7.0.92` dist/index.js:18625).
+ */
+const captured: {
+	transport: { prepareSendMessagesRequest?: (input: unknown) => unknown } | null;
+	/** Every `addToolApprovalResponse` argument, in order (T-1). */
+	approvals: Record<string, unknown>[];
+} = { transport: null, approvals: [] };
+
 mock.module("@ai-sdk/react", () => ({
-	useChat: () => ({
-		messages: chat.messages,
-		sendMessage: () => {},
-		status: chat.status,
-		error: undefined,
-		addToolApprovalResponse: () => {},
-	}),
+	useChat: (options?: { transport?: unknown }) => {
+		if (options?.transport !== undefined) {
+			captured.transport = options.transport as { prepareSendMessagesRequest?: (input: unknown) => unknown };
+		}
+		return {
+			messages: chat.messages,
+			sendMessage: () => {},
+			status: chat.status,
+			error: undefined,
+			addToolApprovalResponse: (answer: Record<string, unknown>) => {
+				captured.approvals.push(answer);
+			},
+		};
+	},
 }));
 
 const { config } = await import("@/lib/wagmi");
@@ -42,6 +80,10 @@ const { AgentChat, SuggestionRow } = await import("./agent-chat");
 const { postFillSuggestions, starterSuggestions } = await import("@/lib/agent/suggestions");
 
 function render(messages: Message[], props: { asset?: string | null } = {}, status = "ready"): string {
+	// Pinned rather than inherited: importing the shared wagmi mock above made
+	// the wallet hook answer WHATEVER the last probe left in `replies`, and every
+	// assertion in this file was written against a signed-OUT visitor.
+	signedOut();
 	chat.messages = messages;
 	chat.status = status;
 	return renderToStaticMarkup(
@@ -194,4 +236,216 @@ test("the person's own words are set apart from the reply", () => {
 	expect(html).toContain('<div class="agent-user">');
 	// Exactly one: the reply is not wrapped.
 	expect(html.match(/agent-user/g)).toHaveLength(1);
+});
+
+/* ------------------------------------------------------------------ *
+ * D-2: the market this panel sends, after a market-to-market move
+ * ------------------------------------------------------------------ */
+
+/**
+ * What the transport would POST right now.
+ *
+ * `prepareSendMessagesRequest` is the component's own closure, so this asks the
+ * REAL thing the route would receive rather than re-deriving it.
+ */
+async function requestBody(): Promise<Record<string, unknown>> {
+	const transport = captured.transport;
+	if (transport?.prepareSendMessagesRequest === undefined) throw new Error("no transport captured");
+	const prepared = (await transport.prepareSendMessagesRequest({
+		messages: [],
+		body: undefined,
+	})) as { body: Record<string, unknown> };
+	return prepared.body;
+}
+
+test("D-2: a market-to-market move changes the market the panel SENDS", async () => {
+	resetTradeMocks();
+	replies.connection = { address: "0x00000000000000000000000000000000000000ab", isConnected: true, chainId: 8453 };
+	chat.messages = [];
+	chat.status = "ready";
+	captured.transport = null;
+
+	// `app/m/[asset]/page.tsx` renders this panel with no `key`, and
+	// `components/market/right-tabs.tsx` keeps it mounted, so a client-side move
+	// from /m/eth to /m/btc changes the prop WITHOUT a remount. `setProps` is
+	// exactly that: every hook slot survives.
+	const h = mount(AgentChat as never, { asset: "eth", variant: "panel" });
+	const afterEth = await requestBody();
+	h.setProps({ asset: "btc", variant: "panel" });
+	const afterBtc = await requestBody();
+	console.log("BODY_AFTER_ETH", JSON.stringify(afterEth));
+	console.log("BODY_AFTER_BTC", JSON.stringify(afterBtc));
+
+	expect(afterEth.asset).toBe("eth");
+	// The value is not cosmetic: `app/api/agent/chat/route.ts` puts it in the
+	// system prompt and hands it to `createReadTools({ asset })`.
+	expect(afterBtc.asset).toBe("btc");
+	// The wallet still rides along, so the fix did not cost the address ref.
+	expect(afterBtc.walletAddress).toBe("0x00000000000000000000000000000000000000ab");
+	h.unmount();
+	resetTradeMocks();
+	signedOut();
+});
+
+test("D-2: the thesis the panel sends still follows its own prop", async () => {
+	resetTradeMocks();
+	chat.messages = [];
+	chat.status = "ready";
+	captured.transport = null;
+	const first = "11111111-2222-3333-4444-555555555555";
+	const second = "66666666-7777-8888-9999-aaaaaaaaaaaa";
+	const h = mount(AgentChat as never, { thesisId: first, variant: "panel" });
+	const before = await requestBody();
+	h.setProps({ thesisId: second, variant: "panel" });
+	const after = await requestBody();
+	console.log("THESIS_BODIES", JSON.stringify({ before: before.thesisId, after: after.thesisId }));
+	expect(before.thesisId).toBe(first);
+	expect(after.thesisId).toBe(second);
+	h.unmount();
+	resetTradeMocks();
+	signedOut();
+});
+
+/* ------------------------------------------------------------------ *
+ * T-1 (Opus user-flow tester): what the model is told when a card is cancelled
+ * ------------------------------------------------------------------ */
+
+/**
+ * The approval card element the chat rendered, whatever component it is.
+ *
+ * `@/test/hook-runner` does not descend into nested function components, so the
+ * card itself is not rendered — its PROPS are, which is exactly the boundary
+ * this test is about: what the chat hands the card's `onRespond`.
+ */
+function approvalCard(h: ReturnType<typeof mount>): { onRespond: (approved: boolean) => void } {
+	const found = h.find((element) => typeof element.type === "function" && "onRespond" in element.props);
+	const card = found[0];
+	if (card === undefined) throw new Error("no approval card rendered");
+	return card.props as unknown as { onRespond: (approved: boolean) => void };
+}
+
+const awaitingPart = (type: string): Message => ({
+	id: "m1",
+	role: "assistant",
+	parts: [{ type, state: "approval-requested", ...({ approval: { id: "a1" }, input: {} } as object) } as Part],
+});
+
+test("T-1: cancelling a card tells the model a PERSON declined it", () => {
+	// Without a reason the SDK sends the model only "Tool call execution denied."
+	// (`ai@7.0.92` dist/index.js:11733 — `approval.reason` or that fallback), and
+	// the model then invented an explanation: "the tool refused, likely because
+	// the order on the book has nearly expired".
+	for (const type of [
+		"tool-requestOptionBookExecution",
+		"tool-requestRfqCreation",
+		"tool-requestRfqCancellation",
+		"tool-requestRfqSettlement",
+	]) {
+		resetTradeMocks();
+		signedOut();
+		captured.approvals = [];
+		chat.messages = [awaitingPart(type)];
+		chat.status = "ready";
+		const h = mount(AgentChat as never, { variant: "panel" });
+		approvalCard(h).onRespond(false);
+		console.log("DECLINED", type, JSON.stringify(captured.approvals));
+		expect(captured.approvals.length, type).toBe(1);
+		expect(captured.approvals[0]?.approved, type).toBe(false);
+		expect(String(captured.approvals[0]?.reason ?? ""), type).toContain("Cancel");
+		h.unmount();
+	}
+});
+
+test("T-1: approving a card carries no decline reason", () => {
+	resetTradeMocks();
+	signedOut();
+	captured.approvals = [];
+	chat.messages = [awaitingPart("tool-requestOptionBookExecution")];
+	chat.status = "ready";
+	const h = mount(AgentChat as never, { variant: "panel" });
+	approvalCard(h).onRespond(true);
+	console.log("APPROVED", JSON.stringify(captured.approvals));
+	expect(captured.approvals[0]?.approved).toBe(true);
+	expect(captured.approvals[0]?.reason).toBeUndefined();
+	h.unmount();
+	resetTradeMocks();
+	signedOut();
+});
+
+/* ------------------------------------------------------------------ *
+ * D-6: the same chip twice in one row
+ * ------------------------------------------------------------------ */
+
+test("D-6: a chip that two sources both propose is rendered once", () => {
+	// `agent-chat.tsx` concatenates `postFillSuggestions(...)` with
+	// `chipsForTurn(...)`, and BOTH contain "Show my positions" — the first as a
+	// deterministic post-fill chip, the second from the signed-in fallback pool.
+	// `SuggestionRow` keys on the label, so the row rendered two identical
+	// buttons under one duplicated React key.
+	const positions = { label: "Show my positions", send: "Show my positions." };
+	const html = renderToStaticMarkup(
+		<SuggestionRow
+			chips={[
+				{ label: "Write a post about it", href: "/new?link=/p/1111" },
+				positions,
+				{ label: "What can I trade right now?", send: "What can I trade right now?" },
+				// The duplicate, as the fallback pool supplies it — same label,
+				// different text to send.
+				{ label: "Show my positions", send: "Show me my open positions." },
+			]}
+			onSend={() => {}}
+		/>,
+	);
+	console.log("D6_ROW", JSON.stringify(pills(html)));
+	expect(pills(html)).toEqual(["Write a post about it", "Show my positions", "What can I trade right now?"]);
+	// The FIRST of the two survives: the deterministic chip leads for a reason.
+	expect(html).toContain("Show my positions</button>");
+});
+
+test("D-6: two chips that differ only in what they SEND are still one row entry", () => {
+	const html = renderToStaticMarkup(
+		<SuggestionRow
+			chips={[
+				{ label: "Same", send: "one" },
+				{ label: "Same", send: "two" },
+				{ label: "Other", send: "three" },
+			]}
+			onSend={() => {}}
+		/>,
+	);
+	expect(pills(html)).toEqual(["Same", "Other"]);
+});
+
+/* ------------------------------------------------------------------ *
+ * D-7: the cutter runs on replies, never on the person's own message
+ * ------------------------------------------------------------------ */
+
+test("D-7: a user who types a line starting SUGGEST: sees their whole message", () => {
+	// The trailer is a convention the MODEL is asked to follow. Applying the
+	// cutter to `role === "user"` truncated a person's own words with no trace:
+	// the reviewer measured 'What does this mean?' rendered for a message that
+	// also said 'SUGGEST: buy low sell high'.
+	const typed = "What does this mean?\nSUGGEST: buy low sell high";
+	const html = render([
+		{ id: "u1", role: "user", parts: [{ type: "text", text: typed, state: "done" }] },
+		answer("Here is what it means."),
+	]);
+	console.log("D7_USER", JSON.stringify(html.match(/<div class="agent-user">[\s\S]*?<\/div>/)?.[0] ?? ""));
+	expect(html).toContain("What does this mean?");
+	expect(html).toContain("buy low sell high");
+	// The reply is still cut: this is a change to WHOSE text is treated, not to
+	// the rule.
+	const reply = render([answer('Answer.\nSUGGEST: ["a","b"]')]);
+	expect(reply).toContain("Answer.");
+	expect(reply).not.toContain("SUGGEST");
+	expect(pills(reply)).toEqual(["a", "b"]);
+});
+
+test("D-7: a user message that IS only a marker line survives", () => {
+	const html = render([
+		{ id: "u1", role: "user", parts: [{ type: "text", text: "SUGGEST: what should I do?", state: "done" }] },
+		answer("It depends."),
+	]);
+	console.log("D7_ONLY_MARKER", JSON.stringify(pills(html)));
+	expect(html).toContain("what should I do?");
 });

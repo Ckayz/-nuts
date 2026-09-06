@@ -20,6 +20,7 @@ import {
 	rfqCanCancel,
 	rfqCanSettle,
 	rfqCreateRequestOf,
+	rfqStillMoves,
 	rfqHoldKey,
 	type RfqExpected,
 	type RfqStatusView,
@@ -153,11 +154,27 @@ describe("which controls a status earns", () => {
 		...over,
 	});
 
-	test("cancel while the quotation is live, never after", () => {
-		const live: RfqStatusView["status"][] = ["waiting_for_offers", "reveal_window", "ready_to_settle"];
-		const over: RfqStatusView["status"][] = ["settled", "cancelled", "expired_unfilled", "failed"];
+	test("cancel while the escrow can still come back, never after", () => {
+		// D-1. An expired, UNFILLED request still holds the deposit, and the
+		// server asks for a cancel on it by name: `lib/rfq/status.ts:164` answers
+		// `{ status: "expired_unfilled", nextAction: "cancel" }`. Leaving it out of
+		// this list left the escrow with no refund control anywhere in the UI.
+		const live: RfqStatusView["status"][] = [
+			"waiting_for_offers",
+			"reveal_window",
+			"ready_to_settle",
+			"expired_unfilled",
+		];
+		const over: RfqStatusView["status"][] = ["settled", "cancelled", "failed", "pending_create"];
+		console.log("CANCEL_GATE", JSON.stringify({
+			live: live.map((status) => rfqCanCancel(view({ status }))),
+			over: over.map((status) => rfqCanCancel(view({ status }))),
+		}));
 		expect(live.map((status) => rfqCanCancel(view({ status })))).toEqual(live.map(() => true));
 		expect(over.map((status) => rfqCanCancel(view({ status })))).toEqual(over.map(() => false));
+		// The server's own instruction is sufficient on its own, so a status this
+		// card has no opinion about that asks for a cancel still offers one.
+		expect(rfqCanCancel(view({ status: "pending_create", nextAction: "cancel" }))).toBe(true);
 		expect(rfqCanCancel(null)).toBe(false);
 	});
 
@@ -187,11 +204,42 @@ describe("the poll is bounded", () => {
 		expect(nextPollDelayMs(waiting, RFQ_MAX_POLLS + 1)).toBeNull();
 	});
 
-	test("it stops the moment the request is not waiting on anything", () => {
-		for (const nextAction of ["settle", "cancel", "none"] as const) {
-			expect(nextPollDelayMs({ ...waiting, nextAction }, 0), nextAction).toBeNull();
-		}
+	test("D-11: every state the chain can move on its own keeps being read", () => {
+		// The `nextAction` values are the SERVER's own, `lib/rfq/status.ts:151-164`.
+		// Keying the poll on `nextAction === "wait"` stopped it on the two states
+		// that most need watching: `waiting_for_offers` (which asks for a cancel)
+		// and `ready_to_settle` (where settlement is permissionless and a maker
+		// bot often settles first).
+		const live: RfqStatusView[] = [
+			{ status: "waiting_for_offers", nextAction: "cancel", sentence: "" },
+			{ status: "reveal_window", nextAction: "wait", sentence: "" },
+			{ status: "ready_to_settle", nextAction: "settle", sentence: "" },
+		];
+		console.log("D11_LIVE", JSON.stringify(live.map((view) => nextPollDelayMs(view, 0))));
+		for (const view of live) expect(nextPollDelayMs(view, 0), view.status).toBe(RFQ_POLL_MS);
+		// The cap still applies to all of them.
+		for (const view of live) expect(nextPollDelayMs(view, RFQ_MAX_POLLS), view.status).toBeNull();
+	});
+
+	test("D-11: a state nothing will change on its own is not read again", () => {
+		const done: RfqStatusView["status"][] = ["settled", "cancelled", "failed", "expired_unfilled", "pending_create"];
+		const views = done.map((status) => ({ status, nextAction: "none" as const, sentence: "" }));
+		console.log("D11_DONE", JSON.stringify(views.map((view) => nextPollDelayMs(view, 0))));
+		for (const view of views) expect(nextPollDelayMs(view, 0), view.status).toBeNull();
 		expect(nextPollDelayMs(null, 0)).toBeNull();
+	});
+
+	test("D-11: and the card only SAYS it stopped where that is news", () => {
+		// "This card has stopped checking on its own" beside a state that will
+		// never change is noise; beside `pending_create`, or after the cap, it is
+		// the instruction to press the control.
+		for (const status of ["settled", "cancelled", "failed", "expired_unfilled"] as const) {
+			expect(rfqStillMoves({ status, nextAction: "none", sentence: "" }), status).toBe(false);
+		}
+		for (const status of ["pending_create", "waiting_for_offers", "reveal_window", "ready_to_settle"] as const) {
+			expect(rfqStillMoves({ status, nextAction: "none", sentence: "" }), status).toBe(true);
+		}
+		expect(rfqStillMoves(null)).toBe(false);
 	});
 });
 

@@ -238,8 +238,12 @@ describe("the card prints what the SERVER decoded, never the model's words", () 
 		// W1: the factory's own order is DESCENDING; the card reads up.
 		expect(text).toContain("2100 / 2200");
 		expect(text).not.toContain("2200 / 2100");
-		expect(text).toContain("2026-09-30T08:00:00Z");
-		expect(text).toContain("2026-09-06T03:00:00Z");
+		// T-5: both instants are formatted for a reader, and neither raw ISO
+		// timestamp survives onto a money card.
+		expect(text).toContain("30 Sep 2026, 08:00 UTC");
+		expect(text).toContain("06 Sep 2026, 03:00 UTC");
+		expect(text).not.toContain("2026-09-30T08:00:00Z");
+		expect(text).not.toContain("2026-09-06T03:00:00Z");
 		h.unmount();
 	});
 
@@ -528,6 +532,39 @@ describe("C#3: a sent request is never forgotten and never re-sent", () => {
 		second.unmount();
 	});
 
+	test("D-3: two cards mounted AT THE SAME TIME cannot both send", async () => {
+		// The test above unmounts the first card, so it exercises the mount-time
+		// `restored` effect. The case the fence exists for is several cards alive
+		// in ONE transcript: each card's own `held` says nothing about the others,
+		// which is why `anotherIsHeld()` re-reads the store immediately before
+		// every send. Without it a second escrow leaves the wallet.
+		reset();
+		rfq.recordCreate = async () => ({ ok: false, code: "LOST", reason: "The server did not answer." });
+		const first = mount(RfqExecution, { rfq: createStage() });
+		const second = mount(RfqExecution, { rfq: createStage() });
+		await first.settle();
+		await second.settle();
+
+		press(first);
+		await first.settle();
+		console.log("TWO_CARDS_A", JSON.stringify({ sends: calls.sends.length, label: controls(first)[0]?.text }));
+		expect(calls.sends.length).toBe(1);
+
+		press(second);
+		await second.settle();
+		console.log(
+			"TWO_CARDS_B",
+			JSON.stringify({ sends: calls.sends.length, label: controls(second)[0]?.text, text: second.text().slice(-140) }),
+		);
+		// One transaction, and the second card ADOPTED the first one's rather than
+		// sending its own.
+		expect(calls.sends.length).toBe(1);
+		expect(controls(second)[0]?.text).toBe("Record the request");
+		expect(second.text()).toContain("not recorded yet");
+		first.unmount();
+		second.unmount();
+	});
+
 	test("a reverted receipt is not called a live request", async () => {
 		reset();
 		rfq.recordCreate = async () => ({ ok: true, rfqRequestId: "row-1", status: "failed" });
@@ -609,6 +646,55 @@ describe("the watching stage", () => {
 		h.unmount();
 	});
 
+	test("D-1: an expired, unfilled request offers the refund and does not call itself live", async () => {
+		// The server's own answer for this state, verbatim from `lib/rfq/status.ts`.
+		const h = await watching({
+			status: "expired_unfilled",
+			nextAction: "cancel",
+			sentence:
+				"The reveal window has passed and no offer is on chain, so there is nothing to settle. Cancelling returns the escrowed deposit.",
+		});
+		console.log("EXPIRED", JSON.stringify({ controls: controls(h).map((c) => c.text), text: h.text().slice(0, 420) }));
+		// The escrow is still with the factory, so the refund must be reachable.
+		expect(controls(h).map((c) => c.text)).toContain("Cancel the request");
+		expect(h.text()).toContain("No maker answered");
+		expect(h.text()).not.toContain("Your request is live");
+		// D-11: and it does not announce that it stopped watching a state that
+		// will never change.
+		expect(h.text()).not.toContain("stopped checking on its own");
+		h.unmount();
+	});
+
+	test("a status the app could not read does not claim the request is live", async () => {
+		// The `unknown` member exists for lane C's C-4 (an indexer answer that is
+		// neither active nor settled must not read as "cancelled, deposit
+		// returned"). Whatever sentence that side settles on, this card must not
+		// print a liveness claim over it.
+		const h = await watching({
+			status: "unknown",
+			nextAction: "none",
+			sentence: "This request's status could not be determined.",
+		});
+		console.log("UNKNOWN_STATUS", JSON.stringify({ controls: controls(h).map((c) => c.text), text: h.text().slice(0, 320) }));
+		expect(h.text()).not.toContain("Your request is live");
+		expect(h.text()).toContain("could not be read");
+		h.unmount();
+	});
+
+	test("D-11: a request waiting on the chain keeps watching, and says nothing about stopping", async () => {
+		for (const over of [
+			// The server's own answers, `lib/rfq/status.ts:154,160,163`.
+			{ status: "waiting_for_offers" as const, nextAction: "cancel" as const },
+			{ status: "reveal_window" as const, nextAction: "wait" as const },
+			{ status: "ready_to_settle" as const, nextAction: "settle" as const, sentence: "A winner exists." },
+		]) {
+			const h = await watching(over);
+			console.log("D11_CARD", over.status, JSON.stringify({ controls: controls(h).map((c) => c.text), stopped: h.text().includes("stopped checking on its own") }));
+			expect(h.text(), over.status).not.toContain("stopped checking on its own");
+			h.unmount();
+		}
+	});
+
 	test("a cancelled request says the escrow is refunded", async () => {
 		const h = await watching({ status: "cancelled", nextAction: "none", sentence: "Cancelled before any offer was accepted." });
 		expect(h.text()).toContain("escrow is refunded");
@@ -629,6 +715,49 @@ describe("the card refuses what it cannot check", () => {
 		expect(calls.sends.length).toBe(0);
 		expect(rfq.prepares.length).toBe(0);
 		expect(h.text()).toContain("cannot be refreshed");
+		h.unmount();
+	});
+
+	test("D-5: a tool output bound to NO wallet sends nothing, and does not throw", async () => {
+		// `lib/agent/rfq-tools.ts` builds the envelope with
+		// `{ account: session?.walletAddress ?? null }`, so `null` is in the
+		// PRODUCER's type. `ready()` tested `!== undefined`, which admits null,
+		// and then called `.toLowerCase()` on it — a money card that crashes on
+		// press. `signedInAccount` refuses first today, so this is latent, and one
+		// refactor of that guard is all it would take.
+		reset();
+		const h = mount(RfqExecution, { rfq: createStage({ account: null } as never) });
+		await h.settle();
+		press(h);
+		await h.settle();
+		console.log("ACCOUNT_NULL", JSON.stringify({ sends: calls.sends.length, prepares: rfq.prepares.length, text: h.text().slice(-160) }));
+		expect(calls.sends.length).toBe(0);
+		expect(rfq.prepares.length).toBe(0);
+		expect(h.text()).toContain("signed-in wallet");
+		h.unmount();
+	});
+
+	test("D-5: the action card refuses the same way", async () => {
+		reset();
+		const h = mount(RfqActionExecution, {
+			action: {
+				prepared: true,
+				kind: "rfq_cancel",
+				rfqRequestId: "row-1",
+				quotationId: "125",
+				token: "cancel-tok",
+				account: null,
+				chainId: 8453,
+				cancel: { to: FACTORY, data: "0xDEAD01", value: "0" },
+			} as never,
+		});
+		await h.settle();
+		press(h);
+		await h.settle();
+		console.log("ACTION_ACCOUNT_NULL", JSON.stringify({ sends: calls.sends.length, cancels: rfq.cancels.length }));
+		expect(calls.sends.length).toBe(0);
+		expect(rfq.cancels.length).toBe(0);
+		expect(h.text()).toContain("signed-in wallet");
 		h.unmount();
 	});
 
@@ -655,22 +784,106 @@ describe("the agent-prepared cancel card", () => {
 			token: kind === "rfq_cancel" ? "cancel-tok" : "settle-tok",
 			account: WALLET,
 			chainId: 8453,
+			// D-4: deliberately NOT the bytes the server would build now. The agent
+			// built these at tool-call time, and minutes can pass before the press.
 			...(kind === "rfq_cancel"
-				? { cancel: { to: FACTORY as `0x${string}`, data: "0xCA0001" as `0x${string}`, value: "0" as const } }
-				: { settle: { to: FACTORY as `0x${string}`, data: "0x5E0001" as `0x${string}`, value: "0" as const } }),
+				? { cancel: { to: FACTORY as `0x${string}`, data: "0xDEAD01" as `0x${string}`, value: "0" as const } }
+				: { settle: { to: FACTORY as `0x${string}`, data: "0xDEAD02" as `0x${string}`, value: "0" as const } }),
 		};
 	}
 
-	test("it sends its one transaction and records it", async () => {
+	test("D-4: it re-prepares through the SERVER and sends those bytes, not the agent's", async () => {
 		reset();
 		const h = mount(RfqActionExecution, { action: action("rfq_cancel") });
 		await h.settle();
 		press(h);
 		await h.settle();
-		console.log("ACTION_CARD", JSON.stringify({ sent: calls.sends.map((s) => s.data), records: rfq.records }));
+		console.log(
+			"ACTION_CARD",
+			JSON.stringify({
+				sent: calls.sends.map((s) => s.data),
+				serverPrepares: { cancel: rfq.cancels.length, settle: rfq.settles.length },
+				records: rfq.records,
+			}),
+		);
+		// The server was asked, and what LEFT is what it answered.
+		expect(rfq.cancels).toEqual([{ rfqRequestId: "row-1" }]);
 		expect(calls.sends.map((s) => s.data)).toEqual(["0xCA0001"]);
+		expect(calls.sends.map((s) => s.data)).not.toContain("0xDEAD01");
+		// And the recording token is the fresh one, so the receipt is bound to the
+		// preparation that actually produced the calldata.
 		expect(rfq.records).toEqual([{ token: "cancel-tok", txHash: HASH, kind: "cancel" }]);
 		h.unmount();
+	});
+
+	test("D-4: a settle card re-prepares too", async () => {
+		reset();
+		const h = mount(RfqActionExecution, { action: action("rfq_settle") });
+		await h.settle();
+		press(h);
+		await h.settle();
+		console.log("ACTION_SETTLE", JSON.stringify({ sent: calls.sends.map((s) => s.data), settles: rfq.settles }));
+		expect(rfq.settles).toEqual([{ rfqRequestId: "row-1" }]);
+		expect(calls.sends.map((s) => s.data)).toEqual(["0x5E0001"]);
+		h.unmount();
+	});
+
+	test("D-4: a re-preparation the server refuses sends nothing", async () => {
+		reset();
+		rfq.prepareCancel = async () => ({ ok: false, code: "GONE", reason: "That request is no longer cancellable." });
+		const h = mount(RfqActionExecution, { action: action("rfq_cancel") });
+		await h.settle();
+		press(h);
+		await h.settle();
+		console.log("ACTION_REFUSED", JSON.stringify({ sends: calls.sends.length, text: h.text().slice(-120) }));
+		expect(calls.sends.length).toBe(0);
+		expect(h.text()).toContain("no longer cancellable");
+		h.unmount();
+	});
+
+	test("D-4: calldata that took too long to come back is not broadcast", async () => {
+		reset();
+		// PRD 14's 30-second fetch-to-broadcast window, the same bound the create
+		// path uses. The clock is moved by the stub rather than by waiting.
+		const realNow = Date.now;
+		rfq.prepareCancel = async () => {
+			Date.now = () => realNow.call(Date) + 40_000;
+			return { ok: true, cancel: { to: FACTORY, data: "0xCA0001", value: "0" }, quotationId: "125", token: "cancel-tok" };
+		};
+		const h = mount(RfqActionExecution, { action: action("rfq_cancel") });
+		await h.settle();
+		try {
+			press(h);
+			await h.settle();
+		} finally {
+			Date.now = realNow;
+		}
+		console.log("ACTION_STALE", JSON.stringify({ sends: calls.sends.length, text: h.text().slice(-160) }));
+		expect(calls.sends.length).toBe(0);
+		expect(h.text()).toContain("30 seconds");
+		h.unmount();
+	});
+
+	test("D-3: two ACTION cards mounted at the same time cannot both send", async () => {
+		// The mirror of the create-card case, for the small cancel/settle card.
+		reset();
+		rfq.recordAction = async () => ({ ok: false, code: "LOST", reason: "The server did not answer." });
+		const first = mount(RfqActionExecution, { action: action("rfq_cancel") });
+		const second = mount(RfqActionExecution, { action: action("rfq_cancel") });
+		await first.settle();
+		await second.settle();
+
+		press(first);
+		await first.settle();
+		expect(calls.sends.length).toBe(1);
+
+		press(second);
+		await second.settle();
+		console.log("TWO_ACTIONS", JSON.stringify({ sends: calls.sends.length, label: controls(second)[0]?.text }));
+		expect(calls.sends.length).toBe(1);
+		expect(controls(second)[0]?.text).toBe("Record the request");
+		first.unmount();
+		second.unmount();
 	});
 
 	test("a recording failure keeps the button recording, not re-sending", async () => {

@@ -2,6 +2,7 @@
 
 import { Button } from "@nuts/ui/components/button";
 import { TodoOwner } from "@/components/primitives";
+import { formatUtcIso } from "./instrument-label";
 import { strikesAscending } from "./rfq-contract";
 
 /**
@@ -107,7 +108,9 @@ export function RfqApproval({
 					<div className="flex justify-between gap-4">
 						{/* TODO-OWNER: label. */}
 						<dt className="text-muted-foreground">Expiry</dt>
-						<dd className="num">{expiry}</dd>
+						{/* T-5: formatted for a reader; an instant this app cannot parse
+						    prints exactly as the tool's argument carried it. */}
+						<dd className="num">{formatUtcIso(expiry) ?? expiry}</dd>
 					</div>
 				)}
 				{reserve && (

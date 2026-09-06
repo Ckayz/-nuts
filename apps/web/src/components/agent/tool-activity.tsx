@@ -44,12 +44,31 @@ interface ToolPart {
 	type: string;
 	state?: string;
 	output?: unknown;
+	/** `ai@7.0.92` dist/index.d.ts:2065-2078: the answer a person gave the card. */
+	approval?: { id?: string; approved?: boolean };
 }
+
+/**
+ * TODO-OWNER: T-1 — what a step the user cancelled is called.
+ *
+ * Appended to the tool's own sentence the way `— failed` is, so the three
+ * terminal readings share one shape.
+ */
+const CANCELLED_SUFFIX = "cancelled";
 
 export function ToolActivity({ part }: { part: ToolPart }) {
 	const label = TOOL_ACTIVITY_LABELS[part.type] ?? part.type.replace(/^tool-/, "");
 	const done = part.state === "output-available";
 	const failed = part.state === "output-error";
+	/**
+	 * T-1. A call the user declined is TERMINAL, and used to render exactly like
+	 * one still in flight: the runtime moves a declined tool call to
+	 * `output-denied` (dist/index.d.ts:2114), and leaves the part at
+	 * `approval-responded` with `approved: false` until it does. Neither state
+	 * was known here, so the reader was told `Preparing the trade…` under a reply
+	 * that had already moved on — for ever.
+	 */
+	const cancelled = part.state === "output-denied" || (part.state === "approval-responded" && part.approval?.approved === false);
 
 	const asOf =
 		done && part.output && typeof part.output === "object" && "asOf" in part.output
@@ -58,8 +77,16 @@ export function ToolActivity({ part }: { part: ToolPart }) {
 
 	return (
 		<p className="flex items-center gap-2 text-muted-foreground text-xs">
-			<span aria-hidden>{failed ? "✗" : done ? "✓" : "○"}</span>
-			<span>{failed ? `${label} — failed` : done ? label : `${label}…`}</span>
+			<span aria-hidden>{cancelled ? "✕" : failed ? "✗" : done ? "✓" : "○"}</span>
+			<span>
+				{cancelled
+					? `${label} — ${CANCELLED_SUFFIX}`
+					: failed
+						? `${label} — failed`
+						: done
+							? label
+							: `${label}…`}
+			</span>
 			{asOf && (
 				<time dateTime={asOf} className="opacity-70">
 					{new Date(asOf).toLocaleTimeString()}

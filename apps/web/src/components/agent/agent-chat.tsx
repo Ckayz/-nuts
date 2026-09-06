@@ -80,7 +80,30 @@ const COPY = {
 	 * `addToolApprovalResponse` is never called for it.
 	 */
 	expiredApproval: "This request expired when the chat was closed. Ask again to prepare it.",
+	/**
+	 * TODO-OWNER: T-1 — what the MODEL is told when the user presses Cancel.
+	 *
+	 * Not a screen string: it is the `reason` the SDK attaches to the denial
+	 * (`ai@7.0.92` dist/index.js:11733 hands the model `approval.reason` and
+	 * falls back to a bare "Tool call execution denied."). With no reason the
+	 * model had nothing to explain the refusal with and invented one — "the tool
+	 * refused, likely because the order on the book has nearly expired" — about a
+	 * book that had refused nothing.
+	 */
+	declined: "The user pressed Cancel in the chat. Nothing was prepared and nothing was sent.",
 } as const;
+
+/**
+ * T-1. The answer handed to `addToolApprovalResponse`, for either card.
+ *
+ * A decline carries `reason`, so the model is told a PERSON stopped this rather
+ * than being left with the SDK's anonymous "Tool call execution denied." An
+ * approval carries none: there is nothing to explain, and an empty field would
+ * still reach the model as a sentence.
+ */
+export function approvalAnswer(id: string, approved: boolean): { id: string; approved: boolean; reason?: string } {
+	return approved ? { id, approved } : { id, approved, reason: COPY.declined };
+}
 
 /**
  * The opening message when the page was reached from a post's "Explain".
@@ -232,16 +255,41 @@ export function SuggestionRow({
 	readonly chips: readonly Chip[];
 	readonly onSend: (text: string) => void;
 }) {
-	if (chips.length === 0) return null;
+	/**
+	 * D-6. The row is built from three independent sources — the post-fill
+	 * chips, the post-RFQ chips and `chipsForTurn` — and two of them can name the
+	 * same thing: `postFillSuggestions` always contains "Show my positions" and
+	 * so does the signed-in fallback pool (`lib/agent/suggestions.ts`
+	 * `walletChips`). Measured on the rotation, turn 5 rendered that button
+	 * twice, under one duplicated React key.
+	 *
+	 * The FIRST of a repeated label wins: the deterministic chips lead the list
+	 * because a fill is worth more than a follow-up question, and deduping here
+	 * rather than at the call site keeps the rule true for every caller.
+	 */
+	const seen = new Set<string>();
+	const unique = chips.filter((chip) => {
+		if (seen.has(chip.label)) return false;
+		seen.add(chip.label);
+		return true;
+	});
+	if (unique.length === 0) return null;
 	return (
 		<div className="pills agent-suggest">
-			{chips.map((chip) =>
+			{unique.map((chip, index) =>
 				isLinkChip(chip) ? (
-					<a key={chip.label} className="pill" href={chip.href}>
+					// Keyed on the position as well as the label: the label is unique
+					// after the filter above, and the index says so at a glance.
+					<a key={`${index}.${chip.label}`} className="pill" href={chip.href}>
 						{chip.label}
 					</a>
 				) : (
-					<button type="button" key={chip.label} className="pill" onClick={() => onSend(chip.send)}>
+					<button
+						type="button"
+						key={`${index}.${chip.label}`}
+						className="pill"
+						onClick={() => onSend(chip.send)}
+					>
 						{chip.label}
 					</button>
 				),
@@ -314,12 +362,24 @@ export function AgentChat({
 		addressRef.current = address;
 	}, [address]);
 
+	/**
+	 * The same trick for the post and the market this panel is about.
+	 *
+	 * D-2: the dependency list read `[thesisId]`, so a client-side move from
+	 * `/m/eth` to `/m/btc` — a PROP change with no remount, because
+	 * `app/m/[asset]/page.tsx` renders this panel with no `key` and
+	 * `components/market/right-tabs.tsx` keeps it mounted — left `assetRef` on
+	 * the old market. The visible chips followed the prop (they read `asset`
+	 * directly); the request body did not, so the model was told ETH while the
+	 * reader was looking at BTC. Every value the effect writes belongs in its
+	 * deps.
+	 */
 	const thesisRef = useRef<string | null>(thesisId);
 	const assetRef = useRef<string | null>(asset);
 	useEffect(() => {
 		thesisRef.current = thesisId;
 		assetRef.current = asset;
-	}, [thesisId]);
+	}, [thesisId, asset]);
 
 	/**
 	 * W5. The saved conversation this chat is appending to.
@@ -552,18 +612,26 @@ export function AgentChat({
 								// "streaming" | "done"); it is treated as streaming while this
 								// message is the one being written, because a part that never
 								// carries the field would otherwise flash half a JSON array.
-								const streaming =
-									part.state === "streaming" || (busy && message.id === messages[messages.length - 1]?.id);
-								const { body } = splitSuggestionTrailer(part.text, streaming);
 								// The person's own words sit in a panel so the page reads as
 								// turns; the reply keeps the page background.
+								//
+								// D-7 (lane D). The trailer is a convention the MODEL is asked
+								// to follow, and the cutter used to run on every text part —
+								// including the user's. A message that merely CONTAINED a line
+								// beginning `SUGGEST:` was silently truncated on screen:
+								// measured, "What does this mean?\nSUGGEST: buy low sell high"
+								// rendered as "What does this mean?". Nothing a person typed is
+								// rewritten here.
 								if (message.role === "user") {
 									return (
 										<div key={i} className="agent-user">
-											<AgentMarkdown text={body} />
+											<AgentMarkdown text={part.text} />
 										</div>
 									);
 								}
+								const streaming =
+									part.state === "streaming" || (busy && message.id === messages[messages.length - 1]?.id);
+								const { body } = splitSuggestionTrailer(part.text, streaming);
 								return <AgentMarkdown key={i} text={body} />;
 							}
 							// The runtime suspended a write tool and is waiting for the user.
@@ -604,9 +672,7 @@ export function AgentChat({
 											tool={part.type}
 											input={approval.input}
 											pending={busy}
-											onRespond={(approved) =>
-												addToolApprovalResponse({ id: approval.id, approved })
-											}
+											onRespond={(approved) => addToolApprovalResponse(approvalAnswer(approval.id, approved))}
 										/>
 									);
 								}
@@ -615,9 +681,7 @@ export function AgentChat({
 										key={i}
 										input={approval.input}
 										pending={busy}
-										onRespond={(approved) =>
-											addToolApprovalResponse({ id: approval.id, approved })
-										}
+										onRespond={(approved) => addToolApprovalResponse(approvalAnswer(approval.id, approved))}
 									/>
 								);
 							}

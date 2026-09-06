@@ -29,7 +29,18 @@ const POSITION_URL_SOURCE = String.raw`\/p\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-
 
 /** Either app-relative destination the agent is allowed to produce. */
 const APP_URL_SOURCE = `(?:${MARKET_URL_SOURCE}|${POSITION_URL_SOURCE})`;
-const MARKET_URL = new RegExp(APP_URL_SOURCE, "gi");
+
+/**
+ * CASE-SENSITIVE, deliberately (D-9, lane D).
+ *
+ * Both expressions carried an `i` flag while this file's own comment said the
+ * asset segment is the lowercase ticker `lib/agent/tools.ts` writes. Next's
+ * static route segment `m` is case-sensitive, so `/M/BTC` is a route this app
+ * does not serve — and the `i` flag turned it into a live anchor to a 404,
+ * measured: `<a class="agent-md-link" href="/M/BTC">/M/BTC</a>`. The uuid is
+ * lowercase hex by construction for the same reason.
+ */
+const MARKET_URL = new RegExp(APP_URL_SOURCE, "g");
 
 /**
  * The SAME grammar, anchored: does this string consist of nothing but a market
@@ -42,7 +53,7 @@ const MARKET_URL = new RegExp(APP_URL_SOURCE, "gi");
  * points: text nodes go through `marketLinkParts`, authored destinations go
  * through this.
  */
-const MARKET_URL_EXACT = new RegExp(`^${APP_URL_SOURCE}$`, "i");
+const MARKET_URL_EXACT = new RegExp(`^${APP_URL_SOURCE}$`);
 
 /**
  * True for the two app-relative destinations the agent may emit — a market page

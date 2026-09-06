@@ -79,7 +79,7 @@ describe("D-C2: the agent's copy is tagged", () => {
 		// `expiredApproval` — the line a reopened chat prints where an approval
 		// card can no longer be answered. The fence's job is to make a new
 		// sentence a visible decision, which is exactly what happened both times.
-		expect(entries.length).toBe(5);
+		expect(entries.length).toBe(6); // W5 expiredApproval + F-D declined (fold merge)
 		let previousEnd = block.indexOf("{") + 1;
 		const undocumented: string[] = [];
 		for (const entry of entries) {

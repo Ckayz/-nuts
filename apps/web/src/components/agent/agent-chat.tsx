@@ -69,6 +69,17 @@ const COPY = {
 	 * message until that call is answered.
 	 */
 	awaitingApproval: "Answer the card above first.",
+	/**
+	 * TODO-OWNER: what a REOPENED chat says where an approval card used to be.
+	 *
+	 * W5. A saved conversation can end on an assistant message whose part is
+	 * `state: "approval-requested"` — that is genuinely what the server produced,
+	 * and it is stored as produced. But the runtime's suspended tool call died
+	 * with the request that made it, so the buttons would answer an approval id
+	 * nothing is waiting on. The card is therefore printed WITHOUT them and
+	 * `addToolApprovalResponse` is never called for it.
+	 */
+	expiredApproval: "This request expired when the chat was closed. Ask again to prepare it.",
 } as const;
 
 /**
@@ -140,6 +151,27 @@ export function readConversationHeader(response: { readonly headers: { get(name:
 	if (value === null) return null;
 	const id = value.trim().toLowerCase();
 	return CONVERSATION_UUID.test(id) ? id : null;
+}
+
+/**
+ * W5. An approval card that can no longer be answered.
+ *
+ * Same frame as `TradeApproval` and `RfqApproval` — `rounded-lg border p-4`, so
+ * a reopened turn reads as the same object it was — with the two buttons gone
+ * and one sentence in their place. Exported and dumb so a test can render it
+ * directly, and so the branch that chooses it is the only thing under test in
+ * the chat.
+ *
+ * It takes no `onRespond`, which is the point: there is nothing to respond to.
+ */
+export function ExpiredApproval() {
+	return (
+		<div className="rounded-lg border p-4">
+			<p className="text-muted-foreground text-sm">
+				{COPY.expiredApproval} <TodoOwner />
+			</p>
+		</div>
+	);
 }
 
 /**
@@ -299,6 +331,25 @@ export function AgentChat({
 	 */
 	const conversationRef = useRef<string | null>(initialConversationId);
 
+	/**
+	 * W5. The ids of the messages this chat was REOPENED with.
+	 *
+	 * A message from here is history: whatever suspended tool call its parts
+	 * describe belonged to a request that has already ended, so an
+	 * `approval-requested` part in one of them can never be answered — the
+	 * approval id is not one this runtime is holding. Anything the runtime
+	 * produces afterwards gets a new id and is not in this set, so a LIVE
+	 * approval in a reopened conversation still renders its buttons.
+	 *
+	 * Filled once, lazily: `useRef(new Set(...))` would rebuild the set on every
+	 * render and throw it away, which is only wasteful, but the intent is
+	 * clearer written as "compute this once".
+	 */
+	const reopenedIdsRef = useRef<ReadonlySet<string> | null>(null);
+	if (reopenedIdsRef.current === null) {
+		reopenedIdsRef.current = new Set((initialMessages ?? []).map((message) => message.id));
+	}
+
 	const [transport] = useState(
 		() =>
 			new DefaultChatTransport({
@@ -382,9 +433,13 @@ export function AgentChat({
 	 * message — see `COPY.awaitingApproval`.
 	 */
 	const last = messages[messages.length - 1];
+	// W5: a REOPENED message never counts. Its card cannot be answered, so
+	// treating it as unanswered would disable the composer for good — the person
+	// would open their own saved chat and find they could not type in it.
 	const awaitingApproval =
 		last !== undefined &&
 		last.role === "assistant" &&
+		reopenedIdsRef.current?.has(last.id) !== true &&
 		last.parts.some((part) => approvalRequest(part) !== null);
 
 	/**
@@ -530,6 +585,14 @@ export function AgentChat({
 							// approval it was waiting for.
 							const approval = approvalRequest(part);
 							if (approval !== null) {
+								// W5. A card from a REOPENED conversation answers nothing: the
+								// runtime that suspended this tool call ended with the request
+								// that made it, so `approval.id` names no waiting call.
+								// Rendered without buttons, and `addToolApprovalResponse` is
+								// never reached for it.
+								if (reopenedIdsRef.current?.has(message.id) === true) {
+									return <ExpiredApproval key={i} />;
+								}
 								// WHICH card answers is decided by the TOOL, read from the part
 								// itself. `approvalRequest` keeps its measured shape (id + input)
 								// — `agent-fold-r2.test.ts` pins that object exactly — so the tool

@@ -64,6 +64,8 @@ describe("D-C2: the agent's copy is tagged", () => {
 			"Ask about options, markets, or what a small budget could buy.",
 			"Something went wrong. Try sending that again.",
 			"Answer the card above first.",
+			// W5: the sentence a reopened chat prints where an approval card was.
+			"This request expired when the chat was closed. Ask again to prepare it.",
 		]) {
 			expect(source).toContain(phrase);
 			// and reached through COPY, not printed as a bare literal in the JSX.
@@ -73,9 +75,11 @@ describe("D-C2: the agent's copy is tagged", () => {
 		const block = source.slice(source.indexOf("const COPY = {"), source.indexOf("} as const;"));
 		const entries = [...block.matchAll(/^\t(\w+):/gm)];
 		// W4 raised this from 3 to 4 DELIBERATELY: `awaitingApproval` is the
-		// composer guard's sentence (follow-up 1). The fence's job is to make a
-		// new sentence a visible decision, which is exactly what happened here.
-		expect(entries.length).toBe(4);
+		// composer guard's sentence (follow-up 1). W5 raised it to 5, for
+		// `expiredApproval` — the line a reopened chat prints where an approval
+		// card can no longer be answered. The fence's job is to make a new
+		// sentence a visible decision, which is exactly what happened both times.
+		expect(entries.length).toBe(5);
 		let previousEnd = block.indexOf("{") + 1;
 		const undocumented: string[] = [];
 		for (const entry of entries) {
@@ -91,9 +95,10 @@ describe("D-C2: the agent's copy is tagged", () => {
 		// `COPY.error` is the fallback for anything the server did not word. The
 		// fence is unchanged in strength: a COPY reference still has to be the last
 		// thing before the rendered marker.
-		// Four now: the guard prints its sentence with a marker as well, so the
-		// placeholder attribute is not the only place it appears.
-		expect(source.match(/COPY\.\w+[^\n]*\} <TodoOwner \/>/g)?.length ?? 0).toBe(4);
+		// Five now: the guard prints its sentence with a marker as well, so the
+		// placeholder attribute is not the only place it appears, and W5's expired
+		// approval card prints its own.
+		expect(source.match(/COPY\.\w+[^\n]*\} <TodoOwner \/>/g)?.length ?? 0).toBe(5);
 	});
 
 	/**

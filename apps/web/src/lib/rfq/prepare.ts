@@ -305,9 +305,15 @@ const quotationSettledTopic: Hex = (() => {
 	return encodeEventTopics({ abi: [events[0] as Abi[number]] })[0] as Hex;
 })();
 
-/** Unix seconds from either an ISO instant or a number, or null. */
+/**
+ * Unix seconds from either an ISO instant or a number, or null.
+ *
+ * `isSafeInteger`, not `isInteger` (A-4): past 2^53 the number is no longer the
+ * one that was written, and `buildRfqCreate` bounds the plausible range from
+ * both ends after this.
+ */
 export function unixSecondsFrom(value: number | string): number | null {
-	if (typeof value === "number") return Number.isInteger(value) && value > 0 ? value : null;
+	if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? value : null;
 	const trimmed = value.trim();
 	if (/^\d+$/.test(trimmed)) {
 		const seconds = Number(trimmed);
@@ -501,17 +507,31 @@ export async function prepareRfqCreateFor(
 	});
 	if (!gate.ok) return fail(gate.code, gate.reason);
 
-	const expected: RfqExpected = {
-		depositBaseUnits: build.expected.depositBaseUnits.toString(),
-		deposit: decimalFromBaseUnits(build.expected.depositBaseUnits.toString(), build.expected.collateral.decimals),
-		strikesUsd: ascending(build.expected.strikesUsd8).map((strike) => decimalFromBaseUnits(strike.toString(), 8)),
-		numContracts: decimalFromBaseUnits(build.expected.numContracts.toString(), build.expected.collateral.decimals),
-		expiryAt: new Date(Number(build.expected.expiryTimestamp) * 1000).toISOString(),
-		offerEndAt: new Date(Number(build.expected.offerEndTimestamp) * 1000).toISOString(),
-		factory: build.factory,
-		maxLossUsd: gate.depositUsd,
-		collateralSymbol: "USDC",
-	};
+	// `toISOString` THROWS `RangeError` on a timestamp outside JavaScript's date
+	// range, and it sits outside the try that wraps `buildRfqCreate`, so an
+	// out-of-range value used to escape a server action as an unclassified error
+	// instead of a refusal (A-4). `buildRfqCreate` now bounds the expiry, which
+	// makes this unreachable through the product; it is caught anyway, because
+	// "unreachable" is an argument and a refusal is a fact.
+	let expected: RfqExpected;
+	try {
+		expected = {
+			depositBaseUnits: build.expected.depositBaseUnits.toString(),
+			deposit: decimalFromBaseUnits(build.expected.depositBaseUnits.toString(), build.expected.collateral.decimals),
+			strikesUsd: ascending(build.expected.strikesUsd8).map((strike) => decimalFromBaseUnits(strike.toString(), 8)),
+			numContracts: decimalFromBaseUnits(build.expected.numContracts.toString(), build.expected.collateral.decimals),
+			expiryAt: new Date(Number(build.expected.expiryTimestamp) * 1000).toISOString(),
+			offerEndAt: new Date(Number(build.expected.offerEndTimestamp) * 1000).toISOString(),
+			factory: build.factory,
+			maxLossUsd: gate.depositUsd,
+			collateralSymbol: "USDC",
+		};
+	} catch {
+		return fail(
+			"RFQ_INVALID_DEADLINE",
+			"The expiry or the offer deadline is not a date this build can express, so nothing was prepared.",
+		);
+	}
 
 	if (build.approve !== undefined) {
 		const approve = asTx(build.approve);

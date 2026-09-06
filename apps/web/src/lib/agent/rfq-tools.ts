@@ -89,8 +89,12 @@ const MAX_ROWS = 10;
  *
  * The calldata a preview builds is DISCARDED — no tool below returns it — so
  * this value can never reach a wallet.
+ *
+ * It IS a real point on secp256k1, because `buildRfqCreate` now decompresses the
+ * key rather than trusting its shape (A-3): `0x02` followed by 32 `11` bytes,
+ * which this used to be, is not a point and is refused.
  */
-const PREVIEW_PUBLIC_KEY = `0x02${"11".repeat(32)}`;
+const PREVIEW_PUBLIC_KEY = `0x02${"22".repeat(32)}`;
 /** Same idea for the requester when nobody is signed in: previews price a shape, not an account. */
 const PREVIEW_REQUESTER = "0x0000000000000000000000000000000000000000" as const;
 

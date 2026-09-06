@@ -478,6 +478,56 @@ describe("prepareRfqCreateFor", () => {
 	});
 });
 
+/* ─────────────────────────── expiry bounds (A-4) ─────────────────────────── */
+
+describe("an expiry that is not a plausible date", () => {
+	/**
+	 * A-4. `PrepareRfqCreateInput.expiry` is `number | string` with no runtime
+	 * parse, and this is a server action: a millisecond timestamp used to be
+	 * accepted and encoded (the user was shown the year 58651), and a larger one
+	 * reached an uncaught `RangeError` out of `new Date(...).toISOString()`.
+	 * Every one of these must be a REFUSAL with a sentence, and no row.
+	 */
+	test("milliseconds, and anything past the horizon, are refused with a sentence and write no row", async () => {
+		const cases: (number | string)[] = [
+			NOW_MS, // the classic: seconds asked for, milliseconds given
+			NOW_S + 401 * 86_400,
+			1e20,
+			Number.MAX_SAFE_INTEGER + 2,
+			-1,
+			0,
+			1.5,
+			"not-a-date",
+		];
+		for (const expiry of cases) {
+			const { deps, state } = makeDeps({ allowance: 500_000n });
+			const result = await prepareRfqCreateFor(SESSION, createInput({ expiry }), deps);
+			expect(result.ok, String(expiry)).toBe(false);
+			if (result.ok) throw new Error("unreachable");
+			expect(result.code, String(expiry)).toBe("RFQ_INVALID_DEADLINE");
+			expect(result.reason.length, String(expiry)).toBeGreaterThan(0);
+			expect(state.rows.size, String(expiry)).toBe(0);
+		}
+	});
+
+	test("a millisecond expiry says so, rather than naming a year nobody asked for", async () => {
+		const { deps } = makeDeps({ allowance: 500_000n });
+		const result = await prepareRfqCreateFor(SESSION, createInput({ expiry: NOW_MS }), deps);
+		if (result.ok) throw new Error("expected a refusal");
+		expect(result.reason).toContain("milliseconds");
+	});
+
+	test("an absurd contract count is refused before any calldata is built", async () => {
+		const { deps, state } = makeDeps({ allowance: 500_000n });
+		const result = await prepareRfqCreateFor(SESSION, createInput({ numContracts: "1000001" }), deps);
+		expect(result.ok).toBe(false);
+		if (result.ok) throw new Error("unreachable");
+		expect(result.code).toBe("RFQ_INVALID_AMOUNT");
+		expect(state.rows.size).toBe(0);
+		expect(state.dryRuns).toEqual([]);
+	});
+});
+
 /* ───────────────────────── phantom pending rows ───────────────────────── */
 
 describe("re-preparing the same request", () => {

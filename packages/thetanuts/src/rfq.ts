@@ -59,6 +59,7 @@
  * number stay the caller's. This module invents none of them.
  */
 import { OPTION_FACTORY_ABI, type ThetanutsClient } from "@thetanuts-finance/thetanuts-client";
+import { SigningKey } from "ethers";
 import { decodeFunctionData, encodeEventTopics, parseAbi, type Abi, type Address, type Hex } from "viem";
 import { ThetanutsLogicError } from "./errors";
 import type { Tx } from "./fill";
@@ -69,6 +70,31 @@ export type RfqUnderlying = "ETH" | "BTC";
 /** USDC on Base carries 6 decimals; asserted against `chainConfig.tokens.USDC` at build time. */
 const COLLATERAL_SYMBOL = "USDC" as const;
 const STRIKE_DECIMALS = 8;
+
+/**
+ * How far ahead an expiry may be asked for.
+ *
+ * TODO-OWNER: 400 days is not a chain limit; it is the cap the agent's own
+ * search tool already uses (`apps/web/src/lib/agent/tools.ts:131`, `.max(400)`),
+ * borrowed so the two surfaces agree. Nothing in the PRD words an RFQ horizon.
+ */
+const MAX_EXPIRY_DAYS = 400;
+
+/**
+ * A plausibility ceiling on the contract count.
+ *
+ * TODO-OWNER: nothing on chain caps it and the escrow is bounded separately by
+ * the caller; this exists so a typo or a model's stray zeroes are refused by
+ * name instead of encoded.
+ */
+const MAX_CONTRACTS = 1_000_000;
+
+/**
+ * An expiry this far past "now in seconds" was almost certainly given in
+ * MILLISECONDS — 1e3 is the real ratio, so 1e2 refuses the mistake without
+ * catching any plausible date.
+ */
+const MILLISECONDS_SUSPICION = 100;
 
 /** The subset of the SDK client this module uses. A real `ThetanutsClient` satisfies it. */
 export interface RfqClient {
@@ -289,6 +315,20 @@ export function buildRfqCreate({ client, params, allowance }: { client: RfqClien
   if (!/^0x0[23][0-9a-fA-F]{64}$/.test(params.requesterPublicKey)) {
     throw new ThetanutsLogicError("RFQ_INVALID_PUBLIC_KEY", "requesterPublicKey must be a 33-byte compressed ECDH public key");
   }
+  // The SHAPE is not the key. The SDK's own gate is shape-only too
+  // (`isValidPublicKey`, dist/index.js:11975-11991), so an x-coordinate that is
+  // not a point on secp256k1 encodes happily and produces an RFQ nobody can
+  // encrypt an offer to. Decompressing it is the check, and ethers throws
+  // "Point is not on curve" / "Cannot find square root" when it is not one
+  // (measured, A-3).
+  try {
+    SigningKey.computePublicKey(params.requesterPublicKey, false);
+  } catch {
+    throw new ThetanutsLogicError(
+      "RFQ_INVALID_PUBLIC_KEY",
+      "requesterPublicKey is not a point on secp256k1, so no market maker could encrypt an offer to it",
+    );
+  }
 
   const strikeCount = params.strikesUsd.length;
   if (strikeCount !== 1 && strikeCount !== 2) {
@@ -306,6 +346,14 @@ export function buildRfqCreate({ client, params, allowance }: { client: RfqClien
   const collateral = usdcConfig(client);
   const contracts = decimalToBaseUnits(params.numContracts, collateral.decimals, "numContracts");
   assertPositive(contracts, "numContracts");
+  const maxContracts = BigInt(MAX_CONTRACTS) * 10n ** BigInt(collateral.decimals);
+  if (contracts > maxContracts) {
+    throw new ThetanutsLogicError(
+      "RFQ_INVALID_AMOUNT",
+      `numContracts is ${params.numContracts}; this build asks for at most ${MAX_CONTRACTS} contracts`,
+      { field: "numContracts", value: contracts },
+    );
+  }
   const reservePerContract = decimalToBaseUnits(params.reservePricePerContract, collateral.decimals, "reservePricePerContract");
   assertPositive(reservePerContract, "reservePricePerContract");
   // The SDK's own arithmetic (calculateReservePrice, index.js:4702-4712) in exact integers.
@@ -320,13 +368,35 @@ export function buildRfqCreate({ client, params, allowance }: { client: RfqClien
   if (!Number.isInteger(params.offerDeadlineMinutes) || params.offerDeadlineMinutes <= 0) {
     throw new ThetanutsLogicError("RFQ_INVALID_DEADLINE", "offerDeadlineMinutes must be a positive whole number of minutes", { minutes: params.offerDeadlineMinutes });
   }
-  if (!Number.isInteger(params.expiry) || params.expiry <= 0) {
+  // `isSafeInteger`, not `isInteger`: past 2^53 the value is no longer the number
+  // that was written, and past ~2.8e14 seconds it stops being a date at all —
+  // `new Date(x * 1000).toISOString()` throws `RangeError` in the caller (A-4).
+  if (!Number.isSafeInteger(params.expiry) || params.expiry <= 0) {
     throw new ThetanutsLogicError("RFQ_INVALID_DEADLINE", "expiry must be a positive whole number of unix seconds", { expiry: params.expiry });
   }
   const nowSeconds = Math.floor((params.now ?? Date.now()) / 1_000);
   const offerEndEstimate = nowSeconds + params.offerDeadlineMinutes * 60;
   if (params.expiry <= offerEndEstimate) {
     throw new ThetanutsLogicError("RFQ_INVALID_DEADLINE", "The option expiry must be after the offer deadline", { expiry: params.expiry, offerEnd: offerEndEstimate });
+  }
+  // BOUNDED FROM ABOVE TOO. Without this an expiry given in MILLISECONDS — a
+  // realistic mistake, the agent tool's own description says "an ISO instant or
+  // unix seconds" — was accepted silently and encoded, and the user was shown an
+  // option expiring in the year 58651 instead of being told the unit was wrong.
+  if (params.expiry > nowSeconds * MILLISECONDS_SUSPICION) {
+    throw new ThetanutsLogicError(
+      "RFQ_INVALID_DEADLINE",
+      "expiry is far beyond any plausible date; it looks like milliseconds, and this field is unix SECONDS",
+      { expiry: params.expiry },
+    );
+  }
+  const latestExpiry = nowSeconds + MAX_EXPIRY_DAYS * 86_400;
+  if (params.expiry > latestExpiry) {
+    throw new ThetanutsLogicError(
+      "RFQ_INVALID_DEADLINE",
+      `The option expiry is further than ${MAX_EXPIRY_DAYS} days away, which this build does not request`,
+      { expiry: params.expiry, latest: latestExpiry },
+    );
   }
 
   const factory = factoryAddress(client);

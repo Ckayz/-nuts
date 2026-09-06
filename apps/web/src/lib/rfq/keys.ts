@@ -26,9 +26,20 @@ import "server-only";
  *
  * AT REST. AES-256-GCM under `RFQ_KEY_MASTER_KEY`, a fresh 12-byte IV per
  * write, the 16-byte tag verified on every read, stored as
- * `v1:` + base64(iv ‖ tag ‖ ciphertext). With no master key configured every
+ * `v2:` + base64(iv ‖ tag ‖ ciphertext). With no master key configured every
  * entry point here REFUSES — a private key is never written in clear, and RFQ
  * creation is refused with one sentence instead.
+ *
+ * BOUND TO ITS WALLET. The `v2` envelope authenticates the lowercase wallet
+ * address as AAD, so a ciphertext copied from one wallet's row into another's —
+ * by a bug, a bad migration, or anyone with database write access — fails the
+ * tag instead of silently handing that wallet someone else's key (A-5). It is
+ * defence in depth: an attacker who can already write the table can substitute a
+ * key they control; what this closes is the accidental swap.
+ *
+ * `v1` (no AAD) is still READ, because this build cannot see whether a
+ * deployment already stored one and orphaning a key is unrecoverable. Nothing
+ * writes `v1` any more, so the estate converges as wallets mint.
  *
  * The private key never leaves this module: it is not returned to a caller, not
  * logged, and never placed in an error message or an error's details.
@@ -66,7 +77,10 @@ export class RfqKeyError extends Error {
 }
 
 const MASTER_KEY_PATTERN = /^[0-9a-f]{64}$/i;
-const VERSION_PREFIX = "v1:";
+/** Written today: AES-256-GCM with the wallet address as AAD. */
+const VERSION_2_PREFIX = "v2:";
+/** Read only: the same envelope without AAD, from before the wallet was bound in. */
+const VERSION_1_PREFIX = "v1:";
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 
@@ -104,27 +118,40 @@ export function normalizeRfqWallet(value: string): string {
 }
 
 /**
- * `v1:` + base64(iv ‖ tag ‖ ciphertext). A fresh IV per call, so encrypting one
- * plaintext twice produces two different payloads — a constant IV under one key
- * leaks plaintext relationships in GCM and also destroys its integrity.
+ * `v2:` + base64(iv ‖ tag ‖ ciphertext), with the wallet address authenticated
+ * as AAD. A fresh IV per call, so encrypting one plaintext twice produces two
+ * different payloads — a constant IV under one key leaks plaintext relationships
+ * in GCM and also destroys its integrity.
  */
-export function encryptRfqPrivateKey(privateKey: string, key: Buffer = masterKey()): string {
+export function encryptRfqPrivateKey(privateKey: string, walletAddress: string, key: Buffer = masterKey()): string {
+	const wallet = normalizeRfqWallet(walletAddress);
 	const iv = randomBytes(IV_BYTES);
 	const cipher = createCipheriv("aes-256-gcm", key, iv);
+	cipher.setAAD(Buffer.from(wallet, "utf8"));
 	const ciphertext = Buffer.concat([cipher.update(privateKey, "utf8"), cipher.final()]);
-	return VERSION_PREFIX + Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString("base64");
+	return VERSION_2_PREFIX + Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString("base64");
 }
 
 /**
- * The reverse. A wrong master key, a truncated payload or a single flipped byte
- * all raise `RFQ_KEY_UNREADABLE` — the GCM tag is verified, so a tampered
- * ciphertext can never be returned as if it were a key.
+ * The reverse. A wrong master key, a truncated payload, a single flipped byte or
+ * a ciphertext written for a DIFFERENT wallet all raise `RFQ_KEY_UNREADABLE` —
+ * the GCM tag is verified, so a tampered or misfiled ciphertext can never be
+ * returned as if it were this wallet's key.
+ *
+ * `v1` payloads (written before the wallet was bound in) are read without AAD;
+ * nothing writes them any more.
  */
-export function decryptRfqPrivateKey(payload: string, key: Buffer = masterKey()): string {
-	if (!payload.startsWith(VERSION_PREFIX)) {
-		throw new RfqKeyError("RFQ_KEY_UNREADABLE", "The stored RFQ key is not in the v1 envelope this build writes");
+export function decryptRfqPrivateKey(payload: string, walletAddress: string, key: Buffer = masterKey()): string {
+	const wallet = normalizeRfqWallet(walletAddress);
+	const version = payload.startsWith(VERSION_2_PREFIX)
+		? VERSION_2_PREFIX
+		: payload.startsWith(VERSION_1_PREFIX)
+			? VERSION_1_PREFIX
+			: null;
+	if (version === null) {
+		throw new RfqKeyError("RFQ_KEY_UNREADABLE", "The stored RFQ key is not in an envelope this build writes or reads");
 	}
-	const raw = Buffer.from(payload.slice(VERSION_PREFIX.length), "base64");
+	const raw = Buffer.from(payload.slice(version.length), "base64");
 	if (raw.length <= IV_BYTES + TAG_BYTES) {
 		throw new RfqKeyError("RFQ_KEY_UNREADABLE", "The stored RFQ key is too short to contain an IV, a tag and a key");
 	}
@@ -133,6 +160,7 @@ export function decryptRfqPrivateKey(payload: string, key: Buffer = masterKey())
 	const ciphertext = raw.subarray(IV_BYTES + TAG_BYTES);
 	try {
 		const decipher = createDecipheriv("aes-256-gcm", key, iv);
+		if (version === VERSION_2_PREFIX) decipher.setAAD(Buffer.from(wallet, "utf8"));
 		decipher.setAuthTag(tag);
 		return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
 	} catch {
@@ -174,7 +202,7 @@ export function dbKeyStorage(walletAddress: string, db: Database = defaultDb): K
 	return {
 		async get(): Promise<string | null> {
 			const payload = await stored();
-			return payload === null ? null : decryptRfqPrivateKey(payload);
+			return payload === null ? null : decryptRfqPrivateKey(payload, wallet);
 		},
 		/**
 		 * INSERT-ONLY. A wallet's RFQ key is minted once and never replaced: the
@@ -194,7 +222,7 @@ export function dbKeyStorage(walletAddress: string, db: Database = defaultDb): K
 			// Derived here so the public column can never drift from the private
 			// half it claims to describe.
 			const publicKey = compressedPublicKeyOf(privateKey);
-			const encryptedPrivateKey = encryptRfqPrivateKey(privateKey, key);
+			const encryptedPrivateKey = encryptRfqPrivateKey(privateKey, wallet, key);
 			await db
 				.insert(agentRfqKeys)
 				.values({ walletAddress: wallet, publicKey, encryptedPrivateKey })

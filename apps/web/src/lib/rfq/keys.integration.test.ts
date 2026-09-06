@@ -62,14 +62,37 @@ describeLive("rfq key storage", () => {
 
 		// The column is a ciphertext, and the plaintext it hides is the private
 		// half of exactly the public key that was returned.
-		expect(row.encryptedPrivateKey.startsWith("v1:")).toBe(true);
-		const privateKey = decryptRfqPrivateKey(row.encryptedPrivateKey);
+		expect(row.encryptedPrivateKey.startsWith("v2:")).toBe(true);
+		const privateKey = decryptRfqPrivateKey(row.encryptedPrivateKey, wallet);
 		// The stored column does not carry the key it hides. (It used to assert
 		// `not.toContain("0x")`, which is base64 and therefore contains "0x" by
 		// chance about 3 runs in 100 — measured; the key itself is the fence.)
 		expect(row.encryptedPrivateKey).not.toContain(privateKey);
 		expect(row.encryptedPrivateKey).not.toContain(privateKey.slice(2));
 		expect(new SigningKey(privateKey).compressedPublicKey).toBe(first.compressedPublicKey);
+	});
+
+	/**
+	 * A-5 against a real row: the stored envelope is bound to the wallet it was
+	 * written for, so the same ciphertext under another wallet's address fails
+	 * the tag rather than handing that wallet someone else's key.
+	 */
+	test("a stored ciphertext does not open for a different wallet", async () => {
+		const mine = newWallet();
+		const theirs = newWallet();
+		await getOrCreateWalletRfqKey(mine);
+		const rows = await db.select().from(agentRfqKeys).where(eq(agentRfqKeys.walletAddress, mine));
+		const row = rows[0];
+		if (!row) throw new Error("row missing");
+
+		expect(() => decryptRfqPrivateKey(row.encryptedPrivateKey, theirs)).toThrowError(
+			expect.objectContaining({ code: "RFQ_KEY_UNREADABLE" }),
+		);
+		// And the row that IS mine still opens, through the provider too.
+		expect(decryptRfqPrivateKey(row.encryptedPrivateKey, mine).startsWith("0x")).toBe(true);
+		expect(await dbKeyStorage(mine).get("thetanuts_rfq_key_8453")).toBe(
+			decryptRfqPrivateKey(row.encryptedPrivateKey, mine),
+		);
 	});
 
 	test("two wallets get two rows and two different keys", async () => {
@@ -113,7 +136,7 @@ describeLive("rfq key storage", () => {
 		expect(rows).toHaveLength(1);
 		const row = rows[0];
 		if (!row) throw new Error("row missing");
-		const stored = new SigningKey(decryptRfqPrivateKey(row.encryptedPrivateKey)).compressedPublicKey;
+		const stored = new SigningKey(decryptRfqPrivateKey(row.encryptedPrivateKey, wallet)).compressedPublicKey;
 		expect(first.compressedPublicKey).toBe(stored);
 		expect(second.compressedPublicKey).toBe(stored);
 		expect(row.publicKey).toBe(stored);

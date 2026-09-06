@@ -4,8 +4,9 @@ import { useChat } from "@ai-sdk/react";
 import {
 	DefaultChatTransport,
 	lastAssistantMessageIsCompleteWithApprovalResponses,
+	type UIMessage,
 } from "ai";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAccount } from "wagmi";
 
 import {
@@ -101,6 +102,8 @@ export function chatRequestBody(input: {
 	readonly thesisId: string | null;
 	/** Optional so existing callers, and the tests pinning them, are unchanged. */
 	readonly asset?: string | null;
+	/** W5. The saved conversation this turn belongs to, once there is one. */
+	readonly conversationId?: string | null;
 }): Record<string, unknown> {
 	return {
 		...(input.body as Record<string, unknown> | undefined),
@@ -109,7 +112,34 @@ export function chatRequestBody(input: {
 		// Omitted rather than sent as null: the route's schema marks it optional.
 		...(input.thesisId === null ? {} : { thesisId: input.thesisId }),
 		...(input.asset === null || input.asset === undefined ? {} : { asset: input.asset }),
+		...(input.conversationId === null || input.conversationId === undefined
+			? {}
+			: { conversationId: input.conversationId }),
 	};
+}
+
+/** W5. The uuid grammar the route's schema accepts for `conversationId`. */
+const CONVERSATION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * W5. The saved conversation the server named on this reply, or null.
+ *
+ * The id travels as a RESPONSE HEADER, and `ai@7.0.92`'s `HttpChatTransport`
+ * keeps only `response.body` (dist/index.js:18664-18681) — the `Response` object
+ * itself never reaches `useChat`. The one seam it does offer is the `fetch`
+ * option, which `sendMessages` calls (`this.fetch ?? globalThis.fetch`,
+ * :18663), so the header is read in a wrapper around fetch and remembered in a
+ * ref.
+ *
+ * Exported and pure so a test can hand it a real `Response` instead of asserting
+ * against the transport's closure. It validates the shape because it feeds the
+ * next request's body: an id the route's schema would refuse is dropped here.
+ */
+export function readConversationHeader(response: { readonly headers: { get(name: string): string | null } }): string | null {
+	const value = response.headers.get("x-agent-conversation");
+	if (value === null) return null;
+	const id = value.trim().toLowerCase();
+	return CONVERSATION_UUID.test(id) ? id : null;
 }
 
 /**
@@ -192,9 +222,30 @@ export function AgentChat({
 	thesisId = null,
 	asset = null,
 	variant = "page",
+	initialMessages,
+	initialConversationId = null,
+	history = null,
 }: {
 	/** The post this conversation is about (`/agent?thesis=<uuid>`). */
 	readonly thesisId?: string | null;
+	/**
+	 * W5. A saved conversation, reopened. The page reads it server-side
+	 * (`/agent?c=<uuid>`) and hands it over; `useChat` starts from these instead
+	 * of from an empty list.
+	 */
+	readonly initialMessages?: readonly UIMessage[];
+	/** W5. The id those messages belong to, so the next turn appends to it. */
+	readonly initialConversationId?: string | null;
+	/**
+	 * W5. The saved-chat rail, rendered by the SERVER and handed in as a node.
+	 *
+	 * A prop rather than a sibling in the page: this component owns the page's
+	 * whole height (`h-[calc(100dvh-126px)]`) as a flex column, so anything
+	 * placed beside it would push the composer off the bottom of the screen.
+	 * Inside, it is one more flex-none row and the message list stays the only
+	 * scrolling element. `null` on the panel variant, which has no room for it.
+	 */
+	readonly history?: ReactNode;
 	/**
 	 * The market this conversation is about. Defaults the agent's search; it does
 	 * not stop the user asking about something else.
@@ -238,10 +289,37 @@ export function AgentChat({
 		assetRef.current = asset;
 	}, [thesisId]);
 
+	/**
+	 * W5. The saved conversation this chat is appending to.
+	 *
+	 * A ref, for the same reason the address is one: the transport is built once
+	 * and must always read the current value. It starts at the id the page
+	 * reopened (null for a new chat) and is set from the first reply's
+	 * `x-agent-conversation` header.
+	 */
+	const conversationRef = useRef<string | null>(initialConversationId);
+
 	const [transport] = useState(
 		() =>
 			new DefaultChatTransport({
 				api: "/api/agent/chat",
+				/**
+				 * W5. The one seam the SDK gives a caller onto the RESPONSE: the
+				 * transport keeps only `response.body`, so the conversation id the
+				 * server named is read here and remembered.
+				 *
+				 * Everything else is `globalThis.fetch`'s behaviour, unchanged — a
+				 * non-OK response is still thrown by the transport, not by this.
+				 */
+				// The cast is `preconnect`: `typeof fetch` carries that static method
+				// and a plain function expression does not. Nothing calls it — the
+				// SDK invokes this value as a function (dist/index.js:18663).
+				fetch: (async (input: URL | RequestInfo, init?: RequestInit) => {
+					const response = await globalThis.fetch(input, init);
+					const id = readConversationHeader(response);
+					if (id !== null) conversationRef.current = id;
+					return response;
+				}) as typeof globalThis.fetch,
 				// Attaches the connected wallet to every request, including the turn the
 				// runtime resumes automatically after an approval. The server binds it
 				// into the write tool, so the model can never name a different address.
@@ -259,6 +337,7 @@ export function AgentChat({
 						walletAddress: addressRef.current,
 						thesisId: thesisRef.current,
 						asset: assetRef.current,
+						conversationId: conversationRef.current,
 					}),
 				}),
 			}),
@@ -266,6 +345,10 @@ export function AgentChat({
 
 	const { messages, sendMessage, status, error, addToolApprovalResponse } = useChat({
 		transport,
+		// W5. A reopened conversation starts from its saved messages. `ChatInit`
+		// takes them once, at construction (`ai@7.0.92` dist/index.d.ts:5554), so
+		// this is the initial state and not a controlled value.
+		messages: initialMessages === undefined ? undefined : [...initialMessages],
 		// Once the user answers an approval, resume the agent loop automatically
 		// rather than making them send another message.
 		sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
@@ -276,12 +359,18 @@ export function AgentChat({
 	// `/agent?thesis=<uuid>` opens the conversation with that post. The ref makes
 	// it fire exactly once: React runs effects twice in development, and a second
 	// send would ask the same question again on the user's bill.
+	//
+	// W5: a REOPENED conversation never fires it. `/agent?c=<uuid>&thesis=<uuid>`
+	// would otherwise re-ask the opening question on the person's bill every time
+	// they opened their own saved chat.
 	const openedFor = useRef<string | null>(null);
+	const reopened = initialMessages !== undefined && initialMessages.length > 0;
 	useEffect(() => {
+		if (reopened) return;
 		if (thesisId === null || openedFor.current === thesisId) return;
 		openedFor.current = thesisId;
 		void sendMessage({ text: thesisOpener(thesisId) });
-	}, [sendMessage, thesisId]);
+	}, [reopened, sendMessage, thesisId]);
 
 	/**
 	 * The newest assistant turn is waiting on an approval card.
@@ -342,6 +431,10 @@ export function AgentChat({
 					: "mx-auto flex h-[calc(100dvh-126px)] min-h-0 w-full max-w-3xl flex-col px-4"
 			}
 		>
+			{/* W5. The saved-chat rail, on the full-page variant only. `flex-none`
+			    keeps the message list the only scrolling element. */}
+			{variant === "page" && history !== null ? history : null}
+
 			<header className="border-b py-4">
 				{/*
 				 * m3/m4 (Opus user-flow tester). `/m/<asset>` renders this component as a

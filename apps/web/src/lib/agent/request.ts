@@ -508,7 +508,15 @@ const messagePartSchema = z.union([textPart, reasoningPart, stepStartPart, toolP
  * The message object stays `.passthrough()` — `useChat` sends `id` and may add
  * metadata — but every part is validated by the closed union above.
  */
-const messageSchema = z
+/**
+ * W5. Exported so `lib/agent/history.ts` can re-validate a message it read back
+ * out of `agent_messages` against the SAME closed union this route accepts.
+ *
+ * That is the whole guarantee behind reopening a chat: a stored message either
+ * parses here — in which case posting it back cannot be refused by the schema —
+ * or it is dropped before it reaches the browser.
+ */
+export const agentMessageSchema = z
 	.object({
 		role: z.enum(["user", "assistant"]),
 		parts: z.array(messagePartSchema),
@@ -531,7 +539,7 @@ const messageSchema = z
 export const agentChatBodySchema = z.object({
 	// TODO-OWNER: the conversation length a single turn may carry. 80 is not an
 	// owner number; it bounds what `convertToModelMessages` is handed.
-	messages: z.array(messageSchema).min(1).max(80),
+	messages: z.array(agentMessageSchema).min(1).max(80),
 	/**
 	 * The connected wallet. Bound into the write tool so the model cannot name a
 	 * different address, and used only as the transaction sender.
@@ -562,6 +570,22 @@ export const agentChatBodySchema = z.object({
 	asset: z
 		.string()
 		.regex(/^[A-Za-z0-9]{1,12}$/)
+		.optional(),
+
+	/**
+	 * W5. The saved conversation this turn belongs to, when the client already
+	 * has one (`/agent?c=<uuid>`, or the id the previous reply's
+	 * `x-agent-conversation` header carried).
+	 *
+	 * A uuid shape, not free text, because it reaches a database read. It is NOT
+	 * a capability: `lib/agent/history.ts` `ensureConversation` refuses any id
+	 * whose row does not belong to the SESSION's wallet, so naming someone
+	 * else's conversation returns a refusal rather than their history. Omitted
+	 * on the first turn of a new chat, which is when the row is created.
+	 */
+	conversationId: z
+		.string()
+		.regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
 		.optional(),
 })
 	/**

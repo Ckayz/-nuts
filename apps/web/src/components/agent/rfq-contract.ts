@@ -349,15 +349,56 @@ export const RFQ_POLL_MS = 20_000;
 export const RFQ_MAX_POLLS = 30;
 
 /**
+ * The states nothing will change without the user: the request is over, one way
+ * or another, and no amount of re-reading will move it.
+ *
+ * `expired_unfilled` and `failed` are here with `settled` and `cancelled`
+ * (D-11): both are ends, and the card printed "This card has stopped checking
+ * on its own" beside them, which is noise next to a state that will never
+ * change. `pending_create` is NOT here — the card stops reading it, but saying
+ * so is the instruction to press the control.
+ */
+const FINISHED: ReadonlySet<RfqStatusKind> = new Set<RfqStatusKind>([
+	"settled",
+	"cancelled",
+	"failed",
+	"expired_unfilled",
+]);
+
+/** Could this request still become something else on its own? */
+export function rfqStillMoves(status: RfqStatusView | null): boolean {
+	return status !== null && !FINISHED.has(status.status);
+}
+
+/**
+ * The states the CHAIN can move while the card is watching: the offer deadline
+ * passes, the reveal window closes, or a maker bot settles the winning offer.
+ */
+const WATCHED: ReadonlySet<RfqStatusKind> = new Set<RfqStatusKind>([
+	"waiting_for_offers",
+	"reveal_window",
+	"ready_to_settle",
+]);
+
+/**
  * How long until the next automatic read, or null to stop.
  *
  * Pure, so the cap is pinned by a test rather than by a fake clock: null once
- * the request is terminal, and null once `RFQ_MAX_POLLS` reads have happened.
+ * nothing can change on its own, and null once `RFQ_MAX_POLLS` reads have
+ * happened.
+ *
+ * D-11. This keyed on `nextAction === "wait"`, which stopped the poll on the
+ * two states that most need watching. `lib/rfq/status.ts` answers
+ * `waiting_for_offers` with `nextAction: "cancel"` (the deadline is still
+ * running) and `ready_to_settle` with `"settle"` — and settlement is
+ * permissionless, so a maker bot often settles a winning request first and the
+ * card would never notice. What decides the poll is whether the CHAIN can move
+ * this state, not what the user is being invited to do about it.
  */
 export function nextPollDelayMs(status: RfqStatusView | null, pollsSoFar: number): number | null {
 	if (status === null) return null;
 	if (pollsSoFar >= RFQ_MAX_POLLS) return null;
-	if (status.nextAction !== "wait") return null;
+	if (!WATCHED.has(status.status)) return null;
 	return RFQ_POLL_MS;
 }
 

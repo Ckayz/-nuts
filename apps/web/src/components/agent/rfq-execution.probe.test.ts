@@ -659,7 +659,24 @@ describe("the watching stage", () => {
 		expect(controls(h).map((c) => c.text)).toContain("Cancel the request");
 		expect(h.text()).toContain("No maker answered");
 		expect(h.text()).not.toContain("Your request is live");
+		// D-11: and it does not announce that it stopped watching a state that
+		// will never change.
+		expect(h.text()).not.toContain("stopped checking on its own");
 		h.unmount();
+	});
+
+	test("D-11: a request waiting on the chain keeps watching, and says nothing about stopping", async () => {
+		for (const over of [
+			// The server's own answers, `lib/rfq/status.ts:154,160,163`.
+			{ status: "waiting_for_offers" as const, nextAction: "cancel" as const },
+			{ status: "reveal_window" as const, nextAction: "wait" as const },
+			{ status: "ready_to_settle" as const, nextAction: "settle" as const, sentence: "A winner exists." },
+		]) {
+			const h = await watching(over);
+			console.log("D11_CARD", over.status, JSON.stringify({ controls: controls(h).map((c) => c.text), stopped: h.text().includes("stopped checking on its own") }));
+			expect(h.text(), over.status).not.toContain("stopped checking on its own");
+			h.unmount();
+		}
 	});
 
 	test("a cancelled request says the escrow is refunded", async () => {

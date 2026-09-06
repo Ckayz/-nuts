@@ -34,6 +34,7 @@ import {
 	rfqHoldStore,
 	type RfqStatusView,
 	type RfqTxKind,
+	rfqStillMoves,
 	sameRfqEconomics,
 	strikesAscending,
 	writeHeldRfq,
@@ -939,7 +940,11 @@ export function RfqExecution({
 							</Button>
 						</div>
 					)}
-					{nextPollDelayMs(status, polls) === null && !terminal && (
+					{/* D-11: only where stopping is news. Beside a state nothing will
+				    change on its own — an expired request, a failed one — the line
+				    is noise; beside a request still on chain it is the instruction
+				    to press the control. */}
+				{nextPollDelayMs(status, polls) === null && !terminal && rfqStillMoves(status) && (
 						<p className="text-muted-foreground text-xs">
 							{COPY.pollingStopped} <TodoOwner />
 						</p>

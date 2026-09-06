@@ -62,6 +62,26 @@ test("D-N1: text that is not a market path still becomes no destination", () => 
 	}
 });
 
+test("B2: a position page links, in text and as an authored destination", () => {
+	const uuid = "9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01";
+	// `getUserPositions` hands the model this exact shape as each row's `path`.
+	expect(render(`Open /p/${uuid} to see it`)).toContain(
+		`<a class="agent-md-link" href="/p/${uuid}">/p/${uuid}</a>`,
+	);
+	expect(render(`[Open](/p/${uuid})`)).toContain(`<a class="agent-md-link" href="/p/${uuid}">Open</a>`);
+	// One bold word beside it must not swallow the link (the D-N1 shape).
+	expect(render(`**Your** put at /p/${uuid}`)).toContain(`href="/p/${uuid}"`);
+});
+
+test("B2: anything else under /p/ or a bare app route stays text", () => {
+	for (const href of ["/p/x", "/p/../portfolio", "/portfolio", "/p/not-a-uuid", "/p/"]) {
+		const html = render(`[Open](${href})`);
+		expect(html, href).not.toContain("<a ");
+		expect(html, href).toContain("Open");
+	}
+	expect(render("Open /p/x and /portfolio")).not.toContain("<a ");
+});
+
 test("D-n1: a markdown destination must match the market grammar, not merely start with /m/", () => {
 	for (const href of ["/m/../portfolio", "/m/btc?thesis=not-a-uuid", "/m/btc/../../x", "/m/btc#frag"]) {
 		const html = render(`[Trade](${href})`);
@@ -85,6 +105,11 @@ test("D-n1: the anchored matcher is the same grammar the text scanner uses", () 
 	expect(isMarketPath("/m/btc ")).toBe(false);
 	expect(isMarketPath("/m/../portfolio")).toBe(false);
 	expect(isMarketPath("https://evil.example/m/btc")).toBe(false);
+	// B2: and the position shape, on the same anchored expression.
+	expect(isMarketPath("/p/9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01")).toBe(true);
+	expect(isMarketPath("/p/9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01 ")).toBe(false);
+	expect(isMarketPath("/p/x")).toBe(false);
+	expect(isMarketPath("https://evil.example/p/9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01")).toBe(false);
 });
 
 test("no raw HTML is ever rendered, whatever the model writes", () => {

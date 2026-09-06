@@ -307,15 +307,41 @@ describe("residual: the agent's market link is clickable", () => {
 		]);
 	});
 
+	/**
+	 * B2. `/p/<uuid>` JOINED the grammar deliberately: `getUserPositions`
+	 * returns a `path` for every row so the model can say "open it" and mean
+	 * something clickable. Until then this case asserted the opposite — that a
+	 * position URL is NOT a destination — and it is changed here rather than
+	 * quietly relaxed, with the shapes that must still stay text listed beside
+	 * the one that must now link.
+	 */
+	test("a position page links, and nothing near it does", () => {
+		const uuid = "9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01";
+		expect(marketLinkParts(`open /p/${uuid} now`)).toEqual([
+			{ text: "open ", href: null },
+			{ text: `/p/${uuid}`, href: `/p/${uuid}` },
+			{ text: " now", href: null },
+		]);
+		for (const text of ["/p/x", "/p/../portfolio", "/portfolio", "/p/not-a-uuid", "/p/"]) {
+			expect({ text, hrefs: marketLinkParts(text).map((piece) => piece.href) }).toEqual({
+				text,
+				hrefs: [null],
+			});
+		}
+	});
+
 	test("nothing else in model output becomes a destination", () => {
 		for (const text of [
 			"visit https://example.com now",
-			"open /p/9f1c7a52-0b64-4d19-9c3a-2b7e5d1a4f01",
 			"javascript:alert(1)",
 			"//evil.example/m/eth",
 			"plain words only",
 		]) {
-			expect(marketLinkParts(text).every((piece) => piece.href === null || piece.href.startsWith("/m/"))).toBe(true);
+			expect(
+				marketLinkParts(text).every(
+					(piece) => piece.href === null || piece.href.startsWith("/m/") || piece.href.startsWith("/p/"),
+				),
+			).toBe(true);
 		}
 		expect(marketLinkParts("plain words only")).toEqual([{ text: "plain words only", href: null }]);
 	});

@@ -13,7 +13,23 @@
  * import is the contract.
  */
 const MARKET_URL_SOURCE = String.raw`\/m\/[a-z0-9]{1,12}(?:\?thesis=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?`;
-const MARKET_URL = new RegExp(MARKET_URL_SOURCE, "gi");
+
+/**
+ * The position page, as `lib/agent/positions.ts` builds it: `/p/<uuid>` and
+ * nothing else.
+ *
+ * `getUserPositions` returns a `path` for every row so the model can say "open
+ * it" and mean something clickable. The grammar is as narrow as the market one
+ * and for the same reason: `/p/` is a real route, so `/p/../portfolio`,
+ * `/p/x` and a bare `/portfolio` must all stay text. A uuid is the ONLY thing
+ * that route ever takes (`app/p/[id]/page.tsx` -> `readPositionDetail`, which
+ * answers null for anything that is not one), so the shape is exactly a uuid.
+ */
+const POSITION_URL_SOURCE = String.raw`\/p\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`;
+
+/** Either app-relative destination the agent is allowed to produce. */
+const APP_URL_SOURCE = `(?:${MARKET_URL_SOURCE}|${POSITION_URL_SOURCE})`;
+const MARKET_URL = new RegExp(APP_URL_SOURCE, "gi");
 
 /**
  * The SAME grammar, anchored: does this string consist of nothing but a market
@@ -26,8 +42,14 @@ const MARKET_URL = new RegExp(MARKET_URL_SOURCE, "gi");
  * points: text nodes go through `marketLinkParts`, authored destinations go
  * through this.
  */
-const MARKET_URL_EXACT = new RegExp(`^${MARKET_URL_SOURCE}$`, "i");
+const MARKET_URL_EXACT = new RegExp(`^${APP_URL_SOURCE}$`, "i");
 
+/**
+ * True for the two app-relative destinations the agent may emit — a market page
+ * and a position page — and for nothing else. The name is unchanged because
+ * `agent-markdown.tsx` and `agent-markdown.test.tsx` both import it and the
+ * question it answers is the same one: is this a destination this app offers?
+ */
 export function isMarketPath(href: string): boolean {
 	return MARKET_URL_EXACT.test(href);
 }

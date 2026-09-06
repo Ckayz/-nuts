@@ -3,10 +3,12 @@
 import {
 	Children,
 	Fragment,
+	cloneElement,
 	createContext,
 	isValidElement,
 	useContext,
 	type ComponentProps,
+	type ReactElement,
 	type ReactNode,
 } from "react";
 import Markdown from "react-markdown";
@@ -129,8 +131,14 @@ function moneySpans(text: string, label: string, keyPrefix: string): ReactNode {
 /**
  * One string child: the market-link split first, then the money pass over the
  * pieces that did NOT become links. A destination is never re-styled.
+ *
+ * `links: false` runs the money pass ALONE. That is the inside of a `strong` or
+ * an `em` — see `EMPHASIS` below — where the link grammar deliberately does not
+ * apply: "a URL wrapped in bold markers stays text" is a property this file has
+ * carried since D-N1 and a test pins the shape it protects.
  */
-function renderString(text: string, keyPrefix: string, label: string): ReactNode {
+function renderString(text: string, keyPrefix: string, label: string, links: boolean): ReactNode {
+	if (!links) return moneySpans(text, label, keyPrefix);
 	let offset = 0;
 	return marketLinkParts(text).map((piece, i) => {
 		// The label for a figure is everything before it, nearest last: the row's
@@ -171,26 +179,59 @@ function renderString(text: string, keyPrefix: string, label: string): ReactNode
  * `seen` accumulates, IN ORDER, the plain text of everything already walked, so
  * a label in an earlier sibling still governs the figure that follows it.
  */
-function walk(node: ReactNode, keyPrefix: string, label: string, seen: { text: string }): ReactNode {
+function walk(
+	node: ReactNode,
+	keyPrefix: string,
+	label: string,
+	seen: { text: string },
+	links = true,
+): ReactNode {
 	if (typeof node === "string") {
-		const rendered = renderString(node, keyPrefix, `${label}\n${seen.text}`);
+		const rendered = renderString(node, keyPrefix, `${label}\n${seen.text}`, links);
 		seen.text += node;
 		return rendered;
 	}
 	if (Array.isArray(node)) {
 		return node.map((child, i) => (
-			<Fragment key={`${keyPrefix}.${i}`}>{walk(child as ReactNode, `${keyPrefix}.${i}`, label, seen)}</Fragment>
+			<Fragment key={`${keyPrefix}.${i}`}>
+				{walk(child as ReactNode, `${keyPrefix}.${i}`, label, seen, links)}
+			</Fragment>
 		));
 	}
 	// A fragment is not an element the caller owns — it is a grouping, so its
 	// children are still this function's business.
 	if (isValidElement(node) && node.type === Fragment) {
 		const { children } = node.props as { children?: ReactNode };
-		return <Fragment key={keyPrefix}>{walk(children, `${keyPrefix}.f`, label, seen)}</Fragment>;
+		return <Fragment key={keyPrefix}>{walk(children, `${keyPrefix}.f`, label, seen, links)}</Fragment>;
+	}
+	/**
+	 * MEASURED on the free-model turns run through the dev server for this
+	 * change: the model writes its figures BOLD almost every time —
+	 * "**$5.73 per contract**", "the max loss you asked about is **5.00 USDC**".
+	 * Leaving every element alone therefore left the owner's ask half done: the
+	 * only figures that got colour were the unbolded ones (rendered probe before
+	 * this branch: TURN1 coloured `$10` and nothing else; TURN2 coloured the
+	 * plain `12.06 USDC` and left the bold `5.00 USDC` neutral).
+	 *
+	 * So emphasis, and ONLY emphasis, is descended into — with the LINK pass
+	 * switched off, so the pinned "a URL wrapped in bold markers stays text"
+	 * property is untouched. `code` and `pre` are deliberately absent: a quoted
+	 * amount is quoted text. Anything else is still returned as it came.
+	 */
+	if (isValidElement(node) && typeof node.type === "string" && EMPHASIS.has(node.type)) {
+		const props = node.props as { children?: ReactNode };
+		return cloneElement(
+			node as ReactElement<{ children?: ReactNode }>,
+			undefined,
+			walk(props.children, `${keyPrefix}.e`, label, seen, false),
+		);
 	}
 	if (isValidElement(node)) seen.text += plainText(node);
 	return node;
 }
+
+/** The inline elements whose text is still prose, so money inside them is money. */
+const EMPHASIS: ReadonlySet<string> = new Set(["strong", "em", "del"]);
 
 function LinkedText({ children, label = "" }: { readonly children?: ReactNode; readonly label?: string }) {
 	return <>{walk(children, "l", label, { text: "" })}</>;

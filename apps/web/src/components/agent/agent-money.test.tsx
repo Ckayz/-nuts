@@ -127,3 +127,53 @@ test("every collateral token the book quotes is recognised", () => {
 		expect(parts.some((p) => p.kind !== "text"), amount).toBe(true);
 	}
 });
+
+/* ------------------------------------------------------------------ *
+ * The replies the free model actually wrote, verbatim
+ * ------------------------------------------------------------------ */
+
+/**
+ * Captured from three `minimax/minimax-m3:free` turns through the dev server on
+ * localhost:3191 while this change was written. They are here because they
+ * caught a real gap: the model puts almost every figure in **bold**, and the
+ * first implementation left every element alone, so the bold figures — the
+ * majority — got no colour at all. Measured then:
+ *
+ *   TURN1 [["agent-money agent-money--loss","$10"]]
+ *   TURN2 [["agent-money","12.06 USDC"]]
+ *
+ * i.e. `**$5.73 per contract**` and `**5.00 USDC**` were invisible to the pass.
+ */
+test("a bold figure is still money — the shape the model writes most", () => {
+	const turn1 = render(
+		"- 2460 put, expires tomorrow — **$5.73 per contract**\n- 2480 put, expires tomorrow — **$9.84 per contract**\n\nFor any of these, the **premium you pay is the most you can lose**. Agent-prepared trades are capped at $10 of risk right now.",
+	);
+	console.log("REAL_TURN1", JSON.stringify(money(turn1)));
+	expect(money(turn1)).toEqual([
+		// Prices per contract, with no loss or gain word in front of them.
+		["agent-money", "$5.73"],
+		["agent-money", "$9.84"],
+		// "capped at $10 of risk" — a loss word precedes it.
+		["agent-money agent-money--loss", "$10"],
+	]);
+	// The emphasis element itself survives; only its text is wrapped.
+	expect(turn1).toContain("<strong>");
+
+	const turn2 = render(
+		'- This is a buy. The max loss is the premium you pay. The "max loss" you asked about is **5.00 USDC** here.\n- A note on the second 2460 put: it quotes about 12.06 USDC per contract, so it is more expensive.',
+	);
+	console.log("REAL_TURN2", JSON.stringify(money(turn2)));
+	expect(money(turn2)).toEqual([
+		["agent-money agent-money--loss", "5.00 USDC"],
+		["agent-money", "12.06 USDC"],
+	]);
+});
+
+test("descending into emphasis does NOT make a bold path a link", () => {
+	// The property this file has carried since D-N1, unchanged: the link grammar
+	// runs on prose, not inside emphasis.
+	const html = render("Trade **/m/btc** now, or /m/eth.");
+	expect(html).toContain("<strong>/m/btc</strong>");
+	expect(html.match(/<a /g)).toHaveLength(1);
+	expect(html).toContain('href="/m/eth"');
+});

@@ -18,6 +18,25 @@ import { expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { WagmiProvider } from "wagmi";
 
+import { mount } from "@/test/hook-runner";
+/**
+ * The ONE wagmi registration (its own docblock says why there is only one).
+ *
+ * Imported here so this file's wallet hook is the mocked one whatever order bun
+ * loads the suite in: `@/test/hook-runner` implements no `useContext`, and the
+ * real hook needs one. MEASURED in this wagmi build: `useAccount` and
+ * `useConnection` are the SAME function object
+ * (`import("wagmi").useAccount === useConnection` -> true), so the existing
+ * `useConnection` override already answers `useAccount`, and the wallet a probe
+ * sees is `replies.connection`.
+ */
+import { replies, resetTradeMocks } from "@/test/trade-mocks";
+
+/** No wallet — what a provider with `reconnectOnMount={false}` used to answer. */
+function signedOut(): void {
+	replies.connection = { address: undefined, isConnected: false, chainId: 8453 };
+}
+
 process.env.DATABASE_URL ??= "postgresql://localhost/offline";
 process.env.OPENROUTER_API_KEY ??= "offline-test";
 
@@ -27,14 +46,29 @@ type Message = { id: string; role: "user" | "assistant"; parts: Part[] };
 /** What the mocked `useChat` will hand back on the next render. */
 const chat: { messages: Message[]; status: string } = { messages: [], status: "ready" };
 
+/**
+ * The transport the component built, kept so a test can ask it what it would
+ * SEND. `useChat` is the only thing that ever receives it (`agent-chat.tsx`
+ * holds it in a `useState` initialiser), and `prepareSendMessagesRequest` is a
+ * public field on `DefaultChatTransport` (`ai@7.0.92` dist/index.js:18625).
+ */
+const captured: {
+	transport: { prepareSendMessagesRequest?: (input: unknown) => unknown } | null;
+} = { transport: null };
+
 mock.module("@ai-sdk/react", () => ({
-	useChat: () => ({
-		messages: chat.messages,
-		sendMessage: () => {},
-		status: chat.status,
-		error: undefined,
-		addToolApprovalResponse: () => {},
-	}),
+	useChat: (options?: { transport?: unknown }) => {
+		if (options?.transport !== undefined) {
+			captured.transport = options.transport as { prepareSendMessagesRequest?: (input: unknown) => unknown };
+		}
+		return {
+			messages: chat.messages,
+			sendMessage: () => {},
+			status: chat.status,
+			error: undefined,
+			addToolApprovalResponse: () => {},
+		};
+	},
 }));
 
 const { config } = await import("@/lib/wagmi");
@@ -42,6 +76,10 @@ const { AgentChat, SuggestionRow } = await import("./agent-chat");
 const { postFillSuggestions, starterSuggestions } = await import("@/lib/agent/suggestions");
 
 function render(messages: Message[], props: { asset?: string | null } = {}, status = "ready"): string {
+	// Pinned rather than inherited: importing the shared wagmi mock above made
+	// the wallet hook answer WHATEVER the last probe left in `replies`, and every
+	// assertion in this file was written against a signed-OUT visitor.
+	signedOut();
 	chat.messages = messages;
 	chat.status = status;
 	return renderToStaticMarkup(
@@ -194,4 +232,72 @@ test("the person's own words are set apart from the reply", () => {
 	expect(html).toContain('<div class="agent-user">');
 	// Exactly one: the reply is not wrapped.
 	expect(html.match(/agent-user/g)).toHaveLength(1);
+});
+
+/* ------------------------------------------------------------------ *
+ * D-2: the market this panel sends, after a market-to-market move
+ * ------------------------------------------------------------------ */
+
+/**
+ * What the transport would POST right now.
+ *
+ * `prepareSendMessagesRequest` is the component's own closure, so this asks the
+ * REAL thing the route would receive rather than re-deriving it.
+ */
+async function requestBody(): Promise<Record<string, unknown>> {
+	const transport = captured.transport;
+	if (transport?.prepareSendMessagesRequest === undefined) throw new Error("no transport captured");
+	const prepared = (await transport.prepareSendMessagesRequest({
+		messages: [],
+		body: undefined,
+	})) as { body: Record<string, unknown> };
+	return prepared.body;
+}
+
+test("D-2: a market-to-market move changes the market the panel SENDS", async () => {
+	resetTradeMocks();
+	replies.connection = { address: "0x00000000000000000000000000000000000000ab", isConnected: true, chainId: 8453 };
+	chat.messages = [];
+	chat.status = "ready";
+	captured.transport = null;
+
+	// `app/m/[asset]/page.tsx` renders this panel with no `key`, and
+	// `components/market/right-tabs.tsx` keeps it mounted, so a client-side move
+	// from /m/eth to /m/btc changes the prop WITHOUT a remount. `setProps` is
+	// exactly that: every hook slot survives.
+	const h = mount(AgentChat as never, { asset: "eth", variant: "panel" });
+	const afterEth = await requestBody();
+	h.setProps({ asset: "btc", variant: "panel" });
+	const afterBtc = await requestBody();
+	console.log("BODY_AFTER_ETH", JSON.stringify(afterEth));
+	console.log("BODY_AFTER_BTC", JSON.stringify(afterBtc));
+
+	expect(afterEth.asset).toBe("eth");
+	// The value is not cosmetic: `app/api/agent/chat/route.ts` puts it in the
+	// system prompt and hands it to `createReadTools({ asset })`.
+	expect(afterBtc.asset).toBe("btc");
+	// The wallet still rides along, so the fix did not cost the address ref.
+	expect(afterBtc.walletAddress).toBe("0x00000000000000000000000000000000000000ab");
+	h.unmount();
+	resetTradeMocks();
+	signedOut();
+});
+
+test("D-2: the thesis the panel sends still follows its own prop", async () => {
+	resetTradeMocks();
+	chat.messages = [];
+	chat.status = "ready";
+	captured.transport = null;
+	const first = "11111111-2222-3333-4444-555555555555";
+	const second = "66666666-7777-8888-9999-aaaaaaaaaaaa";
+	const h = mount(AgentChat as never, { thesisId: first, variant: "panel" });
+	const before = await requestBody();
+	h.setProps({ thesisId: second, variant: "panel" });
+	const after = await requestBody();
+	console.log("THESIS_BODIES", JSON.stringify({ before: before.thesisId, after: after.thesisId }));
+	expect(before.thesisId).toBe(first);
+	expect(after.thesisId).toBe(second);
+	h.unmount();
+	resetTradeMocks();
+	signedOut();
 });

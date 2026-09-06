@@ -231,12 +231,24 @@ export function AgentChat({
 		addressRef.current = address;
 	}, [address]);
 
+	/**
+	 * The same trick for the post and the market this panel is about.
+	 *
+	 * D-2: the dependency list read `[thesisId]`, so a client-side move from
+	 * `/m/eth` to `/m/btc` — a PROP change with no remount, because
+	 * `app/m/[asset]/page.tsx` renders this panel with no `key` and
+	 * `components/market/right-tabs.tsx` keeps it mounted — left `assetRef` on
+	 * the old market. The visible chips followed the prop (they read `asset`
+	 * directly); the request body did not, so the model was told ETH while the
+	 * reader was looking at BTC. Every value the effect writes belongs in its
+	 * deps.
+	 */
 	const thesisRef = useRef<string | null>(thesisId);
 	const assetRef = useRef<string | null>(asset);
 	useEffect(() => {
 		thesisRef.current = thesisId;
 		assetRef.current = asset;
-	}, [thesisId]);
+	}, [thesisId, asset]);
 
 	const [transport] = useState(
 		() =>

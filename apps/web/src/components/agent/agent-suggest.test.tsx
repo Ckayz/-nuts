@@ -54,7 +54,9 @@ const chat: { messages: Message[]; status: string } = { messages: [], status: "r
  */
 const captured: {
 	transport: { prepareSendMessagesRequest?: (input: unknown) => unknown } | null;
-} = { transport: null };
+	/** Every `addToolApprovalResponse` argument, in order (T-1). */
+	approvals: Record<string, unknown>[];
+} = { transport: null, approvals: [] };
 
 mock.module("@ai-sdk/react", () => ({
 	useChat: (options?: { transport?: unknown }) => {
@@ -66,7 +68,9 @@ mock.module("@ai-sdk/react", () => ({
 			sendMessage: () => {},
 			status: chat.status,
 			error: undefined,
-			addToolApprovalResponse: () => {},
+			addToolApprovalResponse: (answer: Record<string, unknown>) => {
+				captured.approvals.push(answer);
+			},
 		};
 	},
 }));
@@ -297,6 +301,72 @@ test("D-2: the thesis the panel sends still follows its own prop", async () => {
 	console.log("THESIS_BODIES", JSON.stringify({ before: before.thesisId, after: after.thesisId }));
 	expect(before.thesisId).toBe(first);
 	expect(after.thesisId).toBe(second);
+	h.unmount();
+	resetTradeMocks();
+	signedOut();
+});
+
+/* ------------------------------------------------------------------ *
+ * T-1 (Opus user-flow tester): what the model is told when a card is cancelled
+ * ------------------------------------------------------------------ */
+
+/**
+ * The approval card element the chat rendered, whatever component it is.
+ *
+ * `@/test/hook-runner` does not descend into nested function components, so the
+ * card itself is not rendered — its PROPS are, which is exactly the boundary
+ * this test is about: what the chat hands the card's `onRespond`.
+ */
+function approvalCard(h: ReturnType<typeof mount>): { onRespond: (approved: boolean) => void } {
+	const found = h.find((element) => typeof element.type === "function" && "onRespond" in element.props);
+	const card = found[0];
+	if (card === undefined) throw new Error("no approval card rendered");
+	return card.props as unknown as { onRespond: (approved: boolean) => void };
+}
+
+const awaitingPart = (type: string): Message => ({
+	id: "m1",
+	role: "assistant",
+	parts: [{ type, state: "approval-requested", ...({ approval: { id: "a1" }, input: {} } as object) } as Part],
+});
+
+test("T-1: cancelling a card tells the model a PERSON declined it", () => {
+	// Without a reason the SDK sends the model only "Tool call execution denied."
+	// (`ai@7.0.92` dist/index.js:11733 — `approval.reason` or that fallback), and
+	// the model then invented an explanation: "the tool refused, likely because
+	// the order on the book has nearly expired".
+	for (const type of [
+		"tool-requestOptionBookExecution",
+		"tool-requestRfqCreation",
+		"tool-requestRfqCancellation",
+		"tool-requestRfqSettlement",
+	]) {
+		resetTradeMocks();
+		signedOut();
+		captured.approvals = [];
+		chat.messages = [awaitingPart(type)];
+		chat.status = "ready";
+		const h = mount(AgentChat as never, { variant: "panel" });
+		approvalCard(h).onRespond(false);
+		console.log("DECLINED", type, JSON.stringify(captured.approvals));
+		expect(captured.approvals.length, type).toBe(1);
+		expect(captured.approvals[0]?.approved, type).toBe(false);
+		expect(String(captured.approvals[0]?.reason ?? ""), type).toContain("Cancel");
+		h.unmount();
+	}
+});
+
+test("T-1: approving a card carries no decline reason", () => {
+	resetTradeMocks();
+	signedOut();
+	captured.approvals = [];
+	chat.messages = [awaitingPart("tool-requestOptionBookExecution")];
+	chat.status = "ready";
+	const h = mount(AgentChat as never, { variant: "panel" });
+	approvalCard(h).onRespond(true);
+	console.log("APPROVED", JSON.stringify(captured.approvals));
+	expect(captured.approvals[0]?.approved).toBe(true);
+	expect(captured.approvals[0]?.reason).toBeUndefined();
 	h.unmount();
 	resetTradeMocks();
 	signedOut();

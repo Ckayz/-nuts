@@ -75,7 +75,10 @@ describe("D-C2: the agent's copy is tagged", () => {
 		// W4 raised this from 3 to 4 DELIBERATELY: `awaitingApproval` is the
 		// composer guard's sentence (follow-up 1). The fence's job is to make a
 		// new sentence a visible decision, which is exactly what happened here.
-		expect(entries.length).toBe(4);
+		// T-1 raises it to 5 the same way: `declined` is the sentence the MODEL
+		// is given when a person presses Cancel, and it is the owner's to word
+		// for the same reason the visible ones are.
+		expect(entries.length).toBe(5);
 		let previousEnd = block.indexOf("{") + 1;
 		const undocumented: string[] = [];
 		for (const entry of entries) {

@@ -70,3 +70,49 @@ test("every sentence is the owner's to word", async () => {
 	const afterMap = source.slice(source.indexOf("};", source.indexOf("TOOL_ACTIVITY_LABELS")));
 	expect(afterMap).not.toMatch(/"[A-Z][a-z]+ [a-z]/);
 });
+
+/* ------------------------------------------------------------------ *
+ * T-1 (Opus user-flow tester): a step the user CANCELLED
+ * ------------------------------------------------------------------ */
+
+test("T-1: a cancelled step reads as cancelled, not as one still running", () => {
+	// `ai@7.0.92` dist/index.d.ts:2114 — the runtime moves a declined tool call
+	// to `output-denied`. The component knew only `output-available` and
+	// `output-error`, so the browser showed "○ Preparing the trade…" for ever
+	// under a reply that had already moved on.
+	const denied = renderToStaticMarkup(
+		<ToolActivity part={{ type: "tool-requestOptionBookExecution", state: "output-denied" }} />,
+	);
+	console.log("DENIED", denied);
+	expect(denied).toContain("Preparing the trade — cancelled");
+	expect(denied).not.toContain("Preparing the trade…");
+
+	// And the state the runtime leaves behind when the answer was NO
+	// (dist/index.d.ts:2065-2078: `approval-responded` carries `approved`).
+	const refused = renderToStaticMarkup(
+		<ToolActivity
+			part={{
+				type: "tool-requestRfqCreation",
+				state: "approval-responded",
+				approval: { id: "a1", approved: false },
+			}}
+		/>,
+	);
+	console.log("REFUSED", refused);
+	expect(refused).toContain("Preparing the request — cancelled");
+
+	// An approval that was GRANTED is still in flight, and must not read as
+	// cancelled: the same state carries both answers.
+	const granted = renderToStaticMarkup(
+		<ToolActivity
+			part={{
+				type: "tool-requestRfqCreation",
+				state: "approval-responded",
+				approval: { id: "a1", approved: true },
+			}}
+		/>,
+	);
+	console.log("GRANTED", granted);
+	expect(granted).toContain("Preparing the request…");
+	expect(granted).not.toContain("cancelled");
+});

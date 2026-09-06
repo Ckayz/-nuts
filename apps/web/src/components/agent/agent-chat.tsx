@@ -68,7 +68,30 @@ const COPY = {
 	 * message until that call is answered.
 	 */
 	awaitingApproval: "Answer the card above first.",
+	/**
+	 * TODO-OWNER: T-1 — what the MODEL is told when the user presses Cancel.
+	 *
+	 * Not a screen string: it is the `reason` the SDK attaches to the denial
+	 * (`ai@7.0.92` dist/index.js:11733 hands the model `approval.reason` and
+	 * falls back to a bare "Tool call execution denied."). With no reason the
+	 * model had nothing to explain the refusal with and invented one — "the tool
+	 * refused, likely because the order on the book has nearly expired" — about a
+	 * book that had refused nothing.
+	 */
+	declined: "The user pressed Cancel in the chat. Nothing was prepared and nothing was sent.",
 } as const;
+
+/**
+ * T-1. The answer handed to `addToolApprovalResponse`, for either card.
+ *
+ * A decline carries `reason`, so the model is told a PERSON stopped this rather
+ * than being left with the SDK's anonymous "Tool call execution denied." An
+ * approval carries none: there is nothing to explain, and an empty field would
+ * still reach the model as a sentence.
+ */
+export function approvalAnswer(id: string, approved: boolean): { id: string; approved: boolean; reason?: string } {
+	return approved ? { id, approved } : { id, approved, reason: COPY.declined };
+}
 
 /**
  * The opening message when the page was reached from a post's "Explain".
@@ -460,9 +483,7 @@ export function AgentChat({
 											tool={part.type}
 											input={approval.input}
 											pending={busy}
-											onRespond={(approved) =>
-												addToolApprovalResponse({ id: approval.id, approved })
-											}
+											onRespond={(approved) => addToolApprovalResponse(approvalAnswer(approval.id, approved))}
 										/>
 									);
 								}
@@ -471,9 +492,7 @@ export function AgentChat({
 										key={i}
 										input={approval.input}
 										pending={busy}
-										onRespond={(approved) =>
-											addToolApprovalResponse({ id: approval.id, approved })
-										}
+										onRespond={(approved) => addToolApprovalResponse(approvalAnswer(approval.id, approved))}
 									/>
 								);
 							}

@@ -194,13 +194,18 @@ live(
 );
 
 live(
-	"a guest turn writes nothing at all and gets no header",
+	"a guest turn writes nothing at all and gets no header — even with a wallet CONNECTED",
 	() => {
+		// The distinction PRD 10.2 draws: "Wallet authentication is required for
+		// persistence." A connected wallet is a value the BROWSER chose and sends
+		// in the body on every request (`chatRequestBody` always includes it); a
+		// session is the httpOnly cookie the server signed. Only the second buys
+		// history, or anyone could write into any address's chats by naming it.
 		const result = probe(`
 			const before = await db.execute(sql\`select count(*)::int as n from agent_conversations\`);
 			const beforeMessages = await db.execute(sql\`select count(*)::int as n from agent_messages\`);
 			globalThis.__session = null;
-			const response = await post({ messages: [text("what is a put", "g-1")] });
+			const response = await post({ messages: [text("what is a put", "g-1")], walletAddress: wallet() });
 			await response.text();
 			const after = await db.execute(sql\`select count(*)::int as n from agent_conversations\`);
 			const afterMessages = await db.execute(sql\`select count(*)::int as n from agent_messages\`);
@@ -294,6 +299,47 @@ live(
 		expect(result.scopeAllowed).toBe(false);
 		expect(result.scopeAllowedOnReply).toBeNull();
 		expect(result.assistantText).toBe("That is outside what this agent does.");
+	},
+	TIMEOUT_MS,
+);
+
+live(
+	"a resumed turn — one whose last message is the assistant's — re-sends the same question, and it is stored once",
+	() => {
+		const result = probe(`
+			const address = wallet();
+			globalThis.__session = { userId: randomUUID(), walletAddress: address, expiresAt: new Date(Date.now() + 3600_000) };
+
+			const first = await post({ messages: [text("prepare a put for me", "r-1")] });
+			const id = first.headers.get("x-agent-conversation");
+			await first.text();
+
+			// The shape the runtime resumes with after an approval: the newest
+			// message is the ASSISTANT's, and the person's question is further back.
+			const resumed = await post({
+				conversationId: id,
+				messages: [
+					text("prepare a put for me", "r-1"),
+					{ id: "r-a1", role: "assistant", parts: [{ type: "text", text: REPLY }] },
+				],
+			});
+			await resumed.text();
+
+			const rows = await rowsFor(id);
+			await db.execute(sql\`delete from agent_conversations where wallet_address = \${address}\`);
+			console.log("RESULT:" + JSON.stringify({
+				status: resumed.status,
+				ids: rows.map((row) => row.parts?.id ?? null),
+				roles: rows.map((row) => row.role),
+				userRows: rows.filter((row) => row.role === "user").length,
+			}));
+		`);
+
+		expect(result.status).toBe(200);
+		// The question is stored ONCE; the two replies are separate rows.
+		expect(result.userRows).toBe(1);
+		expect((result.ids as string[])[0]).toBe("r-1");
+		expect(result.roles).toEqual(["user", "assistant", "assistant"]);
 	},
 	TIMEOUT_MS,
 );

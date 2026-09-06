@@ -78,7 +78,9 @@ const STRIKE_DECIMALS = 8;
  * search tool already uses (`apps/web/src/lib/agent/tools.ts:131`, `.max(400)`),
  * borrowed so the two surfaces agree. Nothing in the PRD words an RFQ horizon.
  */
-const MAX_EXPIRY_DAYS = 400;
+/** Exported so the server can apply the same horizon on ITS clock before building (see lib/rfq/prepare.ts). TODO-OWNER: the number. */
+export const RFQ_MAX_EXPIRY_DAYS = 400;
+const MAX_EXPIRY_DAYS = RFQ_MAX_EXPIRY_DAYS;
 
 /**
  * A plausibility ceiling on the contract count.

@@ -40,8 +40,7 @@ import {
 	buildRfqSettle,
 	createRfqClient,
 	decodeQuotationRequested,
-	type RfqUnderlying,
-} from "@nuts/thetanuts";
+	type RfqUnderlying, RFQ_MAX_EXPIRY_DAYS } from "@nuts/thetanuts";
 import { env } from "@nuts/env/server";
 import { db as defaultDb } from "@nuts/db";
 import type { RfqRequest } from "@nuts/db/schema/index";
@@ -434,6 +433,14 @@ export async function prepareRfqCreateFor(
 	const wallet = session.walletAddress.toLowerCase();
 	if (!HEX_ADDRESS.test(wallet)) return fail("BAD_WALLET", "The signed-in wallet is not a Base address.");
 	const expiry = unixSecondsFrom(input.expiry);
+	// A-4 on the SERVER's clock (not the SDK's wall clock, which the package uses for
+	// its own band): an expiry further than RFQ_MAX_EXPIRY_DAYS from `deps.now()` is
+	// refused before anything is built, so a fixed test clock governs the horizon.
+	// Only values that read as SECONDS are judged here (below 1e11 = year 5138); anything
+	// larger is left to `buildRfqCreate`, whose refusal names the millisecond mistake.
+	if (typeof expiry === "number" && Number.isFinite(expiry) && expiry < 1e11 && expiry > Math.floor(deps.now().getTime() / 1000) + RFQ_MAX_EXPIRY_DAYS * 86_400) {
+		return fail("RFQ_INVALID_DEADLINE", `The option expiry is further than ${RFQ_MAX_EXPIRY_DAYS} days away, which this build does not request.`);
+	}
 	if (expiry === null) {
 		return fail("RFQ_INVALID_DEADLINE", "The expiry must be a unix timestamp in seconds or an ISO instant.");
 	}

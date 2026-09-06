@@ -29,6 +29,7 @@ import {
 import { livePriceBook } from "@/lib/position/spot";
 import type { LivePriceBook } from "@/lib/position/types";
 import { rowDerivation, rowPriceKeys } from "@/lib/position/view";
+import { rfqClientFor } from "@/lib/rfq/prepare";
 
 /**
  * The agent's two POSITION tools (PRD 10.5's `getUserPositions`, and the
@@ -90,6 +91,18 @@ const COPY = {
 	badSettlementPrice: "The settlement price must be a plain positive decimal number of US dollars.",
 	unpricedPremium:
 		"The recorded fill amounts do not satisfy the risk model's own checks, so no figure can be produced for this position.",
+	/**
+	 * RFQ-born options. There is no `positions` row for one — an RFQ mints its
+	 * option at SETTLEMENT, by whoever sends `settleQuotation`, so nothing in
+	 * this app ever saw a fill for it. The Thetanuts indexer lists it and that
+	 * is all this can say about it, which is why every figure below is absent
+	 * rather than estimated.
+	 * TODO-OWNER: the wording.
+	 */
+	rfqBasis:
+		"This option came from a custom request (RFQ) and was minted at settlement, so this app recorded no fill for it. It is listed by the Thetanuts indexer only: there is no premium, no maximum loss and no profit or loss figure for it here. Say that rather than estimating one.",
+	rfqUnreadable:
+		"The Thetanuts indexer could not be read, so any options minted from the user's custom requests are not listed here. Do not say they have none.",
 } as const;
 
 /**
@@ -317,6 +330,65 @@ function orderDerivationInputs(
 	});
 }
 
+/** One option the Thetanuts indexer says a custom request minted for this wallet. */
+export interface RfqOptionSummary {
+	readonly optionAddress: string;
+	readonly quotationId: string;
+	readonly strikesUsd: string[];
+	readonly expiryAt: string;
+	/** The indexer's own numeric option type, unmapped: nothing here proves what each value means. */
+	readonly optionType: number;
+	readonly collateralAddress: string;
+	/** Always "indexer": no fill of this option was ever recorded by this app. */
+	readonly basis: "indexer";
+	readonly note: string;
+}
+
+/**
+ * `client.api.getUserOptionsFromRfq`, mapped and bounded.
+ *
+ * A read failure is reported as a failure, never as an empty list: "you have
+ * none" and "we could not look" are different answers and only one of them is
+ * ever true.
+ */
+export async function rfqOptionsFor(
+	walletAddress: string,
+	client: { api: { getUserOptionsFromRfq(address: string): Promise<readonly RawRfqOption[]> } } = rfqClientFor(
+		walletAddress.toLowerCase(),
+	),
+): Promise<{ options: RfqOptionSummary[] | null; note: string | null }> {
+	let raw: readonly RawRfqOption[];
+	try {
+		raw = await client.api.getUserOptionsFromRfq(walletAddress);
+	} catch {
+		return { options: null, note: COPY.rfqUnreadable };
+	}
+	if (raw.length === 0) return { options: [], note: null };
+	return {
+		options: raw.slice(0, MAX_ROWS).map((option) => ({
+			optionAddress: option.address,
+			quotationId: option.quotationId,
+			strikesUsd: strikesUsdOf(option.strikes),
+			expiryAt: new Date(option.expiry * 1000).toISOString(),
+			optionType: option.optionType,
+			collateralAddress: option.collateral,
+			basis: "indexer" as const,
+			note: COPY.rfqBasis,
+		})),
+		note: COPY.rfqBasis,
+	};
+}
+
+/** The indexer fields this file reads (`StateOption`). Structural, so a test can supply rows. */
+export interface RawRfqOption {
+	readonly address: string;
+	readonly quotationId: string;
+	readonly collateral: string;
+	readonly strikes: readonly string[];
+	readonly expiry: number;
+	readonly optionType: number;
+}
+
 export interface PositionToolsParams {
 	/**
 	 * The signed-in session, read server-side from the cookie — never from the
@@ -367,6 +439,12 @@ export function createPositionTools({ session }: PositionToolsParams) {
 				.filter((value): value is string => value !== null);
 			const soonest = asOf.getTime() + EXPIRY_SOON_DAYS * 86_400_000;
 
+			// Options this wallet owns because a CUSTOM REQUEST settled into one.
+			// Appended rather than merged: they carry no fill, no economics and no
+			// P&L, and presenting them alongside recorded positions as if they did
+			// would be exactly the substitution PRD 8.4 forbids.
+			const rfq = await rfqOptionsFor(session.walletAddress);
+
 			return {
 				signedIn: true as const,
 				asOf: asOf.toISOString(),
@@ -374,6 +452,8 @@ export function createPositionTools({ session }: PositionToolsParams) {
 				// null for a reason that is nothing to do with the positions.
 				feedError: prices.feedError,
 				positions,
+				rfqOptions: rfq.options,
+				rfqOptionsNote: rfq.note,
 				totals: {
 					count: positions.length,
 					/**

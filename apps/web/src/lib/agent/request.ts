@@ -12,11 +12,11 @@ import { z } from "zod";
  * therefore the only `tool-<name>` parts a genuine history can carry.
  *
  * Kept beside the schema rather than imported from `lib/agent/tools.ts`,
- * `lib/agent/positions.ts` and `lib/agent/execute.ts`: all three are
- * `server-only`/`"use server"` modules that pull the Thetanuts SDK and the
- * database in, and this schema is also imported by tests that must not need
- * either. `request.test.ts` greps those three files for their `tool({...})`
- * names and fails if this list drifts.
+ * `lib/agent/positions.ts`, `lib/agent/execute.ts` and
+ * `lib/agent/rfq-tools.ts`: all four are `server-only`/`"use server"` modules
+ * that pull the Thetanuts SDK and the database in, and this schema is also
+ * imported by tests that must not need either. `request.test.ts` greps those
+ * four files for their `tool({...})` names and fails if this list drifts.
  */
 export const AGENT_TOOL_NAMES = [
 	"searchOptionBookOrders",
@@ -26,6 +26,13 @@ export const AGENT_TOOL_NAMES = [
 	"getUserPositions",
 	"whatIfAtExpiry",
 	"requestOptionBookExecution",
+	"buildCustomRfqPreview",
+	"suggestRfqReservePrice",
+	"listMyRfqs",
+	"getRfqStatus",
+	"requestRfqCreation",
+	"requestRfqCancellation",
+	"requestRfqSettlement",
 ] as const;
 
 const TOOL_PART_TYPES = AGENT_TOOL_NAMES.map((name) => `tool-${name}` as const);

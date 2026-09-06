@@ -959,10 +959,10 @@ describe("C-P2-4: a forged tool part is a 400, not a charged turn", () => {
 });
 
 describe("the tool allowlist cannot drift from the tools the app registers", () => {
-	test("AGENT_TOOL_NAMES is exactly what tools.ts and execute.ts define", () => {
+	test("AGENT_TOOL_NAMES is exactly what tools.ts, positions.ts, execute.ts and rfq-tools.ts define", () => {
 		const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 		const found = new Set<string>();
-		for (const source of [read("./tools.ts"), read("./positions.ts"), read("./execute.ts")]) {
+		for (const source of [read("./tools.ts"), read("./positions.ts"), read("./execute.ts"), read("./rfq-tools.ts")]) {
 			for (const match of source.matchAll(/^(?:export const|\tconst) (\w+) = tool\(\{/gm)) {
 				if (match[1] !== undefined) found.add(match[1]);
 			}

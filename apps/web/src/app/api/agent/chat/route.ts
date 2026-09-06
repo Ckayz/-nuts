@@ -12,6 +12,7 @@ import { getSession } from "@/lib/auth/session";
 import { createReadTools } from "@/lib/agent/tools";
 import { createPositionTools } from "@/lib/agent/positions";
 import { createExecutionTools } from "@/lib/agent/execute";
+import { createRfqTools } from "@/lib/agent/rfq-tools";
 import {
 	AGENT_ERROR_SENTENCES,
 	agentErrorSentence,
@@ -238,14 +239,24 @@ export async function POST(request: Request) {
 		 * `createExecutionTools` binds it: the wallet whose positions are read is
 		 * the cookie's, never a value the model can name.
 		 */
-		tools: { ...createReadTools({ asset }), ...createPositionTools({ session }), ...createExecutionTools({ account, session, thesisId }) },
+		tools: { ...createReadTools({ asset }), ...createPositionTools({ session }), ...createRfqTools({ session, account }), ...createExecutionTools({ account, session, thesisId }) },
 		/**
 		 * PRD 10.1 and 14: no transaction is prepared without an explicit answer from
 		 * the user. The runtime suspends the tool call and emits an approval request,
 		 * so `execute` cannot run on the model's say-so alone. Read tools are absent
 		 * from this map and therefore run freely; they cannot move funds.
 		 */
-		toolApproval: { requestOptionBookExecution: "user-approval" },
+		toolApproval: {
+			requestOptionBookExecution: "user-approval",
+			// The three RFQ writes. `requestRfqCreation` escrows the deposit;
+			// `requestRfqCancellation` and `requestRfqSettlement` each send a real
+			// transaction from the user's wallet. None of them may run on the
+			// model's say-so alone. `rfq-tools.ts` `RFQ_APPROVAL_REQUIRED_TOOLS` is
+			// the same list, and `rfq-tools.test.ts` pins this map against it.
+			requestRfqCreation: "user-approval",
+			requestRfqCancellation: "user-approval",
+			requestRfqSettlement: "user-approval",
+		},
 		// Search, preview, then prepare is the deepest real path, and an approval
 		// suspends and resumes the loop. Without a ceiling a confused turn can spin.
 		// TODO-OWNER: the step ceiling and the sampling temperature.

@@ -177,3 +177,55 @@ test("descending into emphasis does NOT make a bold path a link", () => {
 	expect(html.match(/<a /g)).toHaveLength(1);
 	expect(html).toContain('href="/m/eth"');
 });
+
+/* ------------------------------------------------------------------ *
+ * T-3 (Opus user-flow tester): colour that belongs to one sentence
+ * ------------------------------------------------------------------ */
+
+test("T-3: a cue word does not colour the numbers in the NEXT sentence", () => {
+	// Measured in a browser at pin `f414824`: a reply that said "profit" once
+	// left every later figure coloured as a gain, including a STRIKE —
+	// `$2540 rgb(28,206,89) gain` — which is not money made and, by the design
+	// rule, not money at all.
+	const parts = moneyParts("You would be up about $47.91 USDC in profit. The strike is $2540 and it expires Friday.");
+	console.log("T3_BLEED", JSON.stringify(parts.filter((p) => p.kind !== "text")));
+	const kinds = Object.fromEntries(parts.filter((p) => p.kind !== "text").map((p) => [p.text, p.kind]));
+	expect(kinds["$47.91"]).toBe("gain");
+	// The strike is in a sentence of its own and carries no cue.
+	expect(kinds["$2540"]).toBe("neutral");
+});
+
+test("T-3: a cue still governs its OWN sentence, across clauses", () => {
+	// The bound is the sentence, not the figure: everything the sentence says
+	// before a figure still describes it, which is what makes a table row and a
+	// mid-sentence label work.
+	expect(moneyKind("The most you can lose is")).toBe("loss");
+	expect(moneyKind("You could lose the premium; the payout above the strike is")).toBe("gain");
+	// And a cue in an earlier sentence is gone.
+	expect(moneyKind("You could lose everything. The strike is")).toBeNull();
+	// A decimal point is not a sentence end.
+	expect(moneyKind("The most you can lose is 9.99 USDC, or about")).toBe("loss");
+});
+
+test("T-3: a premium column colours its cells", () => {
+	// The tester measured the `PREMIUM PER CONTRACT` column rendering neutral:
+	// the loss cues matched `premium you'd pay` but not a bare "premium", so the
+	// column-header feature this file documents did not fire for the column the
+	// agent actually draws.
+	const cell = moneyParts("9.99 USDC", "Premium per contract");
+	console.log("T3_PREMIUM", JSON.stringify(cell));
+	expect(cell[0]?.kind).toBe("loss");
+	expect(moneyKind("The premium is")).toBe("loss");
+});
+
+test("T-3: what did NOT change", () => {
+	// The reviewer's own sentence (lane D, D-8): a strike beside a premium in ONE
+	// sentence stays neutral, and only the premium colours. A forward-looking
+	// rule would have coloured the strike as a loss here — measured, and rejected
+	// for that reason.
+	const parts = moneyParts("The strike is $2,540 and the premium you'd pay is 9.99 USDC.");
+	console.log("T3_UNCHANGED", JSON.stringify(parts.filter((p) => p.kind !== "text")));
+	const kinds = Object.fromEntries(parts.filter((p) => p.kind !== "text").map((p) => [p.text, p.kind]));
+	expect(kinds["$2,540"]).toBe("neutral");
+	expect(kinds["9.99 USDC"]).toBe("loss");
+});

@@ -64,6 +64,8 @@ describe("D-C2: the agent's copy is tagged", () => {
 			"Ask about options, markets, or what a small budget could buy.",
 			"Something went wrong. Try sending that again.",
 			"Answer the card above first.",
+			// W5: the sentence a reopened chat prints where an approval card was.
+			"This request expired when the chat was closed. Ask again to prepare it.",
 		]) {
 			expect(source).toContain(phrase);
 			// and reached through COPY, not printed as a bare literal in the JSX.
@@ -73,9 +75,11 @@ describe("D-C2: the agent's copy is tagged", () => {
 		const block = source.slice(source.indexOf("const COPY = {"), source.indexOf("} as const;"));
 		const entries = [...block.matchAll(/^\t(\w+):/gm)];
 		// W4 raised this from 3 to 4 DELIBERATELY: `awaitingApproval` is the
-		// composer guard's sentence (follow-up 1). The fence's job is to make a
-		// new sentence a visible decision, which is exactly what happened here.
-		expect(entries.length).toBe(4);
+		// composer guard's sentence (follow-up 1). W5 raised it to 5, for
+		// `expiredApproval` — the line a reopened chat prints where an approval
+		// card can no longer be answered. The fence's job is to make a new
+		// sentence a visible decision, which is exactly what happened both times.
+		expect(entries.length).toBe(5);
 		let previousEnd = block.indexOf("{") + 1;
 		const undocumented: string[] = [];
 		for (const entry of entries) {
@@ -91,9 +95,10 @@ describe("D-C2: the agent's copy is tagged", () => {
 		// `COPY.error` is the fallback for anything the server did not word. The
 		// fence is unchanged in strength: a COPY reference still has to be the last
 		// thing before the rendered marker.
-		// Four now: the guard prints its sentence with a marker as well, so the
-		// placeholder attribute is not the only place it appears.
-		expect(source.match(/COPY\.\w+[^\n]*\} <TodoOwner \/>/g)?.length ?? 0).toBe(4);
+		// Five now: the guard prints its sentence with a marker as well, so the
+		// placeholder attribute is not the only place it appears, and W5's expired
+		// approval card prints its own.
+		expect(source.match(/COPY\.\w+[^\n]*\} <TodoOwner \/>/g)?.length ?? 0).toBe(5);
 	});
 
 	/**
@@ -161,8 +166,34 @@ describe("D-C2: the agent's copy is tagged", () => {
 	 * a chromatic red (`--destructive: oklch(0.58 0.22 27)` in
 	 * `packages/ui/src/styles/globals.css`). No agent surface may reach for it.
 	 */
+	/**
+	 * W5. The saved-chat rail is one more agent surface with no provenance: the
+	 * mockup draws no agent view, so its five labels are the owner's to word and
+	 * every one carries its own tag.
+	 */
+	test("agent-history.tsx holds every sentence in one tagged block", async () => {
+		const source = await read("./agent-history.tsx");
+		expect(source).toContain("export const HISTORY_COPY = {");
+		expect(source).toContain("<TodoOwner />");
+		const block = source.slice(source.indexOf("export const HISTORY_COPY = {"), source.indexOf("} as const;"));
+		const entries = [...block.matchAll(/^\t(\w+):/gm)];
+		expect(entries.length).toBe(5);
+		const undocumented: string[] = [];
+		let previousEnd = block.indexOf("{") + 1;
+		for (const entry of entries) {
+			const at = entry.index ?? 0;
+			if (!block.slice(previousEnd, at).includes("TODO-OWNER")) undocumented.push(entry[1] ?? "?");
+			previousEnd = at + entry[0].length;
+		}
+		expect(undocumented).toEqual([]);
+		// Every rendered sentence reaches through the block, never as a literal.
+		const afterBlock = source.slice(source.indexOf("} as const;"));
+		expect(afterBlock).not.toContain("Sign in with a wallet");
+		expect(afterBlock).not.toContain("New chat<");
+	});
+
 	test("no agent component paints an error red", async () => {
-		for (const name of ["./agent-chat.tsx", "./trade-execution.tsx", "./trade-approval.tsx", "./tool-activity.tsx", "./agent-launcher.tsx", "./agent-markdown.tsx", "./rfq-execution.tsx", "./rfq-approval.tsx"]) {
+		for (const name of ["./agent-chat.tsx", "./agent-history.tsx", "./trade-execution.tsx", "./trade-approval.tsx", "./tool-activity.tsx", "./agent-launcher.tsx", "./agent-markdown.tsx", "./rfq-execution.tsx", "./rfq-approval.tsx"]) {
 			expect(await read(name), name).not.toContain("text-destructive");
 		}
 		// The neutral replacement exists and is the ticket's own idiom.

@@ -9,6 +9,7 @@ import {
 import { env } from "@nuts/env/server";
 
 import { getSession } from "@/lib/auth/session";
+import { appendTurn, ensureConversation } from "@/lib/agent/history";
 import { createReadTools } from "@/lib/agent/tools";
 import { createPositionTools } from "@/lib/agent/positions";
 import { createExecutionTools } from "@/lib/agent/execute";
@@ -31,10 +32,44 @@ import {
 	MESSAGE_TOO_LONG,
 	REQUEST_TOO_LONG,
 	agentChatBodySchema,
+	messageText,
 	withoutClientEchoes,
 } from "@/lib/agent/request";
 
 export const maxDuration = 60;
+
+/**
+ * W5. The response header that tells the browser which saved conversation this
+ * reply belongs to.
+ *
+ * A HEADER rather than message metadata, deliberately. Metadata rides on the
+ * assistant message, which `useChat` posts BACK inside `messages` on the next
+ * turn — so the id would become one more client-writable field the scope gate
+ * has to classify and `convertToModelMessages` could forward. A header reaches
+ * the client, is read by the transport's own `fetch` (`agent-chat.tsx`), and
+ * never enters model context at all.
+ *
+ * MEASURED at `ai@7.0.92`: `toUIMessageStreamResponse` spreads its remaining
+ * options into `createUIMessageStreamResponse` (dist/index.js:11095-11120),
+ * which passes `headers` to the `Response` (`:6584`), so a custom header
+ * survives beside the SDK's own five.
+ */
+export const CONVERSATION_HEADER = "x-agent-conversation";
+
+/**
+ * The newest message the PERSON sent, which is the one this turn is about.
+ *
+ * Read backwards rather than taking the last element: a turn the runtime
+ * resumed after an approval ends with an ASSISTANT message, and the user
+ * message it belongs to is further back.
+ */
+function newestUserMessage(messages: UIMessage[]): UIMessage | null {
+	for (let at = messages.length - 1; at >= 0; at -= 1) {
+		const message = messages[at];
+		if (message !== undefined && message.role === "user") return message;
+	}
+	return null;
+}
 
 /**
  * C-2 (lane C pass 3, MAJOR), K-1 (pass-4 lane C MAJOR-1) and K-4 (pass-5 lane
@@ -176,6 +211,39 @@ export async function POST(request: Request) {
 	const asset = body.data.asset?.toUpperCase() ?? null;
 
 	/**
+	 * W5. The saved conversation this turn belongs to.
+	 *
+	 * PRD 10.2, verbatim: "Guest users receive ephemeral discovery only. Wallet
+	 * authentication is required for persistence." So this whole block is
+	 * skipped without a SESSION — not without a connected wallet: the body's
+	 * `walletAddress` is a value the browser chose, and history is a person's
+	 * own record.
+	 *
+	 * It runs BEFORE `chargeTurn` so a request naming a conversation that is not
+	 * this wallet's is refused without spending one of the day's turns. A
+	 * database failure here does NOT refuse the turn — history is a convenience,
+	 * not a spend control — the chat simply runs unsaved.
+	 */
+	const userMessage = newestUserMessage(messages);
+	let conversationId: string | null = null;
+	if (session !== null) {
+		const opened = await ensureConversation({
+			walletAddress: session.walletAddress,
+			conversationId: body.data.conversationId?.toLowerCase() ?? null,
+			thesisId,
+			firstUserText: userMessage === null ? "" : messageText(userMessage.parts as Array<{ type?: unknown; text?: unknown }>),
+		});
+		if (opened.status === "not-yours") {
+			// TODO-OWNER: the wording. It says nothing about whether that id
+			// exists, on purpose.
+			return agentError("That conversation is not available on this wallet. Start a new chat.", 403);
+		}
+		if (opened.status === "ok") conversationId = opened.id;
+	}
+	/** The header only when there is something to name. */
+	const conversationHeaders = conversationId === null ? undefined : { [CONVERSATION_HEADER]: conversationId };
+
+	/**
 	 * C6-r2. PRD 10.2's daily model limits, charged BEFORE any model is called —
 	 * including the small scope model, which is also a paid call. The turn is
 	 * charged to the signed-in wallet when there is one, so the connected address
@@ -221,7 +289,24 @@ export async function POST(request: Request) {
 				writer.write({ type: "text-end", id });
 			},
 		});
-		return createUIMessageStreamResponse({ stream });
+		/**
+		 * W5. The refusal is part of the conversation, so it is saved like any
+		 * other turn — otherwise reopening a chat would show the question with no
+		 * answer under it. Written straight from the constant rather than through
+		 * a stream callback: this reply is known before the stream exists.
+		 *
+		 * `scope_allowed` is false on the person's message, which is what that
+		 * column is for (PRD 10.8 layer 1).
+		 */
+		if (conversationId !== null && userMessage !== null) {
+			await appendTurn({
+				conversationId,
+				userMessage,
+				assistantMessage: { id: crypto.randomUUID(), parts: [{ type: "text", text: OUT_OF_SCOPE_REPLY }] },
+				scope: { allowed: false, reason: "out of scope" },
+			});
+		}
+		return createUIMessageStreamResponse({ stream, headers: conversationHeaders });
 	}
 
 	const result = streamText({
@@ -280,6 +365,30 @@ export async function POST(request: Request) {
 	});
 
 	return result.toUIMessageStreamResponse({
+		headers: conversationHeaders,
+		/**
+		 * W5. The turn is saved when the stream ends.
+		 *
+		 * MEASURED at `ai@7.0.92` (dist/index.js:7611-7630, the `callOnEnd` in
+		 * `handleUIMessageStreamFinish`): the event is
+		 * `{ messages, isContinuation, isAborted, outcome, responseMessage,
+		 * finishReason }`, and `responseMessage` is the assistant UIMessage the
+		 * SERVER assembled from its own stream — not one the browser sent back.
+		 * `onFinish` is the deprecated alias of `onEnd` (dist/index.d.ts:2578)
+		 * and resolves to the same callback (:11111).
+		 *
+		 * `appendTurn` never throws: a failure here must not break a reply the
+		 * person is already reading.
+		 */
+		onFinish: async ({ responseMessage }) => {
+			if (conversationId === null || userMessage === null) return;
+			await appendTurn({
+				conversationId,
+				userMessage,
+				assistantMessage: responseMessage,
+				scope: { allowed: true, reason: null },
+			});
+		},
 		onError: (error) => {
 			/**
 			 * F-E item 3. `streamText` reports failures HERE rather than throwing out

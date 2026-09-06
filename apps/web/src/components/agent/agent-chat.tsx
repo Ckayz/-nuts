@@ -57,6 +57,17 @@ const COPY = {
 	 * connection), so provider text can never reach the screen.
 	 */
 	error: "Something went wrong. Try sending that again.",
+	/**
+	 * TODO-OWNER: what the composer says while an approval card is unanswered.
+	 *
+	 * Follow-up 1 (`.research/rfq/followups.md`, measured in the 11:3x browser
+	 * walk): sending a new message while a card was waiting failed the turn
+	 * outright — the server logged `AI_MissingToolResultsError: Tool result is
+	 * missing for tool call …` and the reader saw "The agent could not complete
+	 * that." The runtime has suspended a tool call; it cannot take another
+	 * message until that call is answered.
+	 */
+	awaitingApproval: "Answer the card above first.",
 } as const;
 
 /**
@@ -272,9 +283,45 @@ export function AgentChat({
 		void sendMessage({ text: thesisOpener(thesisId) });
 	}, [sendMessage, thesisId]);
 
+	/**
+	 * The newest assistant turn is waiting on an approval card.
+	 *
+	 * `approvalRequest` is the SDK's own shape (`state: "approval-requested"` and
+	 * an `approval.id`); once the user answers, the runtime moves that part to
+	 * `approval-responded`, so "unanswered" needs no separate flag. While this
+	 * holds, the runtime has a suspended tool call and cannot accept another
+	 * message — see `COPY.awaitingApproval`.
+	 */
+	const last = messages[messages.length - 1];
+	const awaitingApproval =
+		last !== undefined &&
+		last.role === "assistant" &&
+		last.parts.some((part) => approvalRequest(part) !== null);
+
+	/**
+	 * How many assistant turns have been written, which is what makes the
+	 * deterministic chip row move instead of repeating itself.
+	 */
+	const turn = messages.reduce((count, message) => (message.role === "assistant" ? count + 1 : count), 0);
+
+	/**
+	 * Is there a wallet the position tools would accept?
+	 *
+	 * MEASURED CAVEAT: this is "a wallet is CONNECTED", not "this browser holds a
+	 * signed-in session" — the session is an httpOnly cookie the server reads,
+	 * and the only client-side publisher of session state (`wallet-bar.tsx` →
+	 * `connected-identity.ts`) publishes the connected address, not the session.
+	 * The AUTHORITATIVE answer is the one the model gets: the route composes
+	 * `sessionLine` from `getSession()`. This flag only decides whether the
+	 * deterministic fallback row may offer a wallet-only chip, and a connected
+	 * but unsigned visitor pressing one is told to sign in — the same sentence
+	 * `getUserPositions` returns.
+	 */
+	const signedIn = Boolean(address);
+
 	function submit(text: string) {
 		const trimmed = text.trim();
-		if (!trimmed || busy) return;
+		if (!trimmed || busy || awaitingApproval) return;
 		void sendMessage({ text: trimmed });
 		setInput("");
 	}
@@ -360,6 +407,15 @@ export function AgentChat({
 								const streaming =
 									part.state === "streaming" || (busy && message.id === messages[messages.length - 1]?.id);
 								const { body } = splitSuggestionTrailer(part.text, streaming);
+								// The person's own words sit in a panel so the page reads as
+								// turns; the reply keeps the page background.
+								if (message.role === "user") {
+									return (
+										<div key={i} className="agent-user">
+											<AgentMarkdown text={body} />
+										</div>
+									);
+								}
 								return <AgentMarkdown key={i} text={body} />;
 							}
 							// The runtime suspended a write tool and is waiting for the user.
@@ -481,8 +537,9 @@ export function AgentChat({
 				    agent just saw) and a generic set, so a plain explanation or the
 				    out-of-scope redirect is no longer a dead end. */}
 				{(() => {
-					if (busy) return null;
-					const last = messages[messages.length - 1];
+					// Hidden while a card is unanswered: pressing a chip would send a
+					// message the runtime cannot accept (follow-up 1).
+					if (busy || awaitingApproval) return null;
 					if (last === undefined || last.role !== "assistant") return null;
 					return (
 						<SuggestionRow
@@ -496,7 +553,7 @@ export function AgentChat({
 								...(lastRfq !== null && lastRfq.messageId === last.id
 									? postRfqSuggestions(lastRfq.rfqRequestId)
 									: []),
-								...chipsForTurn({ parts: last.parts as never, asset }),
+								...chipsForTurn({ parts: last.parts as never, asset, turn, signedIn }),
 							]}
 							onSend={submit}
 						/>
@@ -512,6 +569,11 @@ export function AgentChat({
 			</div>
 
 			<div className="border-t py-4">
+				{awaitingApproval && (
+					<p className="agent-msg">
+						{COPY.awaitingApproval} <TodoOwner />
+					</p>
+				)}
 				<InputGroup>
 					<InputGroupTextarea
 						value={input}
@@ -523,12 +585,19 @@ export function AgentChat({
 							}
 						}}
 						// TODO-OWNER: placeholder wording.
-						placeholder="Ask about a market, or describe what you think will happen…"
-						disabled={busy}
+						placeholder={
+							awaitingApproval
+								? COPY.awaitingApproval
+								: "Ask about a market, or describe what you think will happen…"
+						}
+						disabled={busy || awaitingApproval}
 						rows={2}
 					/>
 					<InputGroupAddon align="block-end">
-						<InputGroupButton onClick={() => submit(input)} disabled={busy || !input.trim()}>
+						<InputGroupButton
+							onClick={() => submit(input)}
+							disabled={busy || awaitingApproval || !input.trim()}
+						>
 							Send
 						</InputGroupButton>
 					</InputGroupAddon>

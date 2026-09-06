@@ -54,14 +54,16 @@ describe("D-C2: the agent's copy is tagged", () => {
 	 * "sourceTagLines":[27,46,356]}` — markers existed in the file, none of them
 	 * covering these. A marker elsewhere in a file is not approval.
 	 */
-	test("agent-chat.tsx holds its three loose sentences in one tagged block", async () => {
+	test("agent-chat.tsx holds its loose sentences in one tagged block", async () => {
 		const source = await read("./agent-chat.tsx");
 		expect(source).toContain("const COPY = {");
-		// The reviewer's three sentences, each now a COPY entry.
+		// The reviewer's three sentences, each now a COPY entry, plus W4's
+		// composer guard — the one thing the chat says that is not a reply.
 		for (const phrase of [
 			"Live Thetanuts liquidity on Base. It prepares trades; your wallet approves them.",
 			"Ask about options, markets, or what a small budget could buy.",
 			"Something went wrong. Try sending that again.",
+			"Answer the card above first.",
 		]) {
 			expect(source).toContain(phrase);
 			// and reached through COPY, not printed as a bare literal in the JSX.
@@ -70,7 +72,10 @@ describe("D-C2: the agent's copy is tagged", () => {
 		// Every entry documented, same rule as trade-execution.tsx below.
 		const block = source.slice(source.indexOf("const COPY = {"), source.indexOf("} as const;"));
 		const entries = [...block.matchAll(/^\t(\w+):/gm)];
-		expect(entries.length).toBe(3);
+		// W4 raised this from 3 to 4 DELIBERATELY: `awaitingApproval` is the
+		// composer guard's sentence (follow-up 1). The fence's job is to make a
+		// new sentence a visible decision, which is exactly what happened here.
+		expect(entries.length).toBe(4);
 		let previousEnd = block.indexOf("{") + 1;
 		const undocumented: string[] = [];
 		for (const entry of entries) {
@@ -86,7 +91,9 @@ describe("D-C2: the agent's copy is tagged", () => {
 		// `COPY.error` is the fallback for anything the server did not word. The
 		// fence is unchanged in strength: a COPY reference still has to be the last
 		// thing before the rendered marker.
-		expect(source.match(/COPY\.\w+[^\n]*\} <TodoOwner \/>/g)?.length ?? 0).toBe(3);
+		// Four now: the guard prints its sentence with a marker as well, so the
+		// placeholder attribute is not the only place it appears.
+		expect(source.match(/COPY\.\w+[^\n]*\} <TodoOwner \/>/g)?.length ?? 0).toBe(4);
 	});
 
 	/**

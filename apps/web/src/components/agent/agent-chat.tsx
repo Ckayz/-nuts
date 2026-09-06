@@ -23,10 +23,14 @@ import {
 	chipsForTurn,
 	isLinkChip,
 	postFillSuggestions,
+	postRfqSuggestions,
 	splitSuggestionTrailer,
 	starterSuggestions,
 } from "@/lib/agent/suggestions";
 import { AgentMarkdown } from "./agent-markdown";
+import { RFQ_APPROVAL_TOOLS, RfqApproval } from "./rfq-approval";
+import type { PreparedRfqAction, PreparedRfqCreate } from "./rfq-contract";
+import { RfqActionExecution, RfqExecution } from "./rfq-execution";
 import { ToolActivity } from "./tool-activity";
 import { TradeApproval } from "./trade-approval";
 import { TradeExecution, type PreparedTrade } from "./trade-execution";
@@ -201,6 +205,12 @@ export function AgentChat({
 	 * chips it earns are deterministic rather than proposed in a trailer.
 	 */
 	const [lastFill, setLastFill] = useState<{ positionId: string; messageId: string } | null>(null);
+	/**
+	 * The RFQ this conversation created, cancelled or settled, and the message
+	 * that carried it. Deterministic for the same reason `lastFill` is: the row id
+	 * comes back from the recording call inside the card, never from a model turn.
+	 */
+	const [lastRfq, setLastRfq] = useState<{ rfqRequestId: string; messageId: string } | null>(null);
 	const { address } = useAccount();
 
 	// Read through a ref so the transport, created once, always sees the current
@@ -371,6 +381,23 @@ export function AgentChat({
 							// approval it was waiting for.
 							const approval = approvalRequest(part);
 							if (approval !== null) {
+								// WHICH card answers is decided by the TOOL, read from the part
+								// itself. `approvalRequest` keeps its measured shape (id + input)
+								// — `agent-fold-r2.test.ts` pins that object exactly — so the tool
+								// name is taken here rather than added to its answer.
+								if (RFQ_APPROVAL_TOOLS.has(part.type)) {
+									return (
+										<RfqApproval
+											key={i}
+											tool={part.type}
+											input={approval.input}
+											pending={busy}
+											onRespond={(approved) =>
+												addToolApprovalResponse({ id: approval.id, approved })
+											}
+										/>
+									);
+								}
 								return (
 									<TradeApproval
 										key={i}
@@ -404,6 +431,41 @@ export function AgentChat({
 								return <ToolActivity key={i} part={part} />;
 							}
 
+							// A prepared RFQ carries unsigned calldata for the user's wallet,
+							// exactly as a prepared trade does. `prepared === true` is the tool's
+							// own flag; a refusal renders as ordinary tool activity.
+							if (part.type === "tool-requestRfqCreation") {
+								const out = (part as { output?: unknown }).output as
+									| (PreparedRfqCreate & { prepared?: boolean })
+									| undefined;
+								if (out?.prepared === true) {
+									return (
+										<RfqExecution
+											key={i}
+											rfq={out}
+											onDone={(rfqRequestId) => setLastRfq({ rfqRequestId, messageId: message.id })}
+										/>
+									);
+								}
+								return <ToolActivity key={i} part={part} />;
+							}
+
+							if (part.type === "tool-requestRfqCancellation" || part.type === "tool-requestRfqSettlement") {
+								const out = (part as { output?: unknown }).output as
+									| (PreparedRfqAction & { prepared?: boolean })
+									| undefined;
+								if (out?.prepared === true) {
+									return (
+										<RfqActionExecution
+											key={i}
+											action={out}
+											onDone={(rfqRequestId) => setLastRfq({ rfqRequestId, messageId: message.id })}
+										/>
+									);
+								}
+								return <ToolActivity key={i} part={part} />;
+							}
+
 							if (part.type.startsWith("tool-")) {
 								return <ToolActivity key={i} part={part} />;
 							}
@@ -428,6 +490,11 @@ export function AgentChat({
 								// A fill is worth more than a follow-up question, so it leads.
 								...(lastFill !== null && lastFill.messageId === last.id
 									? postFillSuggestions(lastFill.positionId)
+									: []),
+								// The same rule for a request the wallet just created, cancelled or
+								// settled: no model turn produced it, so it cannot be proposed in a trailer.
+								...(lastRfq !== null && lastRfq.messageId === last.id
+									? postRfqSuggestions(lastRfq.rfqRequestId)
 									: []),
 								...chipsForTurn({ parts: last.parts as never, asset }),
 							]}

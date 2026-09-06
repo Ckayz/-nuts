@@ -90,6 +90,46 @@ describe("D-C2: the agent's copy is tagged", () => {
 	});
 
 	/**
+	 * The RFQ card is `trade-execution.tsx`'s sibling and gets the same fence: one
+	 * tagged block, every entry documented, and no `setMessage` anywhere in the
+	 * file taking a bare literal. The block is bigger than the trade card's
+	 * because the RFQ path has more states (watching, cancelling, settling), which
+	 * is exactly where an untagged sentence would hide.
+	 */
+	test("rfq-execution.tsx holds every sentence in one tagged block", async () => {
+		const source = await read("./rfq-execution.tsx");
+		expect(source).toContain("const COPY = {");
+		expect(source).toContain("<TodoOwner />");
+		const block = source.slice(source.indexOf("const COPY = {"), source.indexOf("} as const;"));
+		const entries = [...block.matchAll(/^\t(\w+):/gm)];
+		expect(entries.length).toBeGreaterThan(20);
+		const undocumented: string[] = [];
+		let previousEnd = block.indexOf("{") + 1;
+		for (const entry of entries) {
+			const at = entry.index ?? 0;
+			if (!block.slice(previousEnd, at).includes("TODO-OWNER")) undocumented.push(entry[1] ?? "?");
+			previousEnd = at + entry[0].length;
+		}
+		expect(undocumented).toEqual([]);
+	});
+
+	test("no setMessage in rfq-execution.tsx takes a bare string literal", async () => {
+		const source = await read("./rfq-execution.tsx");
+		const bare = [...source.matchAll(/setMessage\(\s*"(?!\)\s*)/g)];
+		expect(bare.map((match) => source.slice(match.index, (match.index ?? 0) + 60))).toEqual([]);
+	});
+
+	test("rfq-approval.tsx tags every sentence it prints", async () => {
+		const source = await read("./rfq-approval.tsx");
+		expect(source.match(/TODO-OWNER/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
+		expect(source).toContain("<TodoOwner />");
+		// The two headings a reviewer greps for.
+		for (const phrase of ["Ask market makers for this option?", "Most per contract"]) {
+			expect(source).toContain(phrase);
+		}
+	});
+
+	/**
 	 * F-E. The five sentences the server may put on the screen live in one tagged
 	 * block too, for the same reason the three above do: nobody has worded them
 	 * but this repo, and a sixth must not slip in untagged.
@@ -115,7 +155,7 @@ describe("D-C2: the agent's copy is tagged", () => {
 	 * `packages/ui/src/styles/globals.css`). No agent surface may reach for it.
 	 */
 	test("no agent component paints an error red", async () => {
-		for (const name of ["./agent-chat.tsx", "./trade-execution.tsx", "./trade-approval.tsx", "./tool-activity.tsx", "./agent-launcher.tsx", "./agent-markdown.tsx"]) {
+		for (const name of ["./agent-chat.tsx", "./trade-execution.tsx", "./trade-approval.tsx", "./tool-activity.tsx", "./agent-launcher.tsx", "./agent-markdown.tsx", "./rfq-execution.tsx", "./rfq-approval.tsx"]) {
 			expect(await read(name), name).not.toContain("text-destructive");
 		}
 		// The neutral replacement exists and is the ticket's own idiom.
@@ -142,7 +182,7 @@ describe("D-C2: the agent's copy is tagged", () => {
 		const source = await Bun.file(new URL("../../lib/agent/suggestions.ts", import.meta.url)).text();
 		const block = source.slice(source.indexOf("const COPY = {"), source.indexOf("} as const;"));
 		const entries = [...block.matchAll(/^\t(\w+):/gm)];
-		expect(entries.length).toBeGreaterThan(25);
+		expect(entries.length).toBeGreaterThan(29);
 		const undocumented: string[] = [];
 		let previousEnd = block.indexOf("{") + 1;
 		for (const entry of entries) {

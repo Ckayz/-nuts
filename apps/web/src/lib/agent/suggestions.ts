@@ -102,6 +102,16 @@ const COPY = {
 	// TODO-OWNER: the hedge entry, offered only where an asset is in context.
 	// Level 1 (owner 2026-09-06 05:4x): the agent proposes, the wallet signs.
 	startHedgeLabel: (asset: string) => `Protect my ${asset} from a drop`,
+	// TODO-OWNER: the RFQ entry, and whether it belongs on the starter row at all.
+	// Offered ONLY on ETH and BTC because that is what the owner put in scope
+	// (2026-09-06 10:1x: BUY puts and put spreads, USDC collateral, ETH/BTC) —
+	// a chip that leads to "I cannot do that here" is worse than no chip.
+	startRfqLabel: (asset: string) => `Ask for a custom ${asset} option`,
+	// TODO-OWNER: sent when the user presses the RFQ chip. It asks for the thing
+	// an RFQ is FOR — a strike or expiry the book does not quote — rather than
+	// naming the mechanism, which means nothing to a first-time reader.
+	startRfqSend: (asset: string) =>
+		`I want a put on ${asset} at a strike the order book does not have. Can market makers quote one for me?`,
 	// TODO-OWNER: sent when the user presses the hedge chip. Deliberately asks
 	// for the cost too: protection that is never priced reads as free.
 	startHedgeSend: (asset: string) =>
@@ -136,6 +146,20 @@ const COPY = {
 	postFillPositionsLabel: "Show my positions",
 	// TODO-OWNER: sent by the post-fill positions chip.
 	postFillPositionsSend: "Show my positions and how they are doing.",
+
+	// --- After an RFQ the wallet confirmed. Deterministic for the same reason. ---
+
+	// TODO-OWNER: the "where is it up to" chip after a request is created.
+	postRfqStatusLabel: "Check my request",
+	// TODO-OWNER: sent by the status chip. The id is the row the card recorded,
+	// so the agent reads THAT request rather than guessing which one is meant.
+	postRfqStatusSend: (rfqRequestId: string) => `What is the status of my request ${rfqRequestId}?`,
+	// TODO-OWNER: the cancel chip. Cancelling is requester-only and refunds the
+	// escrow, which is why it is offered as plainly as the status chip.
+	postRfqCancelLabel: "Cancel it",
+	// TODO-OWNER: sent by the cancel chip. It asks; the wallet still confirms.
+	postRfqCancelSend: (rfqRequestId: string) =>
+		`Cancel my request ${rfqRequestId} and return the escrow.`,
 } as const;
 
 /** A tool part as the chat renders it. Only the fields chips are built from. */
@@ -415,6 +439,14 @@ function tickerOf(asset: string | null | undefined): string | null {
 }
 
 /**
+ * The underlyings an RFQ can be asked for.
+ *
+ * Owner decision 2026-09-06 10:1x, and the factory's own limit: `mmPricing`
+ * prices ETH and BTC only. Uppercase, because `tickerOf` uppercases.
+ */
+const RFQ_UNDERLYINGS: ReadonlySet<string> = new Set(["ETH", "BTC"]);
+
+/**
  * The chips an empty conversation offers.
  *
  * Asset-aware on the market page and in the slide-over, where the reader is
@@ -429,6 +461,23 @@ export function starterSuggestions(input: { readonly asset?: string | null } = {
 			{ label: COPY.startView("ETH"), send: COPY.startView("ETH") },
 			{ label: COPY.startEducation, send: COPY.startEducation },
 			{ label: COPY.startSimplest("BTC"), send: COPY.startSimplest("BTC") },
+		];
+	}
+	/**
+	 * The RFQ starter replaces the generic "what can I trade" chip rather than
+	 * being added beside it: `starterSuggestions` returns exactly
+	 * `MAX_SUGGESTIONS` chips and a test pins that. On a page that is already
+	 * about one market, a chip naming that market beats the generic one.
+	 *
+	 * ETH and BTC only — the factory prices no other underlying for an RFQ
+	 * (owner 2026-09-06 10:1x), so nothing else may offer it.
+	 */
+	if (RFQ_UNDERLYINGS.has(asset)) {
+		return [
+			{ label: COPY.startView(asset), send: COPY.startView(asset) },
+			{ label: COPY.startHedgeLabel(asset), send: COPY.startHedgeSend(asset) },
+			{ label: COPY.startRfqLabel(asset), send: COPY.startRfqSend(asset) },
+			{ label: COPY.startEducation, send: COPY.startEducation },
 		];
 	}
 	return [
@@ -489,6 +538,22 @@ export function postFillSuggestions(positionId: string): Chip[] {
 	return [
 		{ label: COPY.postFillPostLabel, href: `/new?link=/p/${positionId}` },
 		{ label: COPY.postFillPositionsLabel, send: COPY.postFillPositionsSend },
+	];
+}
+
+/**
+ * The two chips a confirmed RFQ earns.
+ *
+ * Deterministic, like `postFillSuggestions`: the row id comes back from the
+ * recording call inside `RfqExecution`, so no model turn ever sees it and no
+ * trailer can propose these. Both SEND text rather than linking, because there
+ * is no RFQ route in this app — the request lives in the conversation and in the
+ * card, and W2's tools read it by id.
+ */
+export function postRfqSuggestions(rfqRequestId: string): Chip[] {
+	return [
+		{ label: COPY.postRfqStatusLabel, send: COPY.postRfqStatusSend(rfqRequestId) },
+		{ label: COPY.postRfqCancelLabel, send: COPY.postRfqCancelSend(rfqRequestId) },
 	];
 }
 

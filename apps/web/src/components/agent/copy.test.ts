@@ -175,6 +175,44 @@ describe("D-C2: the agent's copy is tagged", () => {
 	});
 
 	/**
+	 * W4. A comment left OPEN in `agent.css` is silent: the browser recovers by
+	 * skipping to the next `}` and one rule disappears, with nothing in any test
+	 * output to say so. It happened while this file's sibling change was written
+	 * — a closer was left mid-block and `.agent-md-heading` stopped applying,
+	 * found
+	 * only by looking at a screenshot.
+	 *
+	 * Comments are stripped the way a CSS parser strips them — they do not nest,
+	 * so an opener runs to the FIRST closer — and what is left must be
+	 * brace-balanced and free of prose.
+	 */
+	test("agent.css has no comment left open", async () => {
+		const css = await Bun.file(new URL("../../styles/agent.css", import.meta.url)).text();
+		let code = "";
+		let at = 0;
+		for (;;) {
+			const open = css.indexOf("/*", at);
+			if (open === -1) {
+				code += css.slice(at);
+				break;
+			}
+			code += css.slice(at, open);
+			const close = css.indexOf("*/", open + 2);
+			// An unterminated comment swallows the rest of the file; the prose check
+			// below cannot see it, so it is its own failure.
+			expect(close, "unterminated comment").toBeGreaterThan(-1);
+			at = close + 2;
+		}
+		const opens = (code.match(/\{/g) ?? []).length;
+		const closes = (code.match(/\}/g) ?? []).length;
+		expect({ opens, closes }).toEqual({ opens: closes, closes });
+		// Prose that escaped a comment is the shape this test exists for.
+		for (const word of ["TODO-OWNER", "owner", "measured", "because"]) {
+			expect(code, word).not.toContain(word);
+		}
+	});
+
+	/**
 	 * The chip copy lives in `lib/agent/suggestions.ts`, not in a component: the
 	 * same sentence is both a label and the message pressing it sends, and both
 	 * the chat and the market panel render it. It gets the same fence as the

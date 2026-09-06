@@ -37,7 +37,8 @@
    /m/<asset> two of them. `agent-markdown.tsx` now rewrites every reply heading
    to <p class="agent-md-heading"><strong>, so this selector keeps the SAME
    appearance for that paragraph; the element selectors are kept beside it so
-   nothing regresses if a heading element ever reaches the markup again. */
+   nothing regresses if a heading element ever reaches the markup again.
+
    W4: sized down again to a real label — 12px, uppercase-scale letter-spacing —
    so a heading reads as a divider between sections rather than as another
    sentence. TODO-OWNER: the colour. `--muted` is used here because the accent

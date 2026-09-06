@@ -371,6 +371,14 @@ describe("C4: the create is built AFTER the allowance is on chain", () => {
 });
 
 describe("C#8: calldata past PRD 14's window is refreshed, never sent", () => {
+	/**
+	 * MEASURED, and worth stating: on THIS path the age check is not the fence
+	 * that stops the stale bytes — the server fence below it is (`preparedThisSend`
+	 * is false, so every send re-prepares anyway). Disabling the age check alone
+	 * leaves this test green. What the age check adds is proven by the test after
+	 * next: it REFRESHES calldata the server fence has already produced, instead
+	 * of refusing it.
+	 */
 	test("a stale create is re-prepared and the FRESH bytes are what leave", async () => {
 		reset();
 		const h = mount(RfqExecution, {
@@ -381,6 +389,38 @@ describe("C#8: calldata past PRD 14's window is refreshed, never sent", () => {
 		console.log("STALE", JSON.stringify({ sent: calls.sends.map((s) => s.data), prepares: rfq.prepares.length }));
 		expect(calls.sends.map((s) => s.data)).toEqual([FRESH_DATA]);
 		expect(rfq.prepares.length).toBe(1);
+		h.unmount();
+	});
+
+	test("a preparation this click already made, but stale, is REFRESHED not refused", async () => {
+		reset();
+		let asked = 0;
+		rfq.prepareCreate = async () => {
+			asked += 1;
+			return {
+				ok: true,
+				stage: "create",
+				create: { to: FACTORY as `0x${string}`, data: asked === 1 ? CREATE_DATA : FRESH_DATA, value: "0" },
+				token: `tok${asked}`,
+				expected: EXPECTED,
+				// The allowance already covers the escrow, so the approve branch's own
+				// preparation comes back at the CREATE stage — and slow, so it is
+				// already past PRD 14's window by the time the card holds it. The
+				// refresh it triggers answers in time.
+				preparedAt: new Date(asked === 1 ? Date.now() - 40_000 : Date.now()).toISOString(),
+				note: "",
+			};
+		};
+		const h = mount(RfqExecution, { rfq: approveStage() });
+		press(h);
+		await h.settle();
+		console.log("REFRESH_NOT_REFUSE", JSON.stringify({ prepares: rfq.prepares.length, sent: calls.sends.map((x) => x.data) }));
+		// Asked twice: once as the pre-approval server fence, once because what it
+		// answered was already too old to broadcast.
+		expect(rfq.prepares.length).toBe(2);
+		// Nothing was approved (the allowance already covered it) and the FRESH
+		// create is what left the wallet.
+		expect(calls.sends.map((x) => x.data)).toEqual([FRESH_DATA]);
 		h.unmount();
 	});
 

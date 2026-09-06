@@ -45,7 +45,7 @@ interface ToolPart {
 	state?: string;
 	output?: unknown;
 	/** `ai@7.0.92` dist/index.d.ts:2065-2078: the answer a person gave the card. */
-	approval?: { approved?: boolean };
+	approval?: { id?: string; approved?: boolean };
 }
 
 /**

@@ -5,6 +5,7 @@ export * from "./comments";
 export * from "./enums";
 export * from "./follows";
 export * from "./positions";
+export * from "./rfq";
 export * from "./theses";
 export * from "./users";
 export * from "./likes";

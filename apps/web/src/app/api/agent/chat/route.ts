@@ -19,7 +19,7 @@ import {
 	classifyAgentError,
 } from "@/lib/agent/errors";
 import { agentModel } from "@/lib/agent/model";
-import { SYSTEM_PROMPT } from "@/lib/agent/prompt";
+import { SYSTEM_PROMPT, sessionLine } from "@/lib/agent/prompt";
 import { OUT_OF_SCOPE_REPLY, checkScope } from "@/lib/agent/scope";
 import { chargeTurn, subjectFor } from "@/lib/agent/usage";
 // The request shape lives outside this file: a Next route handler may only
@@ -226,7 +226,17 @@ export async function POST(request: Request) {
 
 	const result = streamText({
 		model: agentModel,
-		system: SYSTEM_PROMPT,
+		/**
+		 * W4. The constant prompt plus ONE runtime line: whether this reader is
+		 * signed in, and which market they are looking at.
+		 *
+		 * The model writes the follow-up chips under every reply, and without this
+		 * it was offering a guest "Show my positions" — a chip that leads straight
+		 * to the refusal `getUserPositions` returns for a session-less request.
+		 * The wallet is taken from the SESSION COOKIE, never from the body, and
+		 * truncated: the full address never enters model context.
+		 */
+		system: SYSTEM_PROMPT + sessionLine({ walletAddress: session?.walletAddress ?? null, asset }),
 		/**
 		 * K-4 item 2. The model is handed the messages MINUS the fields the
 		 * SERVER wrote on an earlier turn and the browser only echoes back. See

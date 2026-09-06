@@ -1,9 +1,20 @@
 "use client";
 
-import { Fragment, isValidElement, type ComponentProps, type ReactNode } from "react";
+import {
+	Children,
+	Fragment,
+	cloneElement,
+	createContext,
+	isValidElement,
+	useContext,
+	type ComponentProps,
+	type ReactElement,
+	type ReactNode,
+} from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { moneyClass, moneyParts } from "./agent-money";
 import { isMarketPath, marketLinkParts } from "./market-link";
 
 /**
@@ -26,10 +37,126 @@ import { isMarketPath, marketLinkParts } from "./market-link";
  * Styling lives in `apps/web/src/styles/agent.css` on `.agent-md`, using the
  * app's own tokens. `@tailwindcss/typography` is deliberately not used: its
  * greys and serifs contradict the one-accent design rule.
+ *
+ * W4 (owner 2026-09-06 12:4x, "can you like make the font some bold some diff
+ * colour etc?"): every money figure is wrapped in a `.agent-money` span and
+ * coloured by what the sentence around it MEANS — see `./agent-money.ts`, which
+ * holds the whole reading rule and is tested on real replies. Nothing else
+ * gains colour: the accent list stays closed and labels stay neutral.
  */
 
+/* ------------------------------------------------------------------ *
+ * Table context: which column a cell is in, and what that column is called
+ * ------------------------------------------------------------------ */
+
 /**
- * Every STRING child gets the market-link treatment, nothing else does.
+ * The header cells of the table being rendered, in order.
+ *
+ * A `td` needs its COLUMN HEADER to know whether "9.99 USDC" is a cost or a
+ * payout, and react-markdown hands a cell component no column index and no
+ * sibling information. Two contexts carry it: the table publishes its headers,
+ * and the row wraps each cell with its own position. Both render no DOM.
+ */
+const ColumnLabels = createContext<readonly string[]>([]);
+const ColumnAt = createContext<number>(-1);
+
+/** A hast node, as react-markdown hands it to a component. */
+interface HastNode {
+	readonly type?: string;
+	readonly tagName?: string;
+	readonly value?: string;
+	readonly children?: readonly HastNode[];
+}
+
+function hastText(node: HastNode | undefined): string {
+	if (node === undefined) return "";
+	if (node.type === "text") return node.value ?? "";
+	return (node.children ?? []).map(hastText).join("");
+}
+
+/** The first row's cell texts — GFM always emits the header row first. */
+function headerTexts(node: unknown): string[] {
+	const rows: HastNode[] = [];
+	const collect = (current: HastNode | undefined) => {
+		if (current === undefined || rows.length > 0) return;
+		if (current.tagName === "tr") {
+			rows.push(current);
+			return;
+		}
+		for (const child of current.children ?? []) collect(child);
+	};
+	collect(node as HastNode | undefined);
+	const first = rows[0];
+	if (first === undefined) return [];
+	return (first.children ?? [])
+		.filter((cell) => cell.tagName === "th" || cell.tagName === "td")
+		.map(hastText);
+}
+
+/* ------------------------------------------------------------------ *
+ * Inline rendering
+ * ------------------------------------------------------------------ */
+
+/**
+ * The text an element contributes as CONTEXT, without rewriting it.
+ *
+ * `**Max loss:** 9.99 USDC` puts the label inside a `<strong>` the walker below
+ * deliberately does not descend into, so without this the figure beside it
+ * would read as neutral. Read-only: nothing here returns an element.
+ */
+function plainText(node: ReactNode): string {
+	if (typeof node === "string") return node;
+	if (typeof node === "number") return String(node);
+	if (Array.isArray(node)) return node.map((child) => plainText(child as ReactNode)).join("");
+	if (isValidElement(node)) return plainText((node.props as { children?: ReactNode }).children);
+	return "";
+}
+
+/** Money runs of one prose fragment. */
+function moneySpans(text: string, label: string, keyPrefix: string): ReactNode {
+	const parts = moneyParts(text, label);
+	if (parts.length === 1 && parts[0]?.kind === "text") return text;
+	return parts.map((part, i) => {
+		const className = moneyClass(part.kind);
+		return className === null ? (
+			<Fragment key={`${keyPrefix}.m${i}`}>{part.text}</Fragment>
+		) : (
+			<span key={`${keyPrefix}.m${i}`} className={className}>
+				{part.text}
+			</span>
+		);
+	});
+}
+
+/**
+ * One string child: the market-link split first, then the money pass over the
+ * pieces that did NOT become links. A destination is never re-styled.
+ *
+ * `links: false` runs the money pass ALONE. That is the inside of a `strong` or
+ * an `em` — see `EMPHASIS` below — where the link grammar deliberately does not
+ * apply: "a URL wrapped in bold markers stays text" is a property this file has
+ * carried since D-N1 and a test pins the shape it protects.
+ */
+function renderString(text: string, keyPrefix: string, label: string, links: boolean): ReactNode {
+	if (!links) return moneySpans(text, label, keyPrefix);
+	let offset = 0;
+	return marketLinkParts(text).map((piece, i) => {
+		// The label for a figure is everything before it, nearest last: the row's
+		// own label, then whatever this string said before this piece.
+		const pieceLabel = `${label}\n${text.slice(0, offset)}`;
+		offset += piece.text.length;
+		return piece.href === null ? (
+			<Fragment key={`${keyPrefix}.${i}`}>{moneySpans(piece.text, pieceLabel, `${keyPrefix}.${i}`)}</Fragment>
+		) : (
+			<a key={`${keyPrefix}.${i}`} className="agent-md-link" href={piece.href}>
+				{piece.text}
+			</a>
+		);
+	});
+}
+
+/**
+ * Every STRING child gets the market-link and money treatment, nothing else does.
  *
  * D-N1 (lane D confirming pass). This used to return its children untouched
  * unless they were ONE string, and react-markdown hands a paragraph an ARRAY as
@@ -45,37 +172,69 @@ import { isMarketPath, marketLinkParts } from "./market-link";
  * `td`, `th`) does the same work when react-markdown renders them, and
  * descending into an arbitrary element would mean rewriting children this
  * component does not own — including `code`, where a URL is quoted text and
- * must stay text. A URL wrapped in bold markers therefore stays text; that is
+ * must stay text, and where an amount is a quoted amount and must not be
+ * coloured. A URL wrapped in bold markers therefore stays text; that is
  * deliberate, not an oversight.
+ *
+ * `seen` accumulates, IN ORDER, the plain text of everything already walked, so
+ * a label in an earlier sibling still governs the figure that follows it.
  */
-function linkStrings(node: ReactNode, keyPrefix: string): ReactNode {
+function walk(
+	node: ReactNode,
+	keyPrefix: string,
+	label: string,
+	seen: { text: string },
+	links = true,
+): ReactNode {
 	if (typeof node === "string") {
-		return marketLinkParts(node).map((piece, i) =>
-			piece.href === null ? (
-				<Fragment key={`${keyPrefix}.${i}`}>{piece.text}</Fragment>
-			) : (
-				<a key={`${keyPrefix}.${i}`} className="agent-md-link" href={piece.href}>
-					{piece.text}
-				</a>
-			),
-		);
+		const rendered = renderString(node, keyPrefix, `${label}\n${seen.text}`, links);
+		seen.text += node;
+		return rendered;
 	}
 	if (Array.isArray(node)) {
 		return node.map((child, i) => (
-			<Fragment key={`${keyPrefix}.${i}`}>{linkStrings(child as ReactNode, `${keyPrefix}.${i}`)}</Fragment>
+			<Fragment key={`${keyPrefix}.${i}`}>
+				{walk(child as ReactNode, `${keyPrefix}.${i}`, label, seen, links)}
+			</Fragment>
 		));
 	}
 	// A fragment is not an element the caller owns — it is a grouping, so its
 	// children are still this function's business.
 	if (isValidElement(node) && node.type === Fragment) {
 		const { children } = node.props as { children?: ReactNode };
-		return <Fragment key={keyPrefix}>{linkStrings(children, `${keyPrefix}.f`)}</Fragment>;
+		return <Fragment key={keyPrefix}>{walk(children, `${keyPrefix}.f`, label, seen, links)}</Fragment>;
 	}
+	/**
+	 * MEASURED on the free-model turns run through the dev server for this
+	 * change: the model writes its figures BOLD almost every time —
+	 * "**$5.73 per contract**", "the max loss you asked about is **5.00 USDC**".
+	 * Leaving every element alone therefore left the owner's ask half done: the
+	 * only figures that got colour were the unbolded ones (rendered probe before
+	 * this branch: TURN1 coloured `$10` and nothing else; TURN2 coloured the
+	 * plain `12.06 USDC` and left the bold `5.00 USDC` neutral).
+	 *
+	 * So emphasis, and ONLY emphasis, is descended into — with the LINK pass
+	 * switched off, so the pinned "a URL wrapped in bold markers stays text"
+	 * property is untouched. `code` and `pre` are deliberately absent: a quoted
+	 * amount is quoted text. Anything else is still returned as it came.
+	 */
+	if (isValidElement(node) && typeof node.type === "string" && EMPHASIS.has(node.type)) {
+		const props = node.props as { children?: ReactNode };
+		return cloneElement(
+			node as ReactElement<{ children?: ReactNode }>,
+			undefined,
+			walk(props.children, `${keyPrefix}.e`, label, seen, false),
+		);
+	}
+	if (isValidElement(node)) seen.text += plainText(node);
 	return node;
 }
 
-function LinkedText({ children }: { readonly children?: ReactNode }) {
-	return <>{linkStrings(children, "l")}</>;
+/** The inline elements whose text is still prose, so money inside them is money. */
+const EMPHASIS: ReadonlySet<string> = new Set(["strong", "em", "del"]);
+
+function LinkedText({ children, label = "" }: { readonly children?: ReactNode; readonly label?: string }) {
+	return <>{walk(children, "l", label, { text: "" })}</>;
 }
 
 /**
@@ -119,6 +278,39 @@ function Heading({ children }: ComponentProps<"h1">) {
 				<LinkedText>{children}</LinkedText>
 			</strong>
 		</p>
+	);
+}
+
+function MdTable({ node, children }: { node?: unknown; children?: ReactNode }) {
+	return (
+		<ColumnLabels.Provider value={headerTexts(node)}>
+			<table>{children}</table>
+		</ColumnLabels.Provider>
+	);
+}
+
+/** Publishes each cell's position so `MdCell` can look its column header up. */
+function MdRow({ children }: { children?: ReactNode }) {
+	let column = -1;
+	return (
+		<tr>
+			{Children.map(children, (child) => {
+				if (!isValidElement(child)) return child;
+				column += 1;
+				return <ColumnAt.Provider value={column}>{child}</ColumnAt.Provider>;
+			})}
+		</tr>
+	);
+}
+
+function MdCell({ children }: { children?: ReactNode }) {
+	const labels = useContext(ColumnLabels);
+	const at = useContext(ColumnAt);
+	const label = at < 0 ? "" : (labels[at] ?? "");
+	return (
+		<td>
+			<LinkedText label={label}>{children}</LinkedText>
+		</td>
 	);
 }
 
@@ -184,11 +376,13 @@ export function AgentMarkdown({ text }: { readonly text: string }) {
 					// the same treatment. A blockquote's children are normally a
 					// `<p>` element, which `p` above already handles; wrapping it
 					// costs nothing and covers the shape where they are not.
-					td: ({ children }) => (
-						<td>
-							<LinkedText>{children}</LinkedText>
-						</td>
-					),
+					//
+					// W4: a `td` also reads its COLUMN HEADER, published by `MdTable`
+					// and located by `MdRow`, so a "Max loss" column colours its own
+					// cells even when the cell says only a number.
+					table: MdTable,
+					tr: MdRow,
+					td: MdCell,
 					th: ({ children }) => (
 						<th>
 							<LinkedText>{children}</LinkedText>

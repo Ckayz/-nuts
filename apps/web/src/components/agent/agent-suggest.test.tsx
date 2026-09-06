@@ -124,3 +124,74 @@ test("after a fill the composer chip is a real link, not a message", () => {
 test("an empty chip set renders no row at all", () => {
 	expect(renderToStaticMarkup(<SuggestionRow chips={[]} onSend={() => {}} />)).toBe("");
 });
+
+/* ------------------------------------------------------------------ *
+ * W4, follow-up 1: the composer while an approval card is unanswered
+ * ------------------------------------------------------------------ */
+
+/** The shape `readUIMessageStream` produces for a suspended write tool. */
+const awaiting: Message = {
+	id: "m1",
+	role: "assistant",
+	parts: [
+		{ type: "text", text: "Here is the trade.", state: "done" },
+		{
+			type: "tool-requestOptionBookExecution",
+			state: "approval-requested",
+			// `approvalRequest` reads `approval.id`; the cast keeps the fixture
+			// the same object the SDK hands the component.
+			...({ approval: { id: "a1" }, input: {} } as object),
+		} as Part,
+	],
+};
+
+test("a new message cannot be sent while a card is waiting", () => {
+	// `.research/rfq/followups.md` item 1: sending here failed the whole turn
+	// with `AI_MissingToolResultsError` and the reader saw "could not complete".
+	const html = render([awaiting]);
+	console.log("GUARD", JSON.stringify(html.match(/Answer the card above first\./g)));
+	// The sentence is printed, not only used as a placeholder.
+	expect(html).toContain("Answer the card above first.");
+	// Both controls are out of action.
+	expect(html).toMatch(/<textarea[^>]*disabled=""/);
+	expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Send</);
+	// And the chip row is gone: pressing a chip sends a message too.
+	expect(pills(html)).toEqual([]);
+});
+
+test("with no card waiting the composer is live and the chips are back", () => {
+	const html = render([answer("Plain answer.")]);
+	expect(html).not.toContain("Answer the card above first.");
+	expect(html).not.toMatch(/<textarea[^>]*disabled=""/);
+	expect(pills(html).length).toBeGreaterThan(0);
+});
+
+test("an ANSWERED card releases the composer", () => {
+	// Once the user answers, the runtime moves the part to `approval-responded`
+	// (`ai@7.0.92` dist/index.d.ts), which `approvalRequest` does not match.
+	const answered: Message = {
+		id: "m1",
+		role: "assistant",
+		parts: [
+			{
+				type: "tool-requestOptionBookExecution",
+				state: "approval-responded",
+				...({ approval: { id: "a1" }, input: {} } as object),
+			} as Part,
+		],
+	};
+	const html = render([answered]);
+	expect(html).not.toContain("Answer the card above first.");
+	expect(html).not.toMatch(/<textarea[^>]*disabled=""/);
+});
+
+test("the person's own words are set apart from the reply", () => {
+	const html = render([
+		{ id: "u1", role: "user", parts: [{ type: "text", text: "What can I buy?", state: "done" }] },
+		answer("Here is one."),
+	]);
+	console.log("USER_BLOCK", JSON.stringify(html.match(/<div class="agent-user">/g)));
+	expect(html).toContain('<div class="agent-user">');
+	// Exactly one: the reply is not wrapped.
+	expect(html.match(/agent-user/g)).toHaveLength(1);
+});

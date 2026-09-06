@@ -54,14 +54,16 @@ describe("D-C2: the agent's copy is tagged", () => {
 	 * "sourceTagLines":[27,46,356]}` — markers existed in the file, none of them
 	 * covering these. A marker elsewhere in a file is not approval.
 	 */
-	test("agent-chat.tsx holds its three loose sentences in one tagged block", async () => {
+	test("agent-chat.tsx holds its loose sentences in one tagged block", async () => {
 		const source = await read("./agent-chat.tsx");
 		expect(source).toContain("const COPY = {");
-		// The reviewer's three sentences, each now a COPY entry.
+		// The reviewer's three sentences, each now a COPY entry, plus W4's
+		// composer guard — the one thing the chat says that is not a reply.
 		for (const phrase of [
 			"Live Thetanuts liquidity on Base. It prepares trades; your wallet approves them.",
 			"Ask about options, markets, or what a small budget could buy.",
 			"Something went wrong. Try sending that again.",
+			"Answer the card above first.",
 		]) {
 			expect(source).toContain(phrase);
 			// and reached through COPY, not printed as a bare literal in the JSX.
@@ -70,7 +72,10 @@ describe("D-C2: the agent's copy is tagged", () => {
 		// Every entry documented, same rule as trade-execution.tsx below.
 		const block = source.slice(source.indexOf("const COPY = {"), source.indexOf("} as const;"));
 		const entries = [...block.matchAll(/^\t(\w+):/gm)];
-		expect(entries.length).toBe(3);
+		// W4 raised this from 3 to 4 DELIBERATELY: `awaitingApproval` is the
+		// composer guard's sentence (follow-up 1). The fence's job is to make a
+		// new sentence a visible decision, which is exactly what happened here.
+		expect(entries.length).toBe(4);
 		let previousEnd = block.indexOf("{") + 1;
 		const undocumented: string[] = [];
 		for (const entry of entries) {
@@ -86,7 +91,9 @@ describe("D-C2: the agent's copy is tagged", () => {
 		// `COPY.error` is the fallback for anything the server did not word. The
 		// fence is unchanged in strength: a COPY reference still has to be the last
 		// thing before the rendered marker.
-		expect(source.match(/COPY\.\w+[^\n]*\} <TodoOwner \/>/g)?.length ?? 0).toBe(3);
+		// Four now: the guard prints its sentence with a marker as well, so the
+		// placeholder attribute is not the only place it appears.
+		expect(source.match(/COPY\.\w+[^\n]*\} <TodoOwner \/>/g)?.length ?? 0).toBe(4);
 	});
 
 	/**
@@ -165,6 +172,44 @@ describe("D-C2: the agent's copy is tagged", () => {
 		// D-n6: ordinary market links are body text, not the accent.
 		expect(css).toContain(".agent-md-link{color:var(--text);text-decoration:underline");
 		expect(css).not.toContain("agent-md-link{color:var(--accent");
+	});
+
+	/**
+	 * W4. A comment left OPEN in `agent.css` is silent: the browser recovers by
+	 * skipping to the next `}` and one rule disappears, with nothing in any test
+	 * output to say so. It happened while this file's sibling change was written
+	 * — a closer was left mid-block and `.agent-md-heading` stopped applying,
+	 * found
+	 * only by looking at a screenshot.
+	 *
+	 * Comments are stripped the way a CSS parser strips them — they do not nest,
+	 * so an opener runs to the FIRST closer — and what is left must be
+	 * brace-balanced and free of prose.
+	 */
+	test("agent.css has no comment left open", async () => {
+		const css = await Bun.file(new URL("../../styles/agent.css", import.meta.url)).text();
+		let code = "";
+		let at = 0;
+		for (;;) {
+			const open = css.indexOf("/*", at);
+			if (open === -1) {
+				code += css.slice(at);
+				break;
+			}
+			code += css.slice(at, open);
+			const close = css.indexOf("*/", open + 2);
+			// An unterminated comment swallows the rest of the file; the prose check
+			// below cannot see it, so it is its own failure.
+			expect(close, "unterminated comment").toBeGreaterThan(-1);
+			at = close + 2;
+		}
+		const opens = (code.match(/\{/g) ?? []).length;
+		const closes = (code.match(/\}/g) ?? []).length;
+		expect({ opens, closes }).toEqual({ opens: closes, closes });
+		// Prose that escaped a comment is the shape this test exists for.
+		for (const word of ["TODO-OWNER", "owner", "measured", "because"]) {
+			expect(code, word).not.toContain(word);
+		}
 	});
 
 	/**

@@ -9,11 +9,27 @@
  * rendered as one pre-wrapped paragraph, so `**BTC** $79,734.89` showed its
  * asterisks. */
 
-.agent-md{font-size:14px;line-height:1.55;color:var(--text)}
+/* W4 (owner 2026-09-06 12:4x: "can you like make the font some bold some diff
+   colour etc? so it easier and nicer to see"). Everything in a reply used to be
+   the same `--text` white, so bold was the only emphasis available and it did
+   not read as emphasis at all. The body is softened ONE step towards `--muted`
+   and `strong` keeps full `--text`, which is what makes bold pop — no new
+   weight, no new size, no new colour. */
+.agent-md{font-size:14px;line-height:1.55;color:color-mix(in oklab,var(--text) 82%,var(--muted))}
 .agent-md > * + *{margin-top:10px}
 .agent-md p{margin:0}
 .agent-md strong{font-weight:700;color:var(--text)}
 .agent-md em{font-style:italic}
+
+/* MONEY. The one thing in a reply that may carry colour (CLAUDE.md: "Colour
+   only on money"), in the two money tokens the rest of the app uses. Which
+   figures are money and which are loss or gain is decided in
+   `components/agent/agent-money.ts`, on the sentence around them; a percentage
+   is deliberately left alone, matching the mockup's rule that the percent
+   beside a P&L is neutral. Money with no label is emphasised, not coloured. */
+.agent-md .agent-money{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.agent-md .agent-money--loss{color:var(--loss)}
+.agent-md .agent-money--gain{color:var(--gain)}
 
 /* The model writes headings because it was given a markdown prompt; they are
    sized down to a label rather than competing with the page's own headings.
@@ -21,9 +37,16 @@
    /m/<asset> two of them. `agent-markdown.tsx` now rewrites every reply heading
    to <p class="agent-md-heading"><strong>, so this selector keeps the SAME
    appearance for that paragraph; the element selectors are kept beside it so
-   nothing regresses if a heading element ever reaches the markup again. */
+   nothing regresses if a heading element ever reaches the markup again.
+
+   W4: sized down again to a real label — 12px, uppercase-scale letter-spacing —
+   so a heading reads as a divider between sections rather than as another
+   sentence. TODO-OWNER: the colour. `--muted` is used here because the accent
+   list in CLAUDE.md is closed and prose is not on it; `--accent-lift` is the
+   alternative the owner may prefer (its token comment calls it contrast-safe as
+   TEXT), and that is the owner's call, not this file's. */
 .agent-md h1,.agent-md h2,.agent-md h3,.agent-md h4,.agent-md .agent-md-heading{
-  font-size:13px;font-weight:700;letter-spacing:.01em;color:var(--muted);
+  font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--muted);
   margin:14px 0 0;text-transform:none}
 .agent-md .agent-md-heading strong{color:inherit;font-weight:inherit}
 
@@ -47,11 +70,27 @@
   margin:0;padding-left:12px;border-left:2px solid var(--line);color:var(--muted)}
 .agent-md hr{border:0;border-top:1px solid var(--line-soft);margin:14px 0}
 
+/* A table is a comparison, so it is read column by column: the header is a
+   label (small, letter-spaced, muted), the FIRST column is the row's name and
+   keeps full `--text`, and a cell that is money is right-aligned so the digits
+   line up under each other. Hairlines, never rules. */
 .agent-md table{border-collapse:collapse;width:100%;font-size:13px}
 .agent-md th,.agent-md td{
   text-align:left;padding:7px 10px;border-bottom:1px solid var(--line-soft)}
-.agent-md th{color:var(--muted);font-weight:600}
+.agent-md th{
+  color:var(--muted);font-weight:600;font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;white-space:nowrap}
 .agent-md td{font-variant-numeric:tabular-nums}
+.agent-md td:first-child{font-weight:600;color:var(--text)}
+.agent-md td:has(.agent-money){text-align:right;white-space:nowrap}
+.agent-md tbody tr:last-child > *{border-bottom:0}
+
+/* A conversation reads as turns only if the person's own words are set apart.
+   The reply keeps the page background; the question sits in the surface tint
+   the rest of the app uses for an inset panel. */
+.agent-user{
+  background:var(--surface2);border:1px solid var(--line-soft);
+  border-radius:var(--r-panel);padding:10px 14px;font-size:14px;line-height:1.55}
 
 /* The ONE destination the agent is allowed to produce: an app-relative market
    path. Everything else the model writes stays text (see market-link.ts).

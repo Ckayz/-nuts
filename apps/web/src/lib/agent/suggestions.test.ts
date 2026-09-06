@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+	fallbackSuggestions,
 	MAX_SUGGESTION_LENGTH,
 	MAX_SUGGESTIONS,
 	SUGGEST_MARKER,
@@ -373,5 +374,123 @@ describe("the RFQ starter", () => {
 		console.log("RFQ_STARTER", JSON.stringify(chip));
 		expect(chip?.send).toContain("ETH");
 		expect(chip?.send).toContain("order book does not have");
+	});
+});
+
+/* ------------------------------------------------------------------ *
+ * W4 (owner 2026-09-06 12:4x): the row must MOVE, and must know the session
+ * ------------------------------------------------------------------ */
+
+describe("the deterministic row rotates", () => {
+	test("two consecutive turns never show the identical fallback row", () => {
+		const rows = [0, 1, 2, 3].map((turn) => fallbackSuggestions({ turn }).map((c) => c.label));
+		console.log("FALLBACK_ROTATION", JSON.stringify(rows));
+		for (let i = 1; i < rows.length; i++) {
+			expect(JSON.stringify(rows[i]), `turn ${i}`).not.toBe(JSON.stringify(rows[i - 1]));
+		}
+		// The anchor is the same every turn on purpose: it is the one chip that
+		// names the market on screen.
+		for (const row of rows) expect(row[0]).toBe("What can I trade right now?");
+	});
+
+	test("the same holds for a tool-derived row", () => {
+		const priced = [done("tool-previewOptionBookTrade", { executable: true, instrument: { asset: "ETH" } })];
+		const rows = [0, 1, 2].map((turn) => suggestionsFor(priced, { turn }).map((c) => c.label));
+		console.log("PRICED_ROTATION", JSON.stringify(rows));
+		expect(JSON.stringify(rows[0])).not.toBe(JSON.stringify(rows[1]));
+		expect(JSON.stringify(rows[1])).not.toBe(JSON.stringify(rows[2]));
+	});
+
+	test("a priced trade ALWAYS offers to move it forward, whatever the rotation", () => {
+		const priced = [done("tool-previewOptionBookTrade", { executable: true, instrument: { asset: "ETH" } })];
+		for (let turn = 0; turn < 9; turn++) {
+			const labels = suggestionsFor(priced, { turn }).map((c) => c.label);
+			expect(labels, `turn ${turn}`).toContain("Prepare this trade");
+			expect(labels.length, `turn ${turn}`).toBeLessThanOrEqual(MAX_SUGGESTIONS);
+		}
+	});
+
+	test("a turn that is not a number, or negative, still produces a row", () => {
+		for (const turn of [-1, -7, Number.NaN, Number.POSITIVE_INFINITY]) {
+			const chips = fallbackSuggestions({ turn });
+			expect(chips.length, String(turn)).toBeGreaterThan(0);
+			expect(new Set(chips.map((c) => c.label)).size).toBe(chips.length);
+		}
+	});
+});
+
+describe("the row knows whether anyone is signed in", () => {
+	test("signed out, nothing wallet-only is ever offered", () => {
+		const offered = new Set<string>();
+		for (let turn = 0; turn < 12; turn++) {
+			for (const chip of fallbackSuggestions({ turn, asset: "ETH" })) offered.add(chip.label);
+			for (const chip of suggestionsFor(
+				[done("tool-getMarketData", { assets: [{ asset: "ETH" }] })],
+				{ turn },
+			)) {
+				offered.add(chip.label);
+			}
+		}
+		console.log("SIGNED_OUT", JSON.stringify([...offered]));
+		expect([...offered]).not.toContain("Show my positions");
+		expect([...offered]).not.toContain("What am I risking right now?");
+	});
+
+	test("signed in, the positions chips join the pool", () => {
+		const offered = new Set<string>();
+		for (let turn = 0; turn < 12; turn++) {
+			for (const chip of fallbackSuggestions({ turn, signedIn: true })) offered.add(chip.label);
+		}
+		console.log("SIGNED_IN", JSON.stringify([...offered]));
+		expect([...offered]).toContain("Show my positions");
+		expect([...offered]).toContain("What am I risking right now?");
+	});
+
+	test("after a positions list, one chip is per position and one is protection", () => {
+		const chips = suggestionsFor(
+			[
+				done("tool-getUserPositions", {
+					signedIn: true,
+					positions: [{ asset: "ETH" }, { asset: "BTC" }],
+				}),
+			],
+			{ signedIn: true },
+		);
+		const labels = chips.map((c) => c.label);
+		console.log("POSITIONS_CHIPS", JSON.stringify(labels));
+		expect(labels).toContain("Show my positions");
+		expect(labels.some((l) => l.includes("Protect my ETH"))).toBe(true);
+	});
+
+	test("a signed-out positions result offers nothing wallet-only", () => {
+		const chips = suggestionsFor([done("tool-getUserPositions", { signedIn: false })]);
+		expect(chips.map((c) => c.label)).not.toContain("Show my positions");
+	});
+
+	test("the RFQ chip is offered where the factory prices one, and only there", () => {
+		const eth = new Set<string>();
+		const sol = new Set<string>();
+		for (let turn = 0; turn < 12; turn++) {
+			for (const chip of fallbackSuggestions({ turn, asset: "ETH" })) eth.add(chip.label);
+			for (const chip of fallbackSuggestions({ turn, asset: "SOL" })) sol.add(chip.label);
+		}
+		expect([...eth]).toContain("Ask for a custom ETH option");
+		expect([...sol].some((l) => l.includes("custom"))).toBe(false);
+	});
+
+	test("a preview the tool refused never offers to prepare it, at any turn", () => {
+		const refused = [done("tool-previewOptionBookTrade", { executable: false, reason: "unproven units" })];
+		for (let turn = 0; turn < 9; turn++) {
+			const chips = suggestionsFor(refused, { turn });
+			expect(chips.length, `turn ${turn}`).toBeGreaterThan(0);
+			expect(chips.map((c) => c.label), `turn ${turn}`).not.toContain("Prepare this trade");
+		}
+	});
+
+	test("chipsForTurn carries the turn and the session down to the fallback", () => {
+		const first = chipsForTurn({ parts: [{ type: "text", text: "Plain." }], turn: 0, signedIn: true });
+		const second = chipsForTurn({ parts: [{ type: "text", text: "Plain." }], turn: 1, signedIn: true });
+		console.log("TURN_CARRIED", JSON.stringify([first.map((c) => c.label), second.map((c) => c.label)]));
+		expect(JSON.stringify(first)).not.toBe(JSON.stringify(second));
 	});
 });

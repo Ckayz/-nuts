@@ -128,6 +128,38 @@ describe("D-C2: the agent's copy is tagged", () => {
 	});
 
 	/**
+	 * The chip copy lives in `lib/agent/suggestions.ts`, not in a component: the
+	 * same sentence is both a label and the message pressing it sends, and both
+	 * the chat and the market panel render it. It gets the same fence as the
+	 * components — every entry documented as the owner's, or citing the PRD
+	 * section that already words it.
+	 *
+	 * Written when the row became model-driven (owner 2026-09-06 05:4x): that
+	 * added the starters, the never-empty fallback and the post-fill chips, and
+	 * a block this size is exactly where an untagged sentence hides.
+	 */
+	test("every chip sentence is tagged, or quotes the PRD", async () => {
+		const source = await Bun.file(new URL("../../lib/agent/suggestions.ts", import.meta.url)).text();
+		const block = source.slice(source.indexOf("const COPY = {"), source.indexOf("} as const;"));
+		const entries = [...block.matchAll(/^\t(\w+):/gm)];
+		expect(entries.length).toBeGreaterThan(25);
+		const undocumented: string[] = [];
+		let previousEnd = block.indexOf("{") + 1;
+		for (const entry of entries) {
+			const at = entry.index ?? 0;
+			const gap = block.slice(previousEnd, at);
+			if (!gap.includes("TODO-OWNER") && !gap.includes("PRD 10.7")) undocumented.push(entry[1] ?? "?");
+			previousEnd = at + entry[0].length;
+		}
+		expect(undocumented).toEqual([]);
+		// And no sentence is built outside the block: every chip label and every
+		// `send` in the file reaches through COPY.
+		const afterBlock = source.slice(source.indexOf("} as const;"));
+		const bareChips = [...afterBlock.matchAll(/(?:label|send):\s*(?:"|`)/g)];
+		expect(bareChips.map((m) => afterBlock.slice(m.index, (m.index ?? 0) + 50))).toEqual([]);
+	});
+
+	/**
 	 * EVERY top-level entry carries its OWN `TODO-OWNER` comment, so the gap
 	 * between one entry and the next must contain one. A looser "somewhere
 	 * above" rule let a new entry inherit its neighbour's tag — measured, so the

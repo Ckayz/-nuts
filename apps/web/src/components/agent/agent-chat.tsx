@@ -18,7 +18,14 @@ import {
 import "@/styles/agent.css";
 import { TodoOwner } from "@/components/primitives";
 import { agentErrorMessage } from "@/lib/agent/errors";
-import { suggestionsFor } from "@/lib/agent/suggestions";
+import {
+	type Chip,
+	chipsForTurn,
+	isLinkChip,
+	postFillSuggestions,
+	splitSuggestionTrailer,
+	starterSuggestions,
+} from "@/lib/agent/suggestions";
 import { AgentMarkdown } from "./agent-markdown";
 import { ToolActivity } from "./tool-activity";
 import { TradeApproval } from "./trade-approval";
@@ -47,18 +54,6 @@ const COPY = {
 	 */
 	error: "Something went wrong. Try sending that again.",
 } as const;
-
-/**
- * D-C2. The four prompts offered on an empty conversation. Nobody's but this
- * file's: the mockup draws no agent view. TODO-OWNER: all four, and whether
- * there should be four at all.
- */
-const STARTERS = [
-	"What can I trade right now?",
-	"I think ETH goes up this week. I have $10.",
-	"What is a put, in plain words?",
-	"Show me the simplest bet you have on BTC.",
-];
 
 /**
  * The opening message when the page was reached from a post's "Explain".
@@ -140,6 +135,44 @@ export function approvalRequest(part: unknown): { id: string; input: Record<stri
 	return { id, input };
 }
 
+/**
+ * The follow-up row under a finished turn.
+ *
+ * Exported and dumb so a test can render it directly: the post-fill chips are
+ * reachable only after a real recorded fill, which no unit test can produce.
+ *
+ * Two kinds of chip. A `send` chip puts its own text through the ordinary
+ * input, so every guardrail runs on it as if it had been typed. A `href` chip
+ * navigates instead — today only the composer, prefilled with the position.
+ * `.pill` sets every property that governs the look (`index.css`), and the
+ * global `a{color:inherit;text-decoration:none}` reset means an anchor needs
+ * nothing extra to match the buttons beside it.
+ */
+export function SuggestionRow({
+	chips,
+	onSend,
+}: {
+	readonly chips: readonly Chip[];
+	readonly onSend: (text: string) => void;
+}) {
+	if (chips.length === 0) return null;
+	return (
+		<div className="pills agent-suggest">
+			{chips.map((chip) =>
+				isLinkChip(chip) ? (
+					<a key={chip.label} className="pill" href={chip.href}>
+						{chip.label}
+					</a>
+				) : (
+					<button type="button" key={chip.label} className="pill" onClick={() => onSend(chip.send)}>
+						{chip.label}
+					</button>
+				),
+			)}
+		</div>
+	);
+}
+
 export function AgentChat({
 	thesisId = null,
 	asset = null,
@@ -161,6 +194,13 @@ export function AgentChat({
 	readonly variant?: "page" | "panel";
 }) {
 	const [input, setInput] = useState("");
+	/**
+	 * The position a fill in this conversation created, and the message that
+	 * carried it. Client state: `TradeExecution` learns the id from the recording
+	 * call, and nothing about it ever reaches the model — which is why the two
+	 * chips it earns are deterministic rather than proposed in a trailer.
+	 */
+	const [lastFill, setLastFill] = useState<{ positionId: string; messageId: string } | null>(null);
 	const { address } = useAccount();
 
 	// Read through a ref so the transport, created once, always sees the current
@@ -269,16 +309,19 @@ export function AgentChat({
 						<p className="text-muted-foreground text-sm">
 							{COPY.emptyDescription} <TodoOwner />
 						</p>
+						{/* Asset-aware where the panel is about one market: a starter
+						    naming some other asset there is a worse prompt than one
+						    naming the market on screen. */}
 						<div className="pills">
-							{STARTERS.map((s) => (
+							{starterSuggestions({ asset }).map((chip) => (
 								<button
 									type="button"
-									key={s}
+									key={chip.label}
 									className="pill"
-									onClick={() => submit(s)}
+									onClick={() => submit(chip.send)}
 									disabled={busy}
 								>
-									{s}
+									{chip.label}
 								</button>
 							))}
 						</div>
@@ -296,7 +339,18 @@ export function AgentChat({
 								// prompt is written in markdown, and as plain text the asterisks showed.
 								// AgentMarkdown applies marketLinkParts to every text node, so the
 								// "only /m/ becomes a link" rule survives the change.
-								return <AgentMarkdown key={i} text={part.text} />;
+								//
+								// The reply's LAST line is the follow-up trailer the prompt asks
+								// for (`SUGGEST: [...]`), which is chips, not prose: it is cut here
+								// so it never renders. `state` is `TextUIPart.state`
+								// (`ai@7.0.92` dist/index.d.ts:1870-1881, optional
+								// "streaming" | "done"); it is treated as streaming while this
+								// message is the one being written, because a part that never
+								// carries the field would otherwise flash half a JSON array.
+								const streaming =
+									part.state === "streaming" || (busy && message.id === messages[messages.length - 1]?.id);
+								const { body } = splitSuggestionTrailer(part.text, streaming);
+								return <AgentMarkdown key={i} text={body} />;
 							}
 							// The runtime suspended a write tool and is waiting for the user.
 							//
@@ -334,7 +388,19 @@ export function AgentChat({
 								const out = (part as { output?: unknown }).output as
 									| (PreparedTrade & { prepared?: boolean })
 									| undefined;
-								if (out?.prepared === true) return <TradeExecution key={i} trade={out} />;
+								if (out?.prepared === true) {
+									return (
+										<TradeExecution
+											key={i}
+											trade={out}
+											// A confirmed fill is client state inside that component, not
+											// a message part, so no model turn can propose what comes
+											// next. The message id is remembered with it so the chips
+											// disappear once the conversation moves on.
+											onDone={(positionId) => setLastFill({ positionId, messageId: message.id })}
+										/>
+									);
+								}
 								return <ToolActivity key={i} part={part} />;
 							}
 
@@ -346,28 +412,27 @@ export function AgentChat({
 					</article>
 				))}
 
-				{/* Follow-ups for the newest assistant turn only, derived in code from
-				    the tool results that turn actually produced, so a chip can never
-				    name an instrument the agent did not just see. */}
+				{/* Follow-ups for the newest assistant turn only.
+				    Owner 2026-09-06 05:4x: something to press on EVERY turn. First
+				    choice is what the model itself proposed in its trailer; under it
+				    sit the tool-derived chips (which can only name an instrument the
+				    agent just saw) and a generic set, so a plain explanation or the
+				    out-of-scope redirect is no longer a dead end. */}
 				{(() => {
 					if (busy) return null;
 					const last = messages[messages.length - 1];
 					if (last === undefined || last.role !== "assistant") return null;
-					const chips = suggestionsFor(last.parts as never);
-					if (chips.length === 0) return null;
 					return (
-						<div className="pills agent-suggest">
-							{chips.map((chip) => (
-								<button
-									type="button"
-									key={chip.label}
-									className="pill"
-									onClick={() => submit(chip.send)}
-								>
-									{chip.label}
-								</button>
-							))}
-						</div>
+						<SuggestionRow
+							chips={[
+								// A fill is worth more than a follow-up question, so it leads.
+								...(lastFill !== null && lastFill.messageId === last.id
+									? postFillSuggestions(lastFill.positionId)
+									: []),
+								...chipsForTurn({ parts: last.parts as never, asset }),
+							]}
+							onSend={submit}
+						/>
 					);
 				})()}
 

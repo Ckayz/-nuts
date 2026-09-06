@@ -25,7 +25,20 @@
 /**
  * Binance's kline endpoint. Public, unauthenticated, no key. Weight 2 per call
  * against a 6,000/minute budget, so the cache window below is generous.
- * VERIFIED 2026-09-06: every live Thetanuts asset has a USDT pair here.
+ *
+ * MEASURED 2026-09-06 23:34 UTC, one request per pair against this endpoint
+ * (`?interval=1h&limit=1`), for ALL EIGHT symbols `buildPriceFeedSymbolMap(8453)`
+ * configures on Base — read from the SDK the same day, not from a doc:
+ * ETH BTC SOL DOGE XRP BNB PAXG AVAX. Every one returned a candle row:
+ *
+ *   BTCUSDT  [[1788649200000,"79783.99000000",...
+ *   ETHUSDT  [[1788649200000,"2480.98000000",...
+ *   SOLUSDT  [[1788649200000,"103.38000000",...
+ *   BNBUSDT  [[1788649200000,"770.49000000",...
+ *   AVAXUSDT [[1788649200000,"7.60200000",...
+ *   XRPUSDT  [[1788649200000,"1.41440000",...
+ *   DOGEUSDT [[1788649200000,"0.09010000",...
+ *   PAXGUSDT [[1788649200000,"4432.75000000",...
  */
 const BINANCE_KLINES = "https://api.binance.com/api/v3/klines";
 
@@ -79,6 +92,17 @@ export const CHART_WINDOW_LABEL = "one week of hourly candles";
  * An allowlist, deliberately: the asset arrives from a URL segment, and an
  * unmapped value must never be concatenated into an outbound request. An asset
  * Thetanuts lists but Binance does not price simply has no chart.
+ *
+ * K-2 (pass-4 D4-m4). DOGE and PAXG were missing and the omission was explained
+ * as "Binance does not price" them, which is false: both pairs were requested
+ * and both returned candles (the measurement is in the comment above the
+ * endpoint). They have no live orders today, so nothing rendered differently —
+ * they would simply have lost their chart, silently, the day they got
+ * liquidity. All eight configured Base feeds are mapped now, so this list and
+ * `buildPriceFeedSymbolMap(8453)` cover the same assets.
+ *
+ * `app/api/klines/[asset]/route.ts` guards the proxy with `binancePair()` — this
+ * map — and keeps no second list of its own.
  * TODO-OWNER: the quote currency, if a venue ever needs a different one.
  */
 const PAIRS: Readonly<Record<string, string>> = {
@@ -88,6 +112,8 @@ const PAIRS: Readonly<Record<string, string>> = {
 	BNB: "BNBUSDT",
 	AVAX: "AVAXUSDT",
 	XRP: "XRPUSDT",
+	DOGE: "DOGEUSDT",
+	PAXG: "PAXGUSDT",
 };
 
 export function binancePair(asset: string): string | null {

@@ -87,7 +87,12 @@ export function SearchList({ id, optionPrefix, results, selected, listRef, onCho
 				{group.rows.map(row => { const current = index++; return <Link key={row.href} href={row.href} prefetch={false}
 					role="option" id={`${optionPrefix}-option-${current}`} aria-selected={selected === current}
 					tabIndex={-1} className="search-option" onMouseDown={event => event.preventDefault()} onClick={onChoose}>
-					<Avatar asset={row.asset} seed={row.avatarSeed} initials={row.initials} tone={row.tone} /><span><strong>{row.displayName}</strong><small>{row.label}</small></span>
+					<Avatar asset={row.asset} seed={row.avatarSeed} initials={row.initials} tone={row.tone} />{/* K-2 (pass-4 D4-m9): the second line is dropped when it repeats the first.
+					    A market's `name` is its SYMBOL in database mode — the Thetanuts SDK
+					    publishes ticker symbols and no full names (`lib/market/summaries.ts`),
+					    so these rows read "ETH" over "ETH". Inventing a name would be worse;
+					    printing it twice is noise. A person's "@handle" always differs, and a
+					    fixture market ("Bitcoin" over "BTC") still shows both. */}<span><strong>{row.displayName}</strong>{row.label === row.displayName ? null : <small>{row.label}</small>}</span>
 				</Link>; })}
 			</div>)}
 		</div>

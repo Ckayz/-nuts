@@ -449,12 +449,28 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 .stats .tile+.tile{padding-left:13px;border-left:1px solid var(--line)}
 
 /* ---------- structures table ---------- */
+/* K-2 (pass-4 D4-M1). CORRECTION to the comment that stood here: it said a
+   600px floor, unlike a 640px one, kept the book from scrolling sideways "at
+   the WIDEST layout". A floor cannot do that. The cells below are
+   `white-space:nowrap`, so the CONTENT sets the width and `min-width` only
+   matters when the content is narrower than the floor. MEASURED on /m/eth with
+   the real book (127 structures) at this commit: `.tbl-wrap` scrollWidth 794px
+   against clientWidth 634 at 1440 and at 1600, 423 at 1181, 738 at 768, 360 at
+   390 — a horizontal scrollbar at every width except 1000 (single column, 950).
+   The Select control sat at x 1111-1174 while the scroller ended at 1035: the
+   ticket's only input was off screen on a normal laptop.
+
+   So the Select column is PINNED to the scroller's right edge and carries a
+   hairline on the side the hidden columns slide under, which is also the scroll
+   affordance the wrap had none of (`mask-image`, `box-shadow`, `background-image`
+   were all `none`). Its background repeats the row's own so nothing shows
+   through: `--surface` is what the table sits on (measured: the nearest painted
+   ancestor is `.card.tabcard`, rgb(18,17,26) = `--surface`), `--surface2` on
+   hover, and the selected row's `--accent-tint-soft` is 8% alpha so it is
+   layered OVER `--surface` rather than replacing it.
+   Sticky cells need `border-collapse:separate`, which the rule below already
+   sets for the row radii. */
 .tbl-wrap{overflow-x:auto}
-/* The floor was 640px. The centre column is 636px at the 1392px shell now that
-   the left rail is fomo's 340px, so a 640px floor put a horizontal scrollbar
-   under the book at the WIDEST layout. 600px is a floor, not a width: the cells
-   are `white-space:nowrap`, so the table still grows to its own content and
-   still scrolls inside `.tbl-wrap` on a narrow screen. */
 .tbl{width:100%;min-width:600px;border-collapse:separate;border-spacing:0}
 .tbl th{text-align:left;font-size:12.5px;font-weight:600;color:var(--muted);padding:0 9px 10px;white-space:nowrap}
 .tbl td{padding:12px 9px;font-size:13.5px;font-weight:500;border-top:1px solid var(--line-soft);white-space:nowrap}
@@ -466,6 +482,13 @@ a.tcard:hover{border-color:#343443;background:#1f1f29}
 .tbl tbody tr[aria-selected="true"]{background:var(--accent-tint-soft)}
 .tbl tbody tr[aria-selected="true"] td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 .tbl .struct{font-weight:700;color:var(--text)}
+/* The one cell allowed to wrap: strikes are the widest string in the row and the
+   only one that reads correctly on two lines. TODO-OWNER: the 120px floor. */
+.tbl td.strikes{white-space:normal;min-width:120px}
+.tbl .sel-col{position:sticky;right:0;background-color:var(--surface);border-left:1px solid var(--line)}
+.tbl tbody tr:hover .sel-col{background-color:var(--surface2)}
+.tbl tbody tr[aria-selected="true"] .sel-col{background-color:var(--surface);
+  background-image:linear-gradient(var(--accent-tint-soft),var(--accent-tint-soft))}
 .sel-btn{height:28px;padding:0 11px;border-radius:var(--r-chip);font-size:12.5px;font-weight:600;
   color:var(--muted);border:1px solid var(--line);transition:color .16s var(--ease),border-color .16s var(--ease)}
 .sel-btn:hover{color:var(--text);border-color:#3a3a48}

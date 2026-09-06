@@ -45,6 +45,12 @@ The top-right wallet chip toggles between the connected and signed-out states wh
   bar, and the 2px cut-outs behind the three stacked avatars on the "new theses" button.
 - **Manrope only**, five weights, `tabular-nums` on every number. No mono font.
 - **No charts.** Thetanuts has no price history, so the product never draws one.
+  - **AMENDED 2026-09-06** (owner: the chart stays only if its price line comes from a
+    real, named source). The market page carries ONE chart. Its series is Binance spot
+    klines read through the app's own `/api/klines/[asset]` proxy, and the page prints
+    where they came from under it: "Binance spot, hourly. Thetanuts settles on a
+    Chainlink TWAP, which can differ." Nothing else in the product draws a chart, and
+    no series is ever synthesised.
 - No gradients, no glassmorphism, no ticker tape, no icon rail.
 
 ## Shape decided 2026-09-06 (owner defaults 3, 5, 6, 7)
@@ -70,6 +76,25 @@ The teammate's shipped feed design is the spec, and this file was updated to mat
   traders card in the single stacked column directly under the posts: the nav's
   "Leaderboard" is an in-page anchor to it, and the blanket `.col-left{display:none}` had
   been scrolling to something hidden. Every other page's left rail is still hidden.
+
+## Amended 2026-09-06 (owner default 1: Bull/Bear name the ASSET's direction)
+
+- **The market ticket's two buttons are relabelled per instrument.** The `#market`
+  view has a PUT SPREAD selected, and buying a put is a bear position, so its ticket
+  now reads `Bull · sell` / `Bear · buy` and its explanatory line reads "Bear buys the
+  spread and pays premium. Bull sells it and posts collateral." — the same two words
+  the running app printed on a selected BTC put spread that day, in the app's order.
+  A call or call spread keeps `Bull · buy` / `Bear · sell`.
+- **KNOWN DRIFT, not yet amended** (needs the owner's word, it is copy): six other
+  places in `thesis-fun-mockup.html` still call a bought PUT or put spread "Bull" —
+  the position rows at lines 785, 791, 1009 and 1297, the position page's `Side` value
+  at line 1038, and its "Trade the same structure" line at 1068. Under this same
+  default each of those reads Bear. (Line 1301 is a bought CALL spread and stays Bull.)
+  MEASURED 2026-09-06 against the running app for a real bought ETH put: the profile
+  and portfolio ROWS print "Bear · $1 risked · …" and the position page's `<title>` is
+  "Bear · ETH put", so the app already disagrees with lines 785/791/1009/1297. Line
+  1038 has no counterpart at all — the app's position details list a `Direction` row
+  reading "Long the structure (bought)", never a `Side · Bull`.
 
 ## Content
 

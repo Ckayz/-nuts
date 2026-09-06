@@ -68,6 +68,14 @@ export async function readMarketSummaries(
 		const book = await live();
 		if ("error" in book) return { markets: [], unavailable: true, navMarketSlug: undefined };
 		const { amount } = await import("../display");
+		// K-2 (pass-4 D4-m9): `name` IS the symbol here, and that is not a
+		// placeholder to be improved on — the Thetanuts SDK publishes ticker
+		// symbols and nothing else (`buildPriceFeedSymbolMap(8453)` returns
+		// `{address: "ETH"}`), so there is no full name to read and inventing one
+		// would be a lie about a market. The surfaces that print a name over a
+		// symbol drop the second line when the two are equal:
+		// `components/shell/search.tsx` and `components/shell/feed-rail.tsx`.
+		// Mock fixtures carry real names ("Bitcoin" over "BTC") and still show both.
 		const markets = book.assets.map(asset => ({
 			slug: asset.slug, asset: asset.asset, name: asset.asset,
 			spotUsd: amount(asset.spotUsd?.toFixed(2) ?? null), changeLabel: "", changeClass: "",

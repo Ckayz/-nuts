@@ -3,7 +3,7 @@ import { MarketList, PositionList } from "@/components/feed/thesis-list";
 import { Leaderboard } from "@/components/creator/leaderboard";
 import { FarcasterRail } from "@/components/shell/farcaster-rail";
 import { PageFrame } from "@/components/shell/page-frame";
-import { TodoOwner } from "@/components/primitives";
+import { TodoOwner, TodoOwnerNote } from "@/components/primitives";
 import { farcasterRail } from "@/lib/farcaster/casts";
 import { discoverData } from "@/lib/page-data";
 import { marketSummariesData } from "@/lib/market/summaries";
@@ -39,10 +39,9 @@ export default async function DiscoverPage() {
 							<span className="x">1W</span>
 						</div>
 						<Leaderboard entries={leaderboard} signedIn={signedIn} databaseMode={databaseMode} />
-						<div className="card-f">
-							P&amp;L is 1W, from onchain fills and settlements. Ranking formula
-							<TodoOwner />
-						</div>
+						{/* K-2 (CL-10): the first sentence is real copy; "Ranking formula"
+						    is the open question and is hidden with its marker. */}
+						<div className="card-f">P&amp;L is 1W, from onchain fills and settlements.<TodoOwnerNote> Ranking formula</TodoOwnerNote></div>
 					</section>
 					{/* Owner decision 7 (2026-09-06): at <=900px the left column stays
 					    in the flow so the Top traders card above reaches a phone.

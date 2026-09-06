@@ -331,17 +331,48 @@
 	position: relative;
 }
 
-/* Flatten only layout wrappers: the same mounted ticket moves between the
-   desktop rail and the slot immediately after the market header. MarketRail
-   returns siblings, so its post panel remains with the other trailing panels. */
-@media (max-width:1180px) {
-	.ticket-first > .col-main,
-	.ticket-first > .col-right,
-	.ticket-first > .col-right > .sticky { display: contents; }
-	.ticket-first > .col-main > * { order: 3; min-width: 0; }
-	.ticket-first > .col-main > :first-child { order: 1; }
-	.ticket-first > .col-right > .sticky > * { order: 4; min-width: 0; }
-	.ticket-first > .col-right > .sticky > .ticket { order: 2; }
+/* K-2 (pass-4 D4-M2, second round). The ticket used to be moved with
+   `display:contents` + `order` on `.col-main` and `.col-right` at <=1180px.
+   That is a VISUAL move only: the ticket stayed inside `.col-right` in the DOM,
+   so the money-path input a visitor sees second was reached by the keyboard —
+   and read by a screen reader — after all 131 focusables of the centre column,
+   a 6,868px backward jump measured on /m/eth at 1000px.
+
+   The ticket is its own slot now (`.col-ticket`, built by
+   `components/shell/stacked-columns.tsx`), a direct child of `.cols` at EVERY
+   width, so the stacked DOM order is simply mainLead · ticket · main · right ·
+   left and needs no `order` rule at all. Nothing below 1181px is declared here
+   any more; the single stacked column follows the DOM.
+
+   At >=1181px the mockup's three columns are restored by placement: the centre
+   column is ONE grid item spanning both rows (so the market header and the
+   chart stay flush, with no gap under a header that is shorter than the
+   ticket), and column 3 carries the ticket above the other panels. MEASURED
+   before and after on /m/eth at 1440: ticket 961px tall at y 205, panels
+   starting at y 1180 — the same pixels the single `.sticky.stack` produced,
+   which is why `row-gap` is the 14px `.stack` used and not the 12px column gap.
+
+   The `.sticky` wrapper is kept exactly where it was. MEASURED on this page at
+   1440 before any change: `.col-right > .sticky` is 1606px tall in a 900px
+   viewport and its `getBoundingClientRect().top` moves 1:1 with the scroll
+   (128 → -272 at 400 → -1072 at 1200), i.e. `position:sticky` never offsets it
+   here. Splitting column 3 in two therefore changes no sticky behaviour; it had
+   none to change.
+
+   `grid-template-rows: min-content 1fr` is load-bearing, not decoration. With
+   both rows `auto`, a grid item that SPANS them distributes its size across the
+   spanned tracks, so `.col-main` (6,805px) inflated row 1 and pushed the
+   trailing panels from y 1103 to y 3886 — measured on /m/eth at 1440 with the
+   placement in and the row template out. A flexible second track takes the
+   spanning item's contribution instead, so row 1 stays the ticket's own height.
+   MEASURED with it in: ticket y 128 h 961, panels y 1103 — 128 + 961 + 14, the
+   same three numbers `.sticky.stack` produced before this change. */
+@media (min-width:1181px) {
+	.cols.page.ticket-first { grid-template-rows: min-content 1fr; row-gap: 14px; }
+	.ticket-first > .col-left { grid-column: 1; grid-row: 1 / span 2; }
+	.ticket-first > .col-main { grid-column: 2; grid-row: 1 / span 2; }
+	.ticket-first > .col-ticket { grid-column: 3; grid-row: 1; }
+	.ticket-first > .col-right { grid-column: 3; grid-row: 2; }
 }
 
 /* The price chart. Hairlines and tokens like every other card; the library is

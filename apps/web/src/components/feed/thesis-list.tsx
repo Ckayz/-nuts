@@ -65,7 +65,13 @@ export function MarketList({ markets }: { markets: MarketSummary[] }) {
 					<Avatar asset={market.asset} initials={market.asset} tone="asset" size={30} />
 					<span className="t">
 						<b>{market.name}</b>
-						<i>{market.asset} · Base</i>
+						{/* K-2 (pass-4 D4-m9): the symbol is dropped from this line when it
+						    repeats the name above it. This card renders the LIVE summaries
+						    (`app/page.tsx` passes `marketSummariesData()`), whose `name` IS
+						    the symbol — the Thetanuts SDK publishes ticker symbols and no
+						    full names — so the row read "BTC" over "BTC · Base". The chain
+						    stays: it is the one thing this line says that the name does not. */}
+						<i>{market.asset === market.name ? "Base" : `${market.asset} · Base`}</i>
 					</span>
 					<span className="v">
 						<b className="num">{market.spotUsd.usd2}</b>

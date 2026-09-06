@@ -4,7 +4,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 
 import { CreatorStats } from "@/components/creator/creator-stats";
 import Link from "next/link";
-import { Avatar, PostTypeBadge, TodoOwner } from "@/components/primitives";
+import { Avatar, PostTypeBadge, TodoOwnerNote } from "@/components/primitives";
 import { Leaderboard } from "@/components/creator/leaderboard";
 import { CopyLink } from "@/components/position/copy-link";
 import { LikeButton } from "@/components/feed/like-button";
@@ -60,7 +60,8 @@ export default async function CreatorPage({
  return <PageFrame left={<FeedRail posts={rail} />} right={<section className="card" id="top-traders">
   <div className="card-h"><h3>Follow top traders</h3><span className="x">1W</span></div>
   <Leaderboard entries={discover.leaderboard} signedIn={discover.signedIn} databaseMode={discover.databaseMode} />
-  <div className="card-f">P&amp;L is 1W, from onchain fills and settlements. Ranking formula<TodoOwner /></div>
+  {/* K-2 (CL-10): "Ranking formula" is the placeholder, hidden with its marker. */}
+  <div className="card-f">P&amp;L is 1W, from onchain fills and settlements.<TodoOwnerNote> Ranking formula</TodoOwnerNote></div>
  </section>}>
   <CreatorStats creator={creator} bio={data.bio} signedIn={data.signedIn} databaseMode={data.databaseMode} following={data.following} self={data.self} profile />
   {data.isOwner && data.editableProfile ? <ProfileEditor key={JSON.stringify(data.editableProfile)} profile={data.editableProfile} walletAddress={data.editableProfile.walletAddress} /> : null}

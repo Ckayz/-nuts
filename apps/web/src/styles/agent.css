@@ -107,6 +107,11 @@ font-size:12.5px;font-weight:500;color:var(--muted);line-height:1.5}
   .agent-fab,.agent-slide{display:none}
 }
 
-/* A page that already asks the agent inline does not also need the floating
-   control: two entry points to one conversation, one covering the other. */
-body:has(.agent-inline) .agent-fab{display:none}
+/* K-2 (pass-4 D4-m8). A `body:has(.agent-inline) .agent-fab{display:none}` rule
+   stood here and could never apply: `.agent-inline` is only rendered by
+   `components/market/right-tabs.tsx` on `/m/<asset>`, and `AgentLauncher`
+   already returns null on `/m/*` and on `/agent` (`launcherHiddenOn`,
+   agent-launcher.tsx), so `.agent-fab` is absent from the DOM on exactly the
+   pages the rule targeted. What hides the launcher today is that early return,
+   not CSS. The `.agent-inline` class itself stays: `styles/market.css` sizes
+   the inline panel with it. */

@@ -8,6 +8,7 @@ import {
 	chipsForTurn,
 	isLinkChip,
 	postFillSuggestions,
+	postRfqSuggestions,
 	splitSuggestionTrailer,
 	starterSuggestions,
 	suggestionsFor,
@@ -332,5 +333,45 @@ describe("postFillSuggestions", () => {
 		expect(link?.label).toBe("Write a post about it");
 		const send = chips.find((c) => !isLinkChip(c));
 		expect(send && !isLinkChip(send) ? send.send : "").toContain("positions");
+	});
+});
+
+describe("postRfqSuggestions", () => {
+	test("both chips SEND text and name the row the card recorded", () => {
+		const chips = postRfqSuggestions("row-1");
+		// No link: there is no RFQ route in this app, and a chip that navigates
+		// nowhere is worse than one that asks the agent.
+		expect(chips.some(isLinkChip)).toBe(false);
+		const labels = chips.map((c) => c.label);
+		console.log("RFQ_CHIPS", JSON.stringify(chips));
+		expect(labels).toEqual(["Check my request", "Cancel it"]);
+		for (const chip of chips) {
+			expect(isLinkChip(chip) ? "" : chip.send).toContain("row-1");
+			expect(chip.label.length).toBeLessThanOrEqual(MAX_SUGGESTION_LENGTH);
+		}
+	});
+});
+
+describe("the RFQ starter", () => {
+	test("is offered on the two underlyings the factory prices, and only there", () => {
+		for (const asset of ["ETH", "BTC", "eth", "btc"]) {
+			const labels = starterSuggestions({ asset }).map((c) => c.label);
+			expect(labels, asset).toContain(`Ask for a custom ${asset.toUpperCase()} option`);
+			// Still exactly MAX_SUGGESTIONS: the RFQ chip REPLACES the generic
+			// discovery chip on a page that is already about one market.
+			expect(labels.length, asset).toBe(MAX_SUGGESTIONS);
+			expect(labels, asset).not.toContain("What can I trade right now?");
+		}
+		for (const asset of ["SOL", "DOGE", "AVAX", null, undefined]) {
+			const labels = starterSuggestions({ asset }).map((c) => c.label);
+			expect(labels.some((l) => l.includes("custom")), JSON.stringify(asset)).toBe(false);
+		}
+	});
+
+	test("what it sends asks for the thing an RFQ is FOR, not for the mechanism", () => {
+		const chip = starterSuggestions({ asset: "ETH" }).find((c) => c.label.includes("custom"));
+		console.log("RFQ_STARTER", JSON.stringify(chip));
+		expect(chip?.send).toContain("ETH");
+		expect(chip?.send).toContain("order book does not have");
 	});
 });

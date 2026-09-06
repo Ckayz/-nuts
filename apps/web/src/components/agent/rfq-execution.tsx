@@ -345,52 +345,6 @@ function useRfqSend(boundAccount: string | undefined, boundChainId: 8453 | undef
 	};
 }
 
-/** The rows every RFQ card prints, from `expected` and never from the model's text. */
-function RfqTerms({ expected }: { readonly expected: RfqExpected }) {
-	return (
-		<dl className="mt-3 space-y-1 text-sm">
-			<div className="flex justify-between gap-4">
-				<dt className="text-muted-foreground">{COPY.deposit}</dt>
-				<dd className="num">{expected.deposit} USDC</dd>
-			</div>
-			<div className="flex justify-between gap-4">
-				<dt className="text-muted-foreground">{COPY.maxLoss}</dt>
-				<dd className="num">${expected.maxLossUsd}</dd>
-			</div>
-			<div className="flex justify-between gap-4">
-				<dt className="text-muted-foreground">{COPY.strikes}</dt>
-				{/* W1: the factory's own order is DESCENDING for a put spread. */}
-				<dd className="num">{strikesAscending(expected.strikesUsd).join(" / ")}</dd>
-			</div>
-			<div className="flex justify-between gap-4">
-				<dt className="text-muted-foreground">{COPY.contracts}</dt>
-				<dd className="num">{expected.numContracts}</dd>
-			</div>
-			<div className="flex justify-between gap-4">
-				<dt className="text-muted-foreground">{COPY.expiry}</dt>
-				<dd className="num">{expected.expiryAt}</dd>
-			</div>
-			<div className="flex justify-between gap-4">
-				<dt className="text-muted-foreground">{COPY.offerDeadline}</dt>
-				<dd className="num">{expected.offerEndAt}</dd>
-			</div>
-		</dl>
-	);
-}
-
-function ExplorerLink({ hash, label }: { readonly hash: string; readonly label: string }) {
-	return (
-		<a
-			className="text-sm underline underline-offset-4"
-			href={`https://basescan.org/tx/${hash}`}
-			target="_blank"
-			rel="noreferrer"
-		>
-			{label}
-		</a>
-	);
-}
-
 export function RfqExecution({
 	rfq,
 	onDone,
@@ -833,7 +787,44 @@ export function RfqExecution({
 		<div className="rounded-lg border p-4">
 			<p className="font-medium text-sm">{rfq.label ?? COPY.untitled}</p>
 
-			<RfqTerms expected={shown} />
+			{/*
+			 * The terms, inline rather than in a child component: the probe harness
+			 * (`@/test/hook-runner`) walks the element tree this function RETURNS and
+			 * does not render nested function components, so a child component here
+			 * made every printed figure invisible to the tests that exist to prove
+			 * the card prints the SERVER's numbers. Measured before it was inlined:
+			 * the card's own text was title + notes + button, with no amount in it.
+			 */}
+			<dl className="mt-3 space-y-1 text-sm">
+				<div className="flex justify-between gap-4">
+					<dt className="text-muted-foreground">{COPY.deposit}</dt>
+					<dd className="num">{`${shown.deposit} USDC`}</dd>
+				</div>
+				<div className="flex justify-between gap-4">
+					<dt className="text-muted-foreground">{COPY.maxLoss}</dt>
+					{/* One text child, not a literal "$" beside an expression: the two
+					    render identically in a browser and differently to anything that
+					    walks the tree, and this figure is the one a reviewer greps for. */}
+					<dd className="num">{`$${shown.maxLossUsd}`}</dd>
+				</div>
+				<div className="flex justify-between gap-4">
+					<dt className="text-muted-foreground">{COPY.strikes}</dt>
+					{/* W1: the factory's own order is DESCENDING for a put spread. */}
+					<dd className="num">{strikesAscending(shown.strikesUsd).join(" / ")}</dd>
+				</div>
+				<div className="flex justify-between gap-4">
+					<dt className="text-muted-foreground">{COPY.contracts}</dt>
+					<dd className="num">{shown.numContracts}</dd>
+				</div>
+				<div className="flex justify-between gap-4">
+					<dt className="text-muted-foreground">{COPY.expiry}</dt>
+					<dd className="num">{shown.expiryAt}</dd>
+				</div>
+				<div className="flex justify-between gap-4">
+					<dt className="text-muted-foreground">{COPY.offerDeadline}</dt>
+					<dd className="num">{shown.offerEndAt}</dd>
+				</div>
+			</dl>
 
 			{allowanceLine !== null && (
 				<div className="mt-3 flex justify-between gap-4 text-sm">
@@ -933,7 +924,16 @@ export function RfqExecution({
 				</div>
 			)}
 
-			{txHash !== null && <div className="mt-2"><ExplorerLink hash={txHash} label={watching ? COPY.viewOnExplorer : COPY.viewSent} /></div>}
+			{txHash !== null && (
+				<a
+					className="mt-2 block text-sm underline underline-offset-4"
+					href={`https://basescan.org/tx/${txHash}`}
+					target="_blank"
+					rel="noreferrer"
+				>
+					{watching ? COPY.viewOnExplorer : COPY.viewSent}
+				</a>
+			)}
 
 			{message && <p className="agent-msg">{message}</p>}
 		</div>
@@ -1081,9 +1081,14 @@ export function RfqActionExecution({
 				</div>
 			)}
 			{txHash !== null && (
-				<div className="mt-2">
-					<ExplorerLink hash={txHash} label={phase === "done" ? COPY.viewOnExplorer : COPY.viewSent} />
-				</div>
+				<a
+					className="mt-2 block text-sm underline underline-offset-4"
+					href={`https://basescan.org/tx/${txHash}`}
+					target="_blank"
+					rel="noreferrer"
+				>
+					{phase === "done" ? COPY.viewOnExplorer : COPY.viewSent}
+				</a>
 			)}
 			{message && <p className="agent-msg">{message}</p>}
 		</div>

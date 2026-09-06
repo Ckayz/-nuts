@@ -238,8 +238,12 @@ describe("the card prints what the SERVER decoded, never the model's words", () 
 		// W1: the factory's own order is DESCENDING; the card reads up.
 		expect(text).toContain("2100 / 2200");
 		expect(text).not.toContain("2200 / 2100");
-		expect(text).toContain("2026-09-30T08:00:00Z");
-		expect(text).toContain("2026-09-06T03:00:00Z");
+		// T-5: both instants are formatted for a reader, and neither raw ISO
+		// timestamp survives onto a money card.
+		expect(text).toContain("30 Sep 2026, 08:00 UTC");
+		expect(text).toContain("06 Sep 2026, 03:00 UTC");
+		expect(text).not.toContain("2026-09-30T08:00:00Z");
+		expect(text).not.toContain("2026-09-06T03:00:00Z");
 		h.unmount();
 	});
 

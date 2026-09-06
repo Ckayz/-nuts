@@ -19,6 +19,7 @@ import {
 	recordRfqCreateFor,
 	recordRfqSettleFor,
 } from "@/lib/rfq/actions";
+import { formatUtcIso } from "./instrument-label";
 import {
 	clearHeldRfq,
 	type HeldRfq,
@@ -822,13 +823,17 @@ export function RfqExecution({
 					<dt className="text-muted-foreground">{COPY.contracts}</dt>
 					<dd className="num">{shown.numContracts}</dd>
 				</div>
+				{/* T-5: a raw ISO instant on the surface a first-time user reads
+				    before approving. The server's value is unchanged; only its
+				    rendering is, and an instant this app cannot parse is printed
+				    exactly as the server sent it rather than dropped. */}
 				<div className="flex justify-between gap-4">
 					<dt className="text-muted-foreground">{COPY.expiry}</dt>
-					<dd className="num">{shown.expiryAt}</dd>
+					<dd className="num">{formatUtcIso(shown.expiryAt) ?? shown.expiryAt}</dd>
 				</div>
 				<div className="flex justify-between gap-4">
 					<dt className="text-muted-foreground">{COPY.offerDeadline}</dt>
-					<dd className="num">{shown.offerEndAt}</dd>
+					<dd className="num">{formatUtcIso(shown.offerEndAt) ?? shown.offerEndAt}</dd>
 				</div>
 			</dl>
 

@@ -43,7 +43,10 @@ test("a creation prints the arguments, strikes read ascending", () => {
 	expect(html).not.toContain("2200 / 2100");
 	expect(html).toContain("ETH");
 	expect(html).toContain("5 USDC");
-	expect(html).toContain("2026-09-30T08:00:00Z");
+	// T-5: the expiry as a person reads it, in UTC, not the raw ISO instant the
+	// tool's argument carries.
+	expect(html).toContain("30 Sep 2026, 08:00 UTC");
+	expect(html).not.toContain("2026-09-30T08:00:00Z");
 });
 
 test("it invents no escrow: the total is a server number, decoded from calldata", () => {

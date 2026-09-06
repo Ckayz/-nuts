@@ -201,6 +201,12 @@ describe("C-2: the gate prompt carries every message it was given", () => {
 				SKIP_ENV_VALIDATION: "1",
 				AI_GATEWAY_API_KEY: "",
 				OPENROUTER_API_KEY: "offline",
+				// B-1: with validation skipped no zod default applies, so the child
+				// must name its own model ids exactly as it names its own key —
+				// `model.ts` refuses to load without them, and inheriting the
+				// developer's env file is the bug B-1 fixed everywhere else.
+				AGENT_MODEL: "anthropic/claude-haiku-4.5",
+				AGENT_GATE_MODEL: "anthropic/claude-haiku-4.5",
 			},
 			stdout: "pipe",
 			stderr: "pipe",
@@ -231,5 +237,40 @@ describe("C-2: the gate prompt carries every message it was given", () => {
 		// The judgement rule the multi-message prompt depends on. Without it the
 		// model may average several messages instead of refusing on one.
 		expect(read("./scope.ts")).toContain("answer true only if EVERY message belongs to this app");
+	});
+});
+
+/**
+ * B (one-shot review of the RFQ build). The gate is PRD 10.8's authoritative
+ * layer, and this build gave the app chips whose text is RFQ vocabulary the
+ * IN-SCOPE list did not name — `postRfqCancelSend` sends "Cancel my request
+ * <id> and return the escrow." and `startRfqSend` asks for a strike the order
+ * book does not have. A chip the app itself offers must not be refused by the
+ * app's own gate.
+ *
+ * The classifier's ANSWER cannot be pinned here (that needs a model call; two
+ * were made once, against `minimax/minimax-m3:free`, and are recorded in the
+ * fold report). What is pinned is that the vocabulary is present at all — the
+ * thing that was missing.
+ */
+describe("the gate's IN-SCOPE list names what the app's own chips say", () => {
+	const scope = read("./scope.ts");
+	const inScope = scope.slice(scope.indexOf("IN SCOPE — answer true:"), scope.indexOf("OUT OF SCOPE"));
+
+	test("custom requests, reserve price, escrow, cancelling, settling and the user's own requests", () => {
+		for (const term of [
+			"Custom option requests (RFQ)",
+			"reserve price",
+			"escrowed deposit",
+			"cancelling or settling a request",
+			"the user's own requests",
+		]) {
+			expect(inScope, term).toContain(term);
+		}
+	});
+
+	test("the RFQ line is IN scope, not OUT", () => {
+		const out = scope.slice(scope.indexOf("OUT OF SCOPE"), scope.indexOf("Beginner questions are IN SCOPE"));
+		expect(out).not.toContain("RFQ");
 	});
 });

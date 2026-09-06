@@ -156,7 +156,15 @@ export type RfqStatusKind =
 	| "settled"
 	| "cancelled"
 	| "expired_unfilled"
-	| "failed";
+	| "failed"
+	/**
+	 * Lane C's C-4: an indexer status that is neither `active` nor `settled` used
+	 * to read as "cancelled … deposit returned" — a money claim that failed open.
+	 * Added here by F-D because the fold writer who owns `lib/rfq/status.ts` is
+	 * working in another worktree and the two must agree; if that side lands a
+	 * different spelling, this line is the one to reconcile.
+	 */
+	| "unknown";
 
 export type RfqNextAction = "wait" | "settle" | "cancel" | "none";
 

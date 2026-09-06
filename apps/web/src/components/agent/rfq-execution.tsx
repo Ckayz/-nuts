@@ -32,6 +32,7 @@ import {
 	rfqCreateRequestOf,
 	type RfqExpected,
 	rfqHoldStore,
+	type RfqStatusKind,
 	type RfqStatusView,
 	type RfqTxKind,
 	rfqStillMoves,
@@ -171,6 +172,12 @@ const COPY = {
 	 * when the requester cancels, which is what the control under this line does.
 	 */
 	expiredTitle: "No maker answered. Cancel to get your deposit back.",
+	/**
+	 * TODO-OWNER: an indexer or chain answer this app could not read (lane C's
+	 * `unknown` status). The card must not print "Your request is live" over it:
+	 * it does not know that.
+	 */
+	unknownTitle: "This request's status could not be read.",
 	/** TODO-OWNER: link to the confirmed transaction. */
 	viewOnExplorer: "View on BaseScan",
 	/** TODO-OWNER: link to a sent-but-unconfirmed transaction. */
@@ -199,6 +206,33 @@ const COPY = {
 	/** TODO-OWNER: printed when the card has stopped polling on its own. */
 	pollingStopped: "This card has stopped checking on its own. Press to check again.",
 } as const;
+
+/**
+ * The heading over a recorded request, one per status.
+ *
+ * A lookup rather than a ternary chain because it is a claim about money: the
+ * card printed `watchingTitle` — "Your request is live" — for every status it
+ * had no branch for, which put that sentence over an EXPIRED, unfilled request
+ * (D-1) directly above the server's own line saying no offer exists, and over
+ * a status the app could not read at all. Every member of `RfqStatusKind` is
+ * named here, so adding one to the union without deciding what it says is a
+ * type error rather than a false claim on screen.
+ */
+const WATCHING_TITLES: Readonly<Record<RfqStatusKind, string>> = {
+	pending_create: COPY.watchingTitle,
+	waiting_for_offers: COPY.watchingTitle,
+	reveal_window: COPY.watchingTitle,
+	ready_to_settle: COPY.watchingTitle,
+	settled: COPY.settledTitle,
+	cancelled: COPY.cancelledTitle,
+	expired_unfilled: COPY.expiredTitle,
+	failed: COPY.failedTitle,
+	unknown: COPY.unknownTitle,
+};
+
+function watchingTitle(status: RfqStatusKind): string {
+	return WATCHING_TITLES[status];
+}
 
 type Phase =
 	| "idle"
@@ -876,18 +910,7 @@ export function RfqExecution({
 			{watching && status !== null ? (
 				<div className="mt-4 space-y-3">
 					<p className="font-medium text-sm">
-						{status.status === "settled"
-							? COPY.settledTitle
-							: status.status === "cancelled"
-								? COPY.cancelledTitle
-								: status.status === "failed"
-									? COPY.failedTitle
-									: // D-1: "Your request is live" was printed over an expired,
-										// unfilled request, directly above the server's own sentence
-										// saying no offer exists and the deposit needs cancelling.
-										status.status === "expired_unfilled"
-										? COPY.expiredTitle
-										: COPY.watchingTitle}{" "}
+						{watchingTitle(status.status)}{" "}
 						<TodoOwner />
 					</p>
 					{/* The server's own sentence, never reworded here. */}

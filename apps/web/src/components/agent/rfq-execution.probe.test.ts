@@ -665,6 +665,22 @@ describe("the watching stage", () => {
 		h.unmount();
 	});
 
+	test("a status the app could not read does not claim the request is live", async () => {
+		// The `unknown` member exists for lane C's C-4 (an indexer answer that is
+		// neither active nor settled must not read as "cancelled, deposit
+		// returned"). Whatever sentence that side settles on, this card must not
+		// print a liveness claim over it.
+		const h = await watching({
+			status: "unknown",
+			nextAction: "none",
+			sentence: "This request's status could not be determined.",
+		});
+		console.log("UNKNOWN_STATUS", JSON.stringify({ controls: controls(h).map((c) => c.text), text: h.text().slice(0, 320) }));
+		expect(h.text()).not.toContain("Your request is live");
+		expect(h.text()).toContain("could not be read");
+		h.unmount();
+	});
+
 	test("D-11: a request waiting on the chain keeps watching, and says nothing about stopping", async () => {
 		for (const over of [
 			// The server's own answers, `lib/rfq/status.ts:154,160,163`.

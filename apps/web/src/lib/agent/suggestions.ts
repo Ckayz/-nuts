@@ -458,14 +458,107 @@ const MARKER_NOISE = "[ \\t>*_`~#\\-]*";
 /** Every marker that begins a line, in order. The LAST one is the trailer. */
 const MARKER_LINE = new RegExp(`(^|\\n)(${MARKER_NOISE})${SUGGEST_MARKER}`, "g");
 
+/** A line that opens or closes a fenced code block: ``` or ~~~, three or more. */
+const FENCE_LINE = /^[ \t]*(`{3,}|~{3,})[ \t]*(.*)$/;
+
+/** A line whose content is a marker (with the decoration models add). */
+const MARKER_ONLY_LINE = new RegExp(`^(${MARKER_NOISE})${SUGGEST_MARKER}`);
+
+/**
+ * B-4 (one-shot review of the RFQ build). The character ranges a fenced code
+ * block encloses AND that cannot hold the trailer.
+ *
+ * The cut is by design for a real trailer, but it also fired on a reply that
+ * SHOWS one — reachable when a user asks the agent about its own follow-up
+ * format, and through injected thesis text that asks the model to print such a
+ * line mid-answer. The reviewer measured:
+ *
+ *   input   Example:\n```\nSUGGEST: ["x"]\n```\nDone.
+ *   body    "Example:"    chips ["x"]
+ *
+ * "Done." was gone from the screen and an illustration became a live chip.
+ *
+ * The EXCEPTION is deliberate and measured: models really do fence the trailer
+ * by itself (`suggestions.test.ts` "survives the decoration a model puts around
+ * the marker" pins ```` ```json\nSUGGEST: […]\n``` ````, and `stripOpenFence`
+ * exists for exactly that). So a block is disqualifying unless its only
+ * non-blank content is marker lines AND nothing but whitespace follows it —
+ * which is a fence around the trailer, not a code sample the answer continues
+ * after.
+ */
+function fencedOutRanges(text: string, streaming: boolean): Array<[number, number]> {
+	const lines = text.split("\n");
+	const lineStart: number[] = [];
+	let offset = 0;
+	for (const line of lines) {
+		lineStart.push(offset);
+		offset += line.length + 1;
+	}
+
+	// The last line carrying anything at all, computed ONCE. "Is there content
+	// after this block?" is then a comparison rather than a join of the rest of
+	// the text — which made the scan quadratic (measured: 20,000 fences took
+	// ~0.9 s before this, 3 ms after).
+	let lastNonBlank = -1;
+	for (let i = lines.length - 1; i >= 0; i--) {
+		if ((lines[i] ?? "").trim() !== "") {
+			lastNonBlank = i;
+			break;
+		}
+	}
+
+	const ranges: Array<[number, number]> = [];
+	for (let i = 0; i < lines.length; i++) {
+		const open = FENCE_LINE.exec(lines[i] ?? "");
+		if (open === null) continue;
+		const fence = open[1] ?? "";
+		const char = fence[0] ?? "`";
+
+		// The close: the same character, at least as long, and carrying nothing
+		// else (CommonMark: a closing fence has no info string).
+		let close = -1;
+		for (let j = i + 1; j < lines.length; j++) {
+			const candidate = FENCE_LINE.exec(lines[j] ?? "");
+			if (candidate === null) continue;
+			const bar = candidate[1] ?? "";
+			if (bar[0] === char && bar.length >= fence.length && (candidate[2] ?? "").trim() === "") {
+				close = j;
+				break;
+			}
+		}
+
+		const contentFrom = i + 1;
+		const contentTo = close === -1 ? lines.length : close;
+		const content = lines.slice(contentFrom, contentTo);
+		const nonBlank = content.filter((line) => line.trim() !== "");
+		// While the answer is still streaming the closing fence may simply not have
+		// arrived yet, and a fence whose content so far is nothing but the marker
+		// is on its way to being that decoration. Cutting it keeps the reader from
+		// watching raw `SUGGEST: [` sit on screen — the same reason
+		// `stripPartialMarker` exists. When the stream ends the real shape is
+		// known and this branch no longer applies.
+		const onlyMarkers = nonBlank.length > 0 && nonBlank.every((line) => MARKER_ONLY_LINE.test(line));
+		const isTrailerDecoration =
+			onlyMarkers && (close === -1 ? streaming : close >= lastNonBlank);
+		if (!isTrailerDecoration) {
+			ranges.push([lineStart[contentFrom] ?? text.length, lineStart[contentTo] ?? text.length]);
+		}
+		i = contentTo;
+	}
+	return ranges;
+}
+
 /** Where the trailer begins (the start of its line's content), or -1. */
-function markerStart(text: string): number {
+function markerStart(text: string, streaming: boolean): number {
+	const fenced = fencedOutRanges(text, streaming);
 	let start = -1;
 	MARKER_LINE.lastIndex = 0;
 	for (let match = MARKER_LINE.exec(text); match !== null; match = MARKER_LINE.exec(text)) {
 		// `match[1]` is the newline (absent at index 0); the cut point is the
 		// noise, so `**` and a fence marker go with the trailer, not the body.
-		start = match.index + (match[1] === "" ? 0 : 1);
+		const at = match.index + (match[1] === "" ? 0 : 1);
+		if (fenced.some(([from, to]) => at >= from && at < to)) continue;
+		start = at;
 	}
 	return start;
 }
@@ -578,7 +671,7 @@ export function splitSuggestionTrailer(
 	text: string,
 	streaming = false,
 ): { body: string; chips: Suggestion[] } {
-	const start = markerStart(text);
+	const start = markerStart(text, streaming);
 	if (start === -1) {
 		if (!streaming) return { body: text, chips: [] };
 		// Only a body that HAD a half-written marker gets the fence treatment: a

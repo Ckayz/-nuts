@@ -65,6 +65,10 @@ const REVEAL = 60;
  * the one `prepare.ts` uses, so the two agreeing is evidence.
  */
 const SETTLED_TOPIC = keccak256(toHex("QuotationSettled(uint256,address,address,address)"));
+/** Same idea for `QuotationCancelled(uint256 indexed quotationId)` — the id is its only argument. */
+const CANCELLED_TOPIC = keccak256(toHex("QuotationCancelled(uint256)"));
+/** EntryPoint 0.7: the address an ERC-4337 bundle actually calls. */
+const ENTRY_POINT = "0x0000000071727De22E5E9d8BAf0edAc6f37da032";
 
 const topicOf = (address: string) => `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
 const idTopic = (id: bigint) => `0x${id.toString(16).padStart(64, "0")}`;
@@ -1098,6 +1102,118 @@ describe("recordRfqCancelFor and recordRfqSettleFor", () => {
 		expect(String(result.note)).toContain("the request is unchanged");
 		expect(prepared.state.rows.get(row.id)?.status).toBe("active");
 		expect(prepared.state.rows.get(row.id)?.cancelTx).toBeNull();
+	});
+
+	/**
+	 * The same wrapped-call class C-1 closed on the create path. A smart account
+	 * or a multisig sends the cancel through an entry point, so the receipt's `to`
+	 * is not the factory and `transaction.input` is a UserOperation rather than
+	 * `cancelQuotation`. The factory still emits `QuotationCancelled` for this
+	 * request, and that log is the proof.
+	 *
+	 * Mutant: put the `to` / input checks back in front of the log read.
+	 */
+	test("a wrapped cancel (entry point in `to`) is recorded on the factory's QuotationCancelled log", async () => {
+		const row = await activeRow(prepared.deps, prepared.state);
+		const cancel = await prepareRfqCancelFor(SESSION, { rfqRequestId: row.id }, prepared.deps);
+		if (!cancel.ok) throw new Error("fixture");
+		const deps: RfqDeps = {
+			...prepared.deps,
+			reader: {
+				async waitForTransactionReceipt() {
+					return {
+						status: "success",
+						logs: [{ address: prepared.factory, topics: [CANCELLED_TOPIC, idTopic(125n)], data: "0x" }],
+					} as never;
+				},
+				// A UserOperation, not `cancelQuotation(uint256)`.
+				async getTransaction() {
+					return { to: ENTRY_POINT, input: `0x765e827f${"00".repeat(64)}` as `0x${string}` };
+				},
+			},
+		};
+		const result = await recordRfqCancelFor(SESSION, { token: cancel.token, txHash: TX }, deps);
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("unreachable");
+		expect(result.status).toBe("cancelled");
+		expect(prepared.state.rows.get(row.id)?.status).toBe("cancelled");
+		expect(prepared.state.rows.get(row.id)?.cancelTx).toBe(TX);
+	});
+
+	/** The same for settlement, and the option address comes out of that very log. */
+	test("a wrapped settle is recorded on QuotationSettled, option address and all", async () => {
+		const ready = makeDeps({
+			allowance: 500_000n,
+			currentWinner: WINNER,
+			nowMs: (OFFER_END + REVEAL + 1) * 1000,
+		});
+		const row = await activeRow(ready.deps, ready.state);
+		const settle = await prepareRfqSettleFor(SESSION, { rfqRequestId: row.id }, ready.deps);
+		if (!settle.ok) throw new Error("fixture");
+		const deps: RfqDeps = {
+			...ready.deps,
+			reader: {
+				async waitForTransactionReceipt() {
+					return {
+						status: "success",
+						logs: [
+							{
+								address: ready.factory,
+								topics: [SETTLED_TOPIC, idTopic(125n), topicOf(WALLET), topicOf(WINNER)],
+								data: topicOf(OPTION_ADDRESS),
+							},
+						],
+					} as never;
+				},
+				async getTransaction() {
+					return { to: ENTRY_POINT, input: `0x765e827f${"00".repeat(64)}` as `0x${string}` };
+				},
+			},
+		};
+		const result = await recordRfqSettleFor(SESSION, { token: settle.token, txHash: TX }, deps);
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("unreachable");
+		expect(result.status).toBe("settled");
+		expect(result.optionAddress?.toLowerCase()).toBe(OPTION_ADDRESS.toLowerCase());
+		expect(ready.state.rows.get(row.id)?.settleTx).toBe(TX);
+	});
+
+	/**
+	 * The log has to be THIS request's. Another quotation's cancellation in the
+	 * same receipt proves nothing about ours, and with a wrapped `to` there is no
+	 * fallback either: refuse, and leave the request exactly as it was.
+	 */
+	test("another request's QuotationCancelled in the same receipt records nothing", async () => {
+		const row = await activeRow(prepared.deps, prepared.state);
+		const cancel = await prepareRfqCancelFor(SESSION, { rfqRequestId: row.id }, prepared.deps);
+		if (!cancel.ok) throw new Error("fixture");
+		const deps: RfqDeps = {
+			...prepared.deps,
+			reader: {
+				async waitForTransactionReceipt() {
+					return {
+						status: "success",
+						logs: [
+							// Right event, right factory, WRONG request.
+							{ address: prepared.factory, topics: [CANCELLED_TOPIC, idTopic(999n)], data: "0x" },
+							// Right request, WRONG emitter.
+							{ address: OPTION_BOOK, topics: [CANCELLED_TOPIC, idTopic(125n)], data: "0x" },
+						],
+					} as never;
+				},
+				async getTransaction() {
+					return { to: ENTRY_POINT, input: `0x765e827f${"00".repeat(64)}` as `0x${string}` };
+				},
+			},
+		};
+		const result = await recordRfqCancelFor(SESSION, { token: cancel.token, txHash: TX }, deps);
+		expect(result.ok).toBe(false);
+		if (result.ok) throw new Error("unreachable");
+		expect(result.code).toBe("RECEIPT_MISMATCH");
+		const stored = prepared.state.rows.get(row.id);
+		expect(stored?.status).toBe("active");
+		expect(stored?.cancelTx).toBeNull();
+		expect(stored?.failureReason).toBeNull();
 	});
 
 	test("a settle receipt records the option address out of QuotationSettled", async () => {

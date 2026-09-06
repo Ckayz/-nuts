@@ -20,6 +20,7 @@ import { randomBytes } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import { db } from "@nuts/db";
 import { agentRfqKeys, rfqRequests } from "@nuts/db/schema/index";
+import { keccak256, toHex } from "viem";
 import { MemoryStorageProvider } from "@thetanuts-finance/thetanuts-client";
 import { QUOTATION_REQUESTED_TOPIC, createRfqClient } from "@nuts/thetanuts";
 import { env } from "@nuts/env/server";
@@ -60,6 +61,11 @@ afterAll(async () => {
 const TX = (seed: string) => `0x${seed.repeat(64).slice(0, 64)}`;
 const NOW = new Date();
 const EXPIRY = Math.floor(NOW.getTime() / 1000) + 7 * 86_400;
+/** `QuotationCancelled(uint256 indexed quotationId)`, hashed from the signature rather than looked up. */
+const CANCELLED_TOPIC = keccak256(toHex("QuotationCancelled(uint256)"));
+/** EntryPoint 0.7: what an ERC-4337 bundle puts in a receipt's `to`. */
+const ENTRY_POINT = "0x0000000071727De22E5E9d8BAf0edAc6f37da032";
+
 const topicOf = (address: string) => `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
 const idTopic = (id: bigint) => `0x${id.toString(16).padStart(64, "0")}`;
 
@@ -317,6 +323,46 @@ describeLive("the RFQ path against a real database", () => {
 		const keys = await db.select().from(agentRfqKeys).where(inArray(agentRfqKeys.walletAddress, [mine, theirs]));
 		expect(keys.length).toBe(2);
 		expect(keys[0]?.publicKey).not.toBe(keys[1]?.publicKey);
+	});
+
+	/**
+	 * The cancel path's own wrapped-call case, against the real database: the
+	 * receipt's `to` is an entry point and its input is a UserOperation, and the
+	 * factory's `QuotationCancelled` for this request is what closes the row.
+	 */
+	test("a wrapped cancel is recorded on the factory's log, and the row closes", async () => {
+		const wallet = newWallet();
+		const session = { userId: crypto.randomUUID(), walletAddress: wallet };
+		const created = liveDeps({});
+		const prepared = await prepareRfqCreateFor(session, input, created.deps);
+		if (!prepared.ok || prepared.stage !== "create") throw new Error("expected the create stage");
+
+		const recording = liveDeps({
+			receipt: {
+				status: "success",
+				logs: [{ address: created.factory, topics: [QUOTATION_REQUESTED_TOPIC, idTopic(7070n), topicOf(wallet)], data: "0x" }],
+			},
+		});
+		expect((await recordRfqCreateFor(session, { token: prepared.token, txHash: TX("7") }, recording.deps)).ok).toBe(true);
+
+		const cancelPrep = await prepareRfqCancelFor(session, { rfqRequestId: prepared.rfqRequestId }, recording.deps);
+		if (!cancelPrep.ok) throw new Error("expected a cancel");
+
+		const wrapped = liveDeps({
+			transactionTo: ENTRY_POINT,
+			transactionInput: `0x765e827f${"00".repeat(64)}`,
+			receipt: {
+				status: "success",
+				logs: [{ address: created.factory, topics: [CANCELLED_TOPIC, idTopic(7070n)], data: "0x" }],
+			},
+		});
+		const cancelTx = TX("8");
+		const closed = await recordRfqCancelFor(session, { token: cancelPrep.token, txHash: cancelTx }, wrapped.deps);
+		expect(closed.ok).toBe(true);
+
+		const row = await drizzleRfqStore(db).findOwn(prepared.rfqRequestId, wallet);
+		expect(row?.status).toBe("cancelled");
+		expect(row?.cancelTx).toBe(cancelTx);
 	});
 
 	/**

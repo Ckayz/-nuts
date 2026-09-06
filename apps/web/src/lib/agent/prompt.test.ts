@@ -12,6 +12,7 @@
  * is a string the provider sees, not an object.
  */
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
 import { SUGGEST_MARKER } from "./suggestions";
 
@@ -50,6 +51,44 @@ describe("the follow-up trailer is specified where it is parsed", () => {
 
 	test("the trailer is the last thing the model is told to write", () => {
 		expect(SYSTEM_PROMPT.trimEnd().endsWith("Write nothing after that line.")).toBe(true);
+	});
+
+	/**
+	 * B-3 (one-shot review of the RFQ build). Two rules used to claim the last
+	 * line — the marketUrl rule said "END your answer with that exact link" while
+	 * the Follow-ups rule said the SUGGEST line is last. A model obeying the
+	 * older one loses the link: `splitSuggestionTrailer` cuts everything after
+	 * the marker, so the reviewer measured `LINK IN BODY? false`.
+	 */
+	test("the marketUrl line and the follow-ups line are ordered, not in conflict", () => {
+		const marketRule = SYSTEM_PROMPT.slice(SYSTEM_PROMPT.indexOf("- When getThesisContext returns a marketUrl"));
+		const marketLine = marketRule.slice(0, marketRule.indexOf("\n"));
+		// The old wording claimed the end of the answer for the link.
+		expect(marketLine).not.toContain("END your answer with");
+		expect(marketLine).toContain("immediately BEFORE the follow-ups line");
+		// And the Follow-ups block says the same thing from its own side.
+		const trailerRule = SYSTEM_PROMPT.slice(SYSTEM_PROMPT.indexOf("The LAST line of every reply is exactly"));
+		expect(trailerRule.slice(0, trailerRule.indexOf("\n"))).toContain("marketUrl line goes immediately before this one");
+	});
+
+	/**
+	 * Opus tester (pass at this pin): with a tool result that said only "Tool call
+	 * execution denied.", the model invented a cause — "the order on the book has
+	 * nearly expired". A denial is a fact the result states; a reason is not.
+	 */
+	test("a denied approval is reported, never explained away", () => {
+		const limits = SYSTEM_PROMPT.slice(
+			SYSTEM_PROMPT.indexOf("## Limits you must respect"),
+			SYSTEM_PROMPT.indexOf("## Honesty"),
+		);
+		const rule = limits.slice(limits.indexOf("- When a tool result says the user DECLINED"));
+		const line = rule.slice(0, rule.indexOf("\n"));
+		expect(line).toContain("DECLINED or DENIED");
+		expect(line).toContain("nothing was sent");
+		expect(line).toContain("Never guess why");
+		// The wording is not the owner's yet, and the file says so.
+		const source = readFileSync(new URL("./prompt.ts", import.meta.url), "utf8");
+		expect(source).toContain('TODO-OWNER: the "Limits you must respect" sentence about a DECLINED approval');
 	});
 });
 

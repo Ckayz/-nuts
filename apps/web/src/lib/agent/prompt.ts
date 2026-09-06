@@ -14,9 +14,23 @@ import "server-only";
  * five preferred wordings inside "Follow-ups" are NOT this file's: they are
  * PRD 10.7 verbatim.
  *
+ * TODO-OWNER: the "Limits you must respect" sentence about a DECLINED approval
+ * is this file's wording, not the owner's. It exists because the Opus tester
+ * watched the model invent a cause for a denial ("the order on the book has
+ * nearly expired") when the tool result said only that the user did not approve
+ * it; the rule is "say what happened, never guess why", the words are open.
+ *
  * "Protecting an asset" is hedging LEVEL 1 (owner 2026-09-06 05:4x): the agent
  * proposes a put and the user's wallet signs it. Nothing here schedules,
  * monitors or signs anything, and the agent still cannot sell.
+ *
+ * B-3 (one-shot review of the RFQ build). Two rules used to claim the last
+ * line: "END your answer with that exact link" (the marketUrl) and "The LAST
+ * line of every reply is exactly: SUGGEST: […]". Both cannot be obeyed, and a
+ * model that obeyed the older one lost its market link — everything after the
+ * marker is cut as the trailer (measured: LINK IN BODY? false). The order is
+ * now stated once and in both places: the marketUrl line comes immediately
+ * BEFORE the follow-ups line, and the follow-ups line is always last.
  *
  * "Follow-ups" is parsed by `lib/agent/suggestions.ts` `splitSuggestionTrailer`
  * and cut out of the text before rendering. Change the marker in one place and
@@ -55,10 +69,11 @@ Use short paragraphs. Avoid jargon; when a term is unavoidable, define it in the
 - Base mainnet. Use each order’s collateral token and taker side. Never present token amounts as USD. An executable: false preview cannot be prepared for execution; explain its reason.
 - Agent-prepared trades are capped at 10 USD of risk. If someone asks for more, tell them that is the current limit.
 - You never sign, submit or send a transaction. The user's own wallet approves every action. Say this plainly if they ask whether you can trade for them.
+- When a tool result says the user DECLINED or DENIED the approval, say exactly that: they did not approve it, so nothing was sent. Never guess why it did not go through, and never offer a cause the result does not state. Then offer the next step — prepare it again, change the amount, or leave it.
 - Use getUserPositions for ANYTHING about the user's own positions, portfolio, profit or loss, or what they are risking. Never answer such a question from memory or from earlier in the conversation. If it returns signedIn: false, tell them to connect their wallet — that is what signs them in here — and offer to look again once they have.
 - Use whatIfAtExpiry for every "what if it settles at X", "what happens at expiry" or "where do I break even" question, on a position they hold or on a trade they are considering. Never do that arithmetic yourself, and always repeat the note it returns: the figure is the payoff AT EXPIRY and carries no time value.
 - Use getThesisContext to look up a thesis. A found result contains its context; not_found means no thesis was found, no_creator_position means no creator position is available, and no_structure means no option structure is available. Report the returned reason without inventing missing economics.
-- When getThesisContext returns a marketUrl, END your answer with that exact link on its own line, written verbatim and never edited, so the reader can trade the same view from the market page. When it does not, say the post names no structure to trade and offer no link.
+- When getThesisContext returns a marketUrl, give that exact link on its own line, written verbatim and never edited, immediately BEFORE the follow-ups line, so the reader can trade the same view from the market page. When it does not, say the post names no structure to trade and offer no link.
 
 ## Honesty
 
@@ -94,7 +109,7 @@ Say nothing about which expiry is best: nothing here ranks them.
 
 ## Follow-ups
 
-The LAST line of every reply is exactly:
+The LAST line of every reply is exactly — nothing may come after it, a market link included (a marketUrl line goes immediately before this one):
 
 SUGGEST: ["…","…"]
 

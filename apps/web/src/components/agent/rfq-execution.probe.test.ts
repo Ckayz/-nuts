@@ -675,21 +675,83 @@ describe("the agent-prepared cancel card", () => {
 			token: kind === "rfq_cancel" ? "cancel-tok" : "settle-tok",
 			account: WALLET,
 			chainId: 8453,
+			// D-4: deliberately NOT the bytes the server would build now. The agent
+			// built these at tool-call time, and minutes can pass before the press.
 			...(kind === "rfq_cancel"
-				? { cancel: { to: FACTORY as `0x${string}`, data: "0xCA0001" as `0x${string}`, value: "0" as const } }
-				: { settle: { to: FACTORY as `0x${string}`, data: "0x5E0001" as `0x${string}`, value: "0" as const } }),
+				? { cancel: { to: FACTORY as `0x${string}`, data: "0xDEAD01" as `0x${string}`, value: "0" as const } }
+				: { settle: { to: FACTORY as `0x${string}`, data: "0xDEAD02" as `0x${string}`, value: "0" as const } }),
 		};
 	}
 
-	test("it sends its one transaction and records it", async () => {
+	test("D-4: it re-prepares through the SERVER and sends those bytes, not the agent's", async () => {
 		reset();
 		const h = mount(RfqActionExecution, { action: action("rfq_cancel") });
 		await h.settle();
 		press(h);
 		await h.settle();
-		console.log("ACTION_CARD", JSON.stringify({ sent: calls.sends.map((s) => s.data), records: rfq.records }));
+		console.log(
+			"ACTION_CARD",
+			JSON.stringify({
+				sent: calls.sends.map((s) => s.data),
+				serverPrepares: { cancel: rfq.cancels.length, settle: rfq.settles.length },
+				records: rfq.records,
+			}),
+		);
+		// The server was asked, and what LEFT is what it answered.
+		expect(rfq.cancels).toEqual([{ rfqRequestId: "row-1" }]);
 		expect(calls.sends.map((s) => s.data)).toEqual(["0xCA0001"]);
+		expect(calls.sends.map((s) => s.data)).not.toContain("0xDEAD01");
+		// And the recording token is the fresh one, so the receipt is bound to the
+		// preparation that actually produced the calldata.
 		expect(rfq.records).toEqual([{ token: "cancel-tok", txHash: HASH, kind: "cancel" }]);
+		h.unmount();
+	});
+
+	test("D-4: a settle card re-prepares too", async () => {
+		reset();
+		const h = mount(RfqActionExecution, { action: action("rfq_settle") });
+		await h.settle();
+		press(h);
+		await h.settle();
+		console.log("ACTION_SETTLE", JSON.stringify({ sent: calls.sends.map((s) => s.data), settles: rfq.settles }));
+		expect(rfq.settles).toEqual([{ rfqRequestId: "row-1" }]);
+		expect(calls.sends.map((s) => s.data)).toEqual(["0x5E0001"]);
+		h.unmount();
+	});
+
+	test("D-4: a re-preparation the server refuses sends nothing", async () => {
+		reset();
+		rfq.prepareCancel = async () => ({ ok: false, code: "GONE", reason: "That request is no longer cancellable." });
+		const h = mount(RfqActionExecution, { action: action("rfq_cancel") });
+		await h.settle();
+		press(h);
+		await h.settle();
+		console.log("ACTION_REFUSED", JSON.stringify({ sends: calls.sends.length, text: h.text().slice(-120) }));
+		expect(calls.sends.length).toBe(0);
+		expect(h.text()).toContain("no longer cancellable");
+		h.unmount();
+	});
+
+	test("D-4: calldata that took too long to come back is not broadcast", async () => {
+		reset();
+		// PRD 14's 30-second fetch-to-broadcast window, the same bound the create
+		// path uses. The clock is moved by the stub rather than by waiting.
+		const realNow = Date.now;
+		rfq.prepareCancel = async () => {
+			Date.now = () => realNow.call(Date) + 40_000;
+			return { ok: true, cancel: { to: FACTORY, data: "0xCA0001", value: "0" }, quotationId: "125", token: "cancel-tok" };
+		};
+		const h = mount(RfqActionExecution, { action: action("rfq_cancel") });
+		await h.settle();
+		try {
+			press(h);
+			await h.settle();
+		} finally {
+			Date.now = realNow;
+		}
+		console.log("ACTION_STALE", JSON.stringify({ sends: calls.sends.length, text: h.text().slice(-160) }));
+		expect(calls.sends.length).toBe(0);
+		expect(h.text()).toContain("30 seconds");
 		h.unmount();
 	});
 

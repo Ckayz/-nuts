@@ -987,7 +987,6 @@ export function RfqActionExecution({
 	const [status, setStatus] = useState<RfqStatusView | null>(null);
 
 	const kind: RfqTxKind = action.kind === "rfq_cancel" ? "cancel" : "settle";
-	const tx = action.kind === "rfq_cancel" ? action.cancel : action.settle;
 	const busy = BUSY.has(phase);
 
 	const finishRecording = useCallback(
@@ -1010,6 +1009,21 @@ export function RfqActionExecution({
 		[hold, onDone, setMessage, setPhase],
 	);
 
+	/**
+	 * D-4. This card used to broadcast `action.cancel` / `action.settle` — the
+	 * calldata the AGENT's tool built at tool-call time — unchanged, while the
+	 * watching card's own `act()` re-prepared through the server on every press.
+	 * Between the tool call, the approval card and the wallet press, minutes can
+	 * pass; the request can settle, be cancelled by a maker bot, or stop being
+	 * cancellable at all, and `PreparedRfqAction` carries no `preparedAt` for
+	 * this card to test.
+	 *
+	 * So it takes its own timestamp, asks the server to build the transaction
+	 * again from the row id, and refuses anything that came back outside PRD
+	 * 14's 30-second window. One code path for both entry points: what leaves
+	 * the wallet is always what the server built moments ago, and the token the
+	 * receipt is recorded against is that preparation's own.
+	 */
 	const send = useCallback(async () => {
 		setMessage(null);
 		if (held !== null) {
@@ -1020,7 +1034,7 @@ export function RfqActionExecution({
 			}
 			return;
 		}
-		if (tx === undefined) {
+		if (action.rfqRequestId === "") {
 			setPhase("error");
 			setMessage(COPY.cannotRefresh);
 			return;
@@ -1032,11 +1046,29 @@ export function RfqActionExecution({
 			return;
 		}
 		try {
-			if (anotherIsHeld()) return;
 			setPhase(kind === "cancel" ? "cancelling" : "settling");
+			// Taken BEFORE the read that produces the calldata, exactly as the
+			// server stamps `preparedAt` on a create.
+			const preparedAt = new Date().toISOString();
+			const prepared =
+				kind === "cancel"
+					? await prepareRfqCancelFor({ rfqRequestId: action.rfqRequestId })
+					: await prepareRfqSettleFor({ rfqRequestId: action.rfqRequestId });
+			if (!prepared.ok) {
+				setPhase("error");
+				setMessage(prepared.reason);
+				return;
+			}
+			if (fillIsStale(preparedAt, Date.now())) {
+				setPhase("error");
+				setMessage(COPY.tooOldToSend);
+				return;
+			}
+			const tx: TxRequest = "cancel" in prepared ? prepared.cancel : prepared.settle;
+			if (anotherIsHeld()) return;
 			const hash = await broadcast(tx, gate.account);
 			setTxHash(hash);
-			const sent: HeldRfq = { token: action.token, txHash: hash, kind, rfqRequestId: action.rfqRequestId };
+			const sent: HeldRfq = { token: prepared.token, txHash: hash, kind, rfqRequestId: action.rfqRequestId };
 			hold(sent);
 			try {
 				await finishRecording(sent);
@@ -1050,7 +1082,6 @@ export function RfqActionExecution({
 		}
 	}, [
 		action.rfqRequestId,
-		action.token,
 		anotherIsHeld,
 		broadcast,
 		finishRecording,
@@ -1062,7 +1093,6 @@ export function RfqActionExecution({
 		setMessage,
 		setPhase,
 		setTxHash,
-		tx,
 	]);
 
 	const label =

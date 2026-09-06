@@ -5,5 +5,6 @@ export * from "./markets";
 export * from "./positions";
 export * from "./quote";
 export * from "./receipt";
+export * from "./rfq";
 export * from "./risk";
 export * from "./side";

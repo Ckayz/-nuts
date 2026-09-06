@@ -158,6 +158,28 @@ export const env = createEnv({
 		 */
 		NEYNAR_API_KEY: z.string().optional(),
 
+		/**
+		 * AES-256-GCM key that encrypts the RFQ requester keypairs at rest
+		 * (`agent_rfq_keys.encrypted_private_key`). 32 bytes as 64 hex
+		 * characters — generate one with `openssl rand -hex 32`.
+		 *
+		 * These are ENCRYPTION keys, not signing keys: an RFQ carries the
+		 * requester's compressed ECDH public key so market makers can encrypt
+		 * their offers to it, and the private half only ever decrypts an offer.
+		 * It cannot move funds and it never reaches the browser or the model.
+		 *
+		 * OPTIONAL, and its absence is the SAFE state: with no value configured
+		 * `lib/rfq/keys.ts` refuses to mint or read a key, so RFQ creation is
+		 * refused with one sentence rather than storing a private key in the
+		 * clear. Every other path is unaffected.
+		 *
+		 * Rotating it ORPHANS every stored key: rows encrypted under the old
+		 * value stop decrypting, and the docs are explicit that a lost RFQ key
+		 * means offers on that RFQ can never be read (llms-full.txt,
+		 * "Key Management"). Rotate only with a re-encryption pass.
+		 */
+		RFQ_KEY_MASTER_KEY: z.string().regex(/^[0-9a-f]{64}$/i, "RFQ_KEY_MASTER_KEY must be 32 bytes as 64 hex characters").optional(),
+
 		/** Base mainnet RPC. Public endpoint works; a keyed provider is better under load. */
 		BASE_RPC_URL: z.string().url().default("https://mainnet.base.org"),
 		THESIS_REFERRER: z.string().regex(/^0x[0-9a-fA-F]{40}$/).default("0xd5E66B6d957C2d5e6C8c167707a49a029D1247dd"),

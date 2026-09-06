@@ -1,4 +1,4 @@
-import { MemoryStorageProvider, ThetanutsClient } from "@thetanuts-finance/thetanuts-client";
+import { MemoryStorageProvider, ThetanutsClient, type KeyStorageProvider } from "@thetanuts-finance/thetanuts-client";
 import { JsonRpcProvider } from "ethers";
 import { ThetanutsLogicError } from "./errors";
 
@@ -8,6 +8,25 @@ export interface CreateReadClientParams { readonly rpcUrl: string; readonly refe
 
 export function createReadClient({ rpcUrl, referrer }: CreateReadClientParams): ThetanutsClient {
   return new ThetanutsClient({ chainId: BASE_CHAIN_ID, provider: new JsonRpcProvider(rpcUrl), referrer, keyStorageProvider: new MemoryStorageProvider() });
+}
+
+export interface CreateRfqClientParams extends CreateReadClientParams {
+  /**
+   * Where the requester's ECDH private key lives. RFQ offers are encrypted to
+   * the requester's public key, so a key that dies with the process (the
+   * `MemoryStorageProvider` `createReadClient` uses) means offers on an RFQ
+   * created today can never be decrypted. Pass a durable, per-wallet provider.
+   */
+  readonly keyStorageProvider: KeyStorageProvider;
+}
+
+/**
+ * A client for the RFQ path. Same constructor as `createReadClient` — the only
+ * difference is the injected key storage, which is what makes the requester's
+ * keypair outlive the process. Reads and calldata encoders behave identically.
+ */
+export function createRfqClient({ rpcUrl, referrer, keyStorageProvider }: CreateRfqClientParams): ThetanutsClient {
+  return new ThetanutsClient({ chainId: BASE_CHAIN_ID, provider: new JsonRpcProvider(rpcUrl), referrer, keyStorageProvider });
 }
 
 export function assertBaseChain(chainId: number): asserts chainId is typeof BASE_CHAIN_ID {

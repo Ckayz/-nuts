@@ -197,7 +197,7 @@ repair:
    pre-run baseline.
 3. Fix the cause locally, prove it on a fresh throwaway
    (`create database x` + `bunx drizzle-kit migrate` from an EMPTY database, so
-   the whole chain `0000`-`0009` is exercised, not just the tail), then re-run
+   the whole chain `0000`-`0010` is exercised, not just the tail), then re-run
    the production command. Re-running after a rollback is safe: the batch is
    applied from the same starting point.
 4. NEVER `drizzle-kit push` to "repair" the difference, and never hand-edit
@@ -219,7 +219,7 @@ WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
 ORDER BY table_name;
 ```
 
-Expected migration count: **10** (`0000`–`0009`. `0000`–`0008` measured 2026-09-05 on a fresh throwaway and on a `0000`-only baseline, where `0001`–`0008` commit in one transaction; production itself measured at 10 on 2026-09-06 06:57.) A count below 10 means a migration this repository carries has not been applied — investigate before deploying. Expected application tables: `activity`, `agent_conversations`, `agent_messages`, `agent_proposals`, `agent_receipts`, `agent_rfq_keys`, `agent_usage`, `auth_challenges`, `comments`, `follows`, `likes`, `positions`, `theses`, `users`. Investigate an unexpected baseline or result before deployment.
+Expected migration count: **11** (`0000`–`0010`. `0000`–`0008` measured 2026-09-05 on a fresh throwaway and on a `0000`-only baseline, where `0001`–`0008` commit in one transaction; production itself measured at 10 on 2026-09-06 06:57, i.e. before `0010_rfq_requests`, which is measured 2026-09-06 on a fresh throwaway migrated from empty — 11 rows, 15 tables.) A count below 11 means a migration this repository carries has not been applied — investigate before deploying. Expected application tables: `activity`, `agent_conversations`, `agent_messages`, `agent_proposals`, `agent_receipts`, `agent_rfq_keys`, `agent_usage`, `auth_challenges`, `comments`, `follows`, `likes`, `positions`, `rfq_requests`, `theses`, `users`. Investigate an unexpected baseline or result before deployment.
 
 Standing rule: **NEVER run `drizzle-kit push` against the shared or production database.** Use migrations; push can drop another developer's tables.
 

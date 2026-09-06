@@ -591,26 +591,39 @@ describe("rfqActionToolOutput", () => {
  * ------------------------------------------------------------------ */
 
 describe("lib/rfq/actions.ts", () => {
-	test("exports exactly the seven names rfq-execution.tsx imports, all async", async () => {
-		const actions: Record<string, unknown> = await import("@/lib/rfq/actions");
-		for (const name of [
-			"prepareRfqCreateFor",
-			"prepareRfqCancelFor",
-			"prepareRfqSettleFor",
-			"recordRfqCreateFor",
-			"recordRfqCancelFor",
-			"recordRfqSettleFor",
-			"getRfqStatusFor",
-		]) {
-			expect(typeof actions[name]).toBe("function");
-			expect((actions[name] as { constructor: { name: string } }).constructor.name).toBe("AsyncFunction");
-		}
+	/**
+	 * Orchestrator (integration): read from the SOURCE, not from `import()`.
+	 * `components/agent/rfq-execution.probe.test.ts` replaces this module with
+	 * `mock.module` for the card's probes, and bun applies that process-wide, so
+	 * a later file importing the real module got the mock and this test failed
+	 * only in the full run (36/0 alone, RED in `bun test`). The text is what the
+	 * card's import statement is bound to, and it cannot be mocked.
+	 */
+	const source = readFileSync(new URL("../rfq/actions.ts", import.meta.url), "utf8");
+	const exported = [...source.matchAll(/^export async function (\w+)\(/gm)].map((m) => m[1]);
+
+	test("exports exactly the seven names rfq-execution.tsx imports, all async", () => {
+		expect(source.startsWith('"use server"')).toBe(true);
+		expect([...exported].sort()).toEqual(
+			[
+				"prepareRfqCreateFor",
+				"prepareRfqCancelFor",
+				"prepareRfqSettleFor",
+				"recordRfqCreateFor",
+				"recordRfqCancelFor",
+				"recordRfqSettleFor",
+				"getRfqStatusFor",
+			].sort(),
+		);
+		// Nothing else is exported: a `"use server"` module's every export is callable from the browser.
+		expect(source.match(/^export (?!async function)/gm)).toBeNull();
 	});
 
-	test("no action accepts a session or a wallet: each takes exactly one argument", async () => {
-		const actions: Record<string, (...args: never[]) => unknown> = await import("@/lib/rfq/actions");
-		for (const name of Object.keys(actions)) {
-			expect(actions[name]?.length).toBe(1);
+	test("no action accepts a session or a wallet: each takes exactly one argument", () => {
+		for (const m of source.matchAll(/^export async function \w+\(([^)]*)\)/gm)) {
+			const params = m[1] ?? "";
+			expect(params.split(",").filter((p) => p.trim() !== "").length).toBe(1);
+			expect(params).not.toMatch(/session|wallet|account/i);
 		}
 	});
 });

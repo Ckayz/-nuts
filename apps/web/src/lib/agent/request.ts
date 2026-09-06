@@ -333,9 +333,18 @@ export const HISTORY_TOO_LONG = "agent:history-too-long";
 export const REQUEST_TOO_LONG = "agent:request-too-long";
 
 /**
- * The text of one message, exactly as the route's `inboundTexts` and the scope
- * gate read it. One implementation so the validated string and the classified
- * string cannot drift apart.
+ * The trimmed text of one message.
+ *
+ * K-4: this used to say "exactly as the route's `inboundTexts` and the scope
+ * gate read it", and that stopped being true the moment `inboundTexts` began
+ * serialising the whole message — the gate now reads `JSON.stringify(message)`,
+ * which CONTAINS this text and is longer than it. The sentence is corrected
+ * rather than deleted because a stale claim about what the gate sees is the
+ * failure this whole fold is about.
+ *
+ * What it is now: the trim of `rawMessageText`, kept because the length fence's
+ * history is written against it and the tests measure both halves of that
+ * story. `rawMessageText` — untrimmed — is what the fence actually measures.
  */
 export function messageText(parts: ReadonlyArray<{ type?: unknown; text?: unknown }>): string {
 	return rawMessageText(parts).trim();
@@ -356,6 +365,105 @@ export function rawMessageText(parts: ReadonlyArray<{ type?: unknown; text?: unk
 		)
 		.map((part) => part.text)
 		.join("\n");
+}
+
+/**
+ * K-4 item 2 (pass-5 lane C MAJOR-1). Fields on a PART that the SERVER wrote on
+ * an earlier turn and the browser only echoes back.
+ *
+ * MEASURED at the installed SDK's bytes, not assumed:
+ *   - `providerMetadata` on a text or reasoning part is written by the UI
+ *     message stream from the provider's own chunks (`ai@7.0.92`
+ *     dist/index.js:7094, 7108, 7146, 7159) and forwarded by
+ *     `convertToModelMessages` as `providerOptions` (:11541, 11563, 11575).
+ *   - `callProviderMetadata` is written the same way (:7002, 7051) and becomes
+ *     the tool call's `providerOptions` (:11643); `resultProviderMetadata`
+ *     becomes the tool result's (:11656, 11668).
+ *   - `toolMetadata` comes from a server tool's own `metadata` (:7207, 7228) and
+ *     is NOT read by `convertToModelMessages` at all -- it reaches the browser
+ *     and stops there. The pass-5 brief listed it as a channel to the model;
+ *     that is REFUTED at the bytes. It is dropped here anyway: it is the same
+ *     kind of field, unbounded by shape, and nothing downstream reads it.
+ *
+ * `useChat` really does send all of them back (`this.state.messages` is the
+ * request body), which is why they are still ACCEPTED by the schema and dropped
+ * here instead of being refused -- refusing would 400 an honest browser's next
+ * message.
+ *
+ * This app relies on none of them: `route.ts` passes no `providerOptions`, no
+ * `experimental_toolApprovalSecret` and no reasoning configuration (grep), so
+ * nothing it sends depends on a value coming back. If extended thinking is ever
+ * enabled, an Anthropic reasoning part's signature travels in
+ * `providerMetadata` and this list must lose that key again.
+ */
+const ECHOED_PART_KEYS = [
+	"providerMetadata",
+	"toolMetadata",
+	"callProviderMetadata",
+	"resultProviderMetadata",
+] as const;
+
+/**
+ * K-4 item 2. The same, inside a tool part's `approval`.
+ *
+ * `requestReason` and `signature` are written by the SERVER when it asks for an
+ * approval (`ai@7.0.92` dist/index.js:5985-6028: `signature` only when
+ * `experimental_toolApprovalSecret` is set, `reason` only when the
+ * `toolApproval` decision carries one) and `useChat` spreads the old approval
+ * object into its response (:18886). This route sets neither option, so neither
+ * value is ever produced here and a client sending one is inventing it.
+ *
+ * `reason` is the field the PERSON could in principle write:
+ * `addToolApprovalResponse({id, approved, reason})`. MEASURED in this app's own
+ * UI -- `components/agent/agent-chat.tsx:326` calls it with `{ id, approved }`
+ * and nothing else, and no other call site exists (grep) -- so today it is
+ * never a person's words either. It reaches the model TWICE when present
+ * (`tool-approval-response.reason` and a `tool-result` output whose
+ * `type: "execution-denied"` reads as an app-produced fact), which is why it
+ * goes.
+ *
+ * If a future ticket lets someone type a reason for declining a trade, this key
+ * comes off the list; the gate already classifies it either way, because
+ * `inboundTexts` serialises the message BEFORE this runs.
+ */
+const ECHOED_APPROVAL_KEYS = ["reason", "requestReason", "signature"] as const;
+
+function withoutEchoedFields(part: unknown): unknown {
+	if (typeof part !== "object" || part === null || Array.isArray(part)) return part;
+	const copy: Record<string, unknown> = { ...(part as Record<string, unknown>) };
+	for (const key of ECHOED_PART_KEYS) delete copy[key];
+	const approval = copy.approval;
+	if (typeof approval === "object" && approval !== null && !Array.isArray(approval)) {
+		const approvalCopy: Record<string, unknown> = { ...(approval as Record<string, unknown>) };
+		for (const key of ECHOED_APPROVAL_KEYS) delete approvalCopy[key];
+		copy.approval = approvalCopy;
+	}
+	return copy;
+}
+
+/**
+ * K-4 item 2. The messages as the PRIMARY model may see them.
+ *
+ * Called by `route.ts` between the scope gate and `convertToModelMessages`, on
+ * purpose and in that order: the gate classifies what the client actually sent,
+ * and the model receives a subset of it. Doing this inside the schema instead
+ * would hide these bytes from the authoritative layer as well -- which is the
+ * exact shape of the defect this fold closes -- and would also let the
+ * `MAX_REQUEST_CHARS` fence stop counting them.
+ *
+ * Non-mutating: the caller has already handed the originals to the gate, and a
+ * shared array that changes underneath a later reader is its own bug.
+ *
+ * This IS an enumeration, and unlike `inboundTexts` that is fine: it removes
+ * surface, it does not establish a guarantee. Completeness lives in
+ * `inboundTexts`. A field this list forgets is still classified.
+ */
+export function withoutClientEchoes<T extends { readonly parts?: unknown }>(messages: readonly T[]): T[] {
+	return messages.map((message) => {
+		const parts = message.parts;
+		if (!Array.isArray(parts)) return message;
+		return { ...message, parts: parts.map(withoutEchoedFields) } as unknown as T;
+	});
 }
 
 /**

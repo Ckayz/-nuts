@@ -25,10 +25,19 @@ const repoRoot = resolve(here, "../../..");
 const webEnvDir = resolve(repoRoot, "apps/web");
 
 // Highest priority first: dotenv keeps the first value it sees for a given key.
+// `.env.<NODE_ENV>` sits between them because BUN loads it too (`bun test` runs
+// with NODE_ENV=test): pass-5 lane A (2026-09-06) measured that an
+// `apps/web/.env.test` was invisible to `envFileValues()`, so the test-database
+// fence read its value as a human's choice and the destructive suites ran
+// (record.integration 37 pass instead of 3 pass / 35 skip). The same order Bun
+// uses: `.env.local`, then `.env.<NODE_ENV>`, then `.env`.
+const nodeEnvFile = process.env.NODE_ENV ? `.env.${process.env.NODE_ENV}` : null;
 const candidates = [
 	resolve(process.cwd(), ".env.local"),
+	...(nodeEnvFile ? [resolve(process.cwd(), nodeEnvFile)] : []),
 	resolve(process.cwd(), ".env"),
 	resolve(webEnvDir, ".env.local"),
+	...(nodeEnvFile ? [resolve(webEnvDir, nodeEnvFile)] : []),
 	resolve(webEnvDir, ".env"),
 ];
 

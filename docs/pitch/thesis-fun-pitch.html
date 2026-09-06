@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thesis.fun — Pitch</title>
+  <style>
+    :root {
+      /* Thesis.fun's own tokens (apps/web/src/index.css), measured 2026-09-06 */
+      --c-bg: #060510;
+      --c-bg-alt: #0b0a16;
+      --c-bg-card: #12111a;
+      --c-surface: #1a1922;
+      --c-border: #282438;
+      --c-primary: #3f6fe0;
+      --c-primary-lift: #7598e9;
+      --c-primary-dim: rgba(63,111,224,0.14);
+      --c-gain: #1cce59;
+      --c-loss: #fd6536;
+      --c-text: #f7f7f7;
+      --c-text-secondary: rgba(247,247,247,0.72);
+      --c-text-muted: #9899a3;
+      --f-hero: 96px; --f-h1: 60px; --f-h2: 44px; --f-h3: 32px; --f-body: 26px; --f-small: 21px; --f-caption: 17px;
+      --font: -apple-system, "SF Pro Display", "SF Pro Text", "Manrope", Inter, system-ui, sans-serif;
+      --s-xs: 8px; --s-sm: 16px; --s-md: 32px; --s-lg: 48px; --s-xl: 64px;
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; background: var(--c-bg); color: var(--c-text); font-family: var(--font); -webkit-font-smoothing: antialiased; }
+    .deck { width: 100vw; height: 100vh; position: relative; overflow: hidden; }
+    .slide { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding: 72px 110px; opacity: 0; pointer-events: none; transition: opacity .45s var(--ease-out); background: var(--c-bg); }
+    .slide.active { opacity: 1; pointer-events: auto; }
+    .slide.active .in { animation: up .55s var(--ease-out) both; }
+    .slide.active .in:nth-child(1){animation-delay:0s}.slide.active .in:nth-child(2){animation-delay:.06s}.slide.active .in:nth-child(3){animation-delay:.12s}.slide.active .in:nth-child(4){animation-delay:.18s}.slide.active .in:nth-child(5){animation-delay:.24s}.slide.active .in:nth-child(6){animation-delay:.3s}
+    @keyframes up { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .slide { transition: opacity .2s; } .slide.active .in { animation: none; } }
+    .hero { font-size: var(--f-hero); font-weight: 800; letter-spacing: -0.035em; line-height: 1.02; }
+    .h1 { font-size: var(--f-h1); font-weight: 750; letter-spacing: -0.025em; line-height: 1.08; text-wrap: balance; }
+    .h2 { font-size: var(--f-h2); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; text-wrap: balance; }
+    .h3 { font-size: var(--f-h3); font-weight: 650; letter-spacing: -0.012em; line-height: 1.25; }
+    .body { font-size: var(--f-body); font-weight: 450; line-height: 1.45; color: var(--c-text-secondary); }
+    .small { font-size: var(--f-small); line-height: 1.45; color: var(--c-text-secondary); }
+    .caption { font-size: var(--f-caption); font-weight: 600; color: var(--c-text-muted); letter-spacing: .12em; text-transform: uppercase; }
+    .num { font-variant-numeric: tabular-nums; }
+    .lift { color: var(--c-primary-lift); }
+    .gain { color: var(--c-gain); } .loss { color: var(--c-loss); } .muted { color: var(--c-text-muted); }
+    .bg-alt { background: var(--c-bg-alt); }
+    .divider { width: 56px; height: 3px; border-radius: 2px; background: var(--c-primary); margin: var(--s-md) 0; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-lg); }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-md); }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-md); }
+    .card { background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 18px; padding: var(--s-md); }
+    .metric { text-align: left; }
+    .metric-value { font-size: 64px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
+    .metric-label { font-size: var(--f-small); color: var(--c-text-muted); margin-top: 10px; }
+    .metric-src { font-size: 15px; color: var(--c-text-muted); margin-top: 8px; opacity: .8; }
+    .badge { display: inline-block; padding: 7px 16px; border-radius: 999px; font-size: var(--f-caption); font-weight: 600; letter-spacing: .04em; border: 1px solid var(--c-border); color: var(--c-text-secondary); }
+    .badge.accent { background: var(--c-primary-dim); color: var(--c-primary-lift); border-color: transparent; }
+    .bullets { list-style: none; }
+    .bullets li { padding: 14px 0 14px 30px; position: relative; font-size: var(--f-body); color: var(--c-text-secondary); border-bottom: 1px solid var(--c-border); }
+    .bullets li:last-child { border-bottom: 0; }
+    .bullets li::before { content: ''; position: absolute; left: 0; top: 50%; width: 8px; height: 8px; border-radius: 50%; background: var(--c-primary); transform: translateY(-50%); }
+    .shot { background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 18px; padding: 12px; }
+    .shot img { width: 100%; display: block; border-radius: 10px; }
+    table.cmp { width: 100%; border-collapse: collapse; }
+    table.cmp th { text-align: left; padding: 14px 18px; font-size: var(--f-small); color: var(--c-text-muted); border-bottom: 1px solid var(--c-border); font-weight: 600; }
+    table.cmp td { padding: 16px 18px; font-size: var(--f-body); border-bottom: 1px solid var(--c-border); color: var(--c-text-secondary); }
+    table.cmp tr.us td { color: var(--c-text); background: var(--c-primary-dim); font-weight: 600; }
+    .yes { color: var(--c-gain); font-weight: 700; } .no { color: var(--c-text-muted); }
+    .timeline { position: relative; padding-left: 40px; }
+    .timeline::before { content: ''; position: absolute; left: 10px; top: 0; bottom: 0; width: 2px; background: var(--c-border); }
+    .tl { position: relative; padding-bottom: 26px; }
+    .tl .dot { position: absolute; left: -36px; top: 8px; width: 12px; height: 12px; border-radius: 50%; background: var(--c-border); border: 2px solid var(--c-bg); }
+    .tl.done .dot { background: var(--c-gain); }
+    .tl.now .dot { background: var(--c-primary); }
+    .foot { position: absolute; left: 110px; right: 110px; bottom: 34px; font-size: 15px; color: var(--c-text-muted); }
+    .foot a { color: inherit; }
+    .nav { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 14px 36px; background: linear-gradient(0deg, rgba(6,5,16,.95), transparent); z-index: 100; opacity: 0; transition: opacity .3s; }
+    .deck:hover .nav { opacity: 1; }
+    .nav-counter { font-size: 15px; color: var(--c-text-muted); font-variant-numeric: tabular-nums; }
+    .nav-progress { flex: 1; max-width: 220px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.08); margin: 0 22px; }
+    .nav-progress-fill { height: 100%; border-radius: 2px; background: var(--c-primary); transition: width .3s var(--ease-out); }
+    .nav-btn { background: none; border: 1px solid var(--c-border); color: var(--c-text-secondary); padding: 8px 14px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 14px; }
+    .nav-btn:hover { border-color: var(--c-primary); color: var(--c-text); }
+    .notes { display: none; position: fixed; bottom: 60px; left: 40px; right: 40px; background: rgba(0,0,0,.92); border: 1px solid var(--c-border); border-radius: 14px; padding: 18px 22px; font-size: 16px; color: var(--c-text-secondary); line-height: 1.55; z-index: 200; max-height: 220px; overflow-y: auto; }
+    .notes.visible { display: block; }
+    @media print { .deck { overflow: visible; } .slide { position: relative; opacity: 1; pointer-events: auto; page-break-after: always; height: 100vh; } .nav, .notes { display: none !important; } .in { animation: none !important; } }
+  </style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+  <!-- 1 · Title -->
+  <div class="slide bg-alt" style="justify-content:center;align-items:center;text-align:center;">
+    <div class="in" style="font-size:28px;font-weight:800;letter-spacing:-.03em;color:var(--c-text-muted);margin-bottom:26px;">thesis<span class="lift">.fun</span></div>
+    <h1 class="hero in">Say it. <span class="lift">Trade it.</span></h1>
+    <p class="h3 in" style="color:var(--c-text-secondary);margin-top:26px;max-width:860px;font-weight:500;">Social trading, the fomo way — but for real onchain options, not memecoins.</p>
+    <div class="in" style="margin-top:44px;display:flex;gap:12px;">
+      <span class="badge accent">Thetanuts OptionBook</span><span class="badge">Base mainnet</span><span class="badge">Live · first real fill today</span>
+    </div>
+    <div class="notes">Bar test: "Thesis.fun is fomo for options. You post a take on BTC, you buy or sell a real option against it from your own wallet, and the trade lives on your profile with a live P&amp;L card that everyone can check on chain." Say it in one breath, then go straight to the story.</div>
+  </div>
+
+  <!-- 2 · The story so far -->
+  <div class="slide">
+    <span class="caption in">Social trading has been tried for years</span>
+    <h1 class="h1 in" style="margin-top:16px;max-width:1100px;">Farcaster. The Base app. It kept almost taking off.</h1>
+    <div class="divider in"></div>
+    <div class="grid-3 in">
+      <div class="card"><p class="caption" style="color:var(--c-primary-lift);">2023–24</p><p class="h3" style="margin-top:12px;">Farcaster frames</p><p class="small" style="margin-top:8px;">Trading inside a social feed. Loud, then quiet.</p></div>
+      <div class="card"><p class="caption" style="color:var(--c-primary-lift);">2025</p><p class="h3" style="margin-top:12px;">The Base app</p><p class="small" style="margin-top:8px;">Coinbase put a wallet and a feed together. Hype on, hype off, plenty of criticism.</p></div>
+      <div class="card" style="border-color:var(--c-primary);"><p class="caption" style="color:var(--c-primary-lift);">2026</p><p class="h3" style="margin-top:12px;">fomo and pump.fun</p><p class="small" style="margin-top:8px;">Two apps proved the model with real revenue, every day.</p></div>
+    </div>
+    <div class="notes">Keep this to 30 seconds. The point is: the idea was never wrong, the packaging was. Then show the numbers on the next slide.</div>
+  </div>
+
+  <!-- 3 · Proof the model works -->
+  <div class="slide bg-alt">
+    <span class="caption in">2026 · the model works</span>
+    <h1 class="h1 in" style="margin-top:16px;">Two social-trading apps, real revenue, this week.</h1>
+    <div class="divider in"></div>
+    <div class="grid-2 in">
+      <div class="card">
+        <p class="h3">fomo</p>
+        <div class="grid-2" style="margin-top:18px;gap:18px;">
+          <div class="metric"><div class="metric-value num gain">$7.06M</div><div class="metric-label">revenue, last 7 days</div></div>
+          <div class="metric"><div class="metric-value num">$18.3M</div><div class="metric-label">revenue, last 30 days</div></div>
+        </div>
+        <p class="metric-src">≈ $1.0M per day this week · $47.6M all-time · DefiLlama, 6 Sep 2026</p>
+      </div>
+      <div class="card">
+        <p class="h3">pump.fun</p>
+        <div class="grid-2" style="margin-top:18px;gap:18px;">
+          <div class="metric"><div class="metric-value num gain">$7.2M</div><div class="metric-label">revenue, last 7 days</div></div>
+          <div class="metric"><div class="metric-value num">$35.9M</div><div class="metric-label">revenue, last 30 days</div></div>
+        </div>
+        <p class="metric-src">$1.11B all-time · DefiLlama, 6 Sep 2026</p>
+      </div>
+    </div>
+    <p class="body in" style="margin-top:28px;">Both are built for one thing: <b style="color:var(--c-text);">memecoins and spot majors.</b> Nobody has done this for derivatives.</p>
+    <div class="notes">These are DefiLlama numbers pulled today (6 Sep 2026), not press quotes. fomo's 7-day pace is about one million dollars a day. If a judge asks "isn't fomo on Solana?" — yes, and that is the point: the model is proven, the venue and the asset class are open.</div>
+  </div>
+
+  <!-- 4 · The gap -->
+  <div class="slide">
+    <span class="caption in">The gap</span>
+    <h1 class="h1 in" style="margin-top:16px;max-width:1100px;">Options are the biggest derivatives market crypto has, and almost none of it is social or onchain.</h1>
+    <div class="divider in"></div>
+    <div class="grid-3 in">
+      <div class="metric card"><div class="metric-value num">$1.9T</div><div class="metric-label">Deribit options volume, 2025</div><div class="metric-src">≈ 49% of all crypto options · Cryptonomist / CoinLaw</div></div>
+      <div class="metric card"><div class="metric-value num">&lt;1%</div><div class="metric-label">of crypto options volume is onchain</div><div class="metric-src">CryptoSlate, 2026</div></div>
+      <div class="metric card"><div class="metric-value num">$69M</div><div class="metric-label">onchain options notional, last 30 days</div><div class="metric-src">DefiLlama options dashboard, 6 Sep 2026 · Derive leads at $64M</div></div>
+    </div>
+    <p class="body in" style="margin-top:28px;">Onchain options venues exist. Social apps exist. <b style="color:var(--c-text);">The square where they meet is empty.</b> So we built it.</p>
+    <div class="notes">Two numbers to remember: nearly two trillion in offchain options volume last year, under one percent of options onchain. That is the room. Do not oversell the onchain number — it is small today, which is exactly why a consumer front door matters.</div>
+  </div>
+
+  <!-- 5 · Introducing -->
+  <div class="slide bg-alt" style="justify-content:center;">
+    <span class="caption in">Introducing</span>
+    <h1 class="hero in" style="margin-top:16px;font-size:80px;">thesis<span class="lift">.fun</span></h1>
+    <p class="h2 in" style="margin-top:22px;max-width:1100px;font-weight:600;color:var(--c-text-secondary);">A trade is a post. Every position is a real option on Thetanuts, filled from your own wallet, with its own page and a live P&amp;L card anyone can verify on Base.</p>
+    <div class="grid-3 in" style="margin-top:44px;">
+      <div class="card"><p class="h3">Every market with liquidity</p><p class="small" style="margin-top:8px;">Assets, strikes and expiries come live from the OptionBook. Nothing hardcoded. 352 structures across 6 assets right now.</p></div>
+      <div class="card"><p class="h3">Both sides, honest sizing</p><p class="small" style="margin-top:8px;">Buy an option: lose at most the premium. Sell one: lock collateral, earn the premium. The ticket says exactly what you risk.</p></div>
+      <div class="card"><p class="h3">A feed that cannot lie</p><p class="small" style="margin-top:8px;">Likes, comments, follows and a leaderboard built only from onchain fills. A losing thesis cannot be deleted.</p></div>
+    </div>
+    <div class="notes">Three things, then demo. "Every market with liquidity" is a real differentiator: we derive the whole product from the live book, so when Thetanuts lists something we list it the same minute.</div>
+  </div>
+
+  <!-- 6 · Demo: market page -->
+  <div class="slide" style="padding:56px 80px;">
+    <div style="display:flex;gap:48px;align-items:center;height:100%;">
+      <div class="shot in" style="flex:1.45;"><img src="img/market-btc.png" alt="The BTC market page: live structures from the OptionBook, the Bull/Bear ticket, Binance spot chart"></div>
+      <div class="in" style="flex:1;display:flex;flex-direction:column;gap:18px;">
+        <span class="caption">Demo · the market page</span>
+        <h2 class="h2">Pick a structure. Take a side.</h2>
+        <ul class="bullets">
+          <li>Live book: 148 BTC structures today</li>
+          <li>Bull / Bear per instrument</li>
+          <li>Premium, max loss, break-even, before you sign</li>
+          <li>Approve once, one fill on Base</li>
+        </ul>
+      </div>
+    </div>
+    <div class="notes">Show the real page here if you can. Point at the maker signature line: quotes refresh about every minute and the app refuses to broadcast a stale one. Then click Trade and show the wallet asking twice: approve exactly the premium, then the fill.</div>
+  </div>
+
+  <!-- 7 · Demo: feed -->
+  <div class="slide bg-alt" style="padding:56px 80px;">
+    <div style="display:flex;gap:48px;align-items:center;height:100%;">
+      <div class="in" style="flex:1;display:flex;flex-direction:column;gap:18px;">
+        <span class="caption">Demo · the feed</span>
+        <h2 class="h2">Say why. Link the trade. It unfurls like a post on X.</h2>
+        <ul class="bullets">
+          <li>Post text, tag a market, or link your position</li>
+          <li>The link becomes a clickable P&amp;L card</li>
+          <li>Follow the people whose fills are real</li>
+          <li>Leaderboard from onchain P&amp;L only</li>
+        </ul>
+      </div>
+      <div class="shot in" style="flex:1.45;"><img src="img/feed.png" alt="The feed: posts with market tags, live P&amp;L, top traders rail"></div>
+    </div>
+    <div class="notes">The social layer is the moat fomo proved: people trade what their friends trade. Ours cannot be gamed because the only source of a track record is the chain.</div>
+  </div>
+
+  <!-- 8 · Demo: agent + phone -->
+  <div class="slide" style="padding:56px 80px;">
+    <div style="display:flex;gap:40px;align-items:center;height:100%;">
+      <div class="shot in" style="flex:1.3;"><img src="img/agent.png" alt="The AI agent: explains any thesis and prepares a trade; the wallet signs"></div>
+      <div class="shot in" style="flex:.55;"><img src="img/market-phone.png" alt="The market page on a phone"></div>
+      <div class="in" style="flex:1;display:flex;flex-direction:column;gap:18px;">
+        <span class="caption">Demo · AI × options</span>
+        <h2 class="h2">An agent that explains, proposes, and never signs.</h2>
+        <ul class="bullets">
+          <li>Reads the live book and the thesis</li>
+          <li>Prepares real calldata, same path as the ticket</li>
+          <li>Hard loss ceiling and daily caps on the server</li>
+          <li>Your wallet approves every transaction</li>
+        </ul>
+      </div>
+    </div>
+    <div class="notes">This is the AI × Options track. Be precise: the agent prepares, the human signs. Autonomous signing is on the roadmap as a session-key design, deliberately not shipped for a hackathon with real money.</div>
+  </div>
+
+  <!-- 9 · Why onchain -->
+  <div class="slide bg-alt">
+    <span class="caption in">Why this has to be onchain</span>
+    <h1 class="h1 in" style="margin-top:16px;">Rip out the chain and the product is a Discord with screenshots.</h1>
+    <div class="divider in"></div>
+    <div class="grid-2 in">
+      <div class="card" style="border-color:rgba(253,101,54,.35);"><p class="caption loss">Without the chain</p><ul class="bullets" style="margin-top:10px;"><li>Track records are screenshots</li><li>Losing calls quietly disappear</li><li>"Copy me" needs a custodian</li></ul></div>
+      <div class="card" style="border-color:var(--c-primary);"><p class="caption" style="color:var(--c-primary-lift);">On Base with Thetanuts</p><ul class="bullets" style="margin-top:10px;"><li style="color:var(--c-text);">Every position is a real option, verifiable by tx</li><li style="color:var(--c-text);">A losing thesis cannot be deleted</li><li style="color:var(--c-text);">Your wallet is your identity and your custody</li></ul></div>
+    </div>
+    <div class="notes">The blockchain-necessity test, answered with one sentence: the feed is only worth something because nobody, including us, can fake a fill.</div>
+  </div>
+
+  <!-- 10 · Proof -->
+  <div class="slide">
+    <span class="caption in">Proof · today, on mainnet</span>
+    <h1 class="h1 in" style="margin-top:16px;">Real money went through it this morning.</h1>
+    <div class="divider in"></div>
+    <div class="grid-4 in">
+      <div class="metric"><div class="metric-value num gain">$0.99999</div><div class="metric-label">premium paid on our first real fill</div><div class="metric-src">Base block 50,934,233 · 09:23 SGT</div></div>
+      <div class="metric"><div class="metric-value num">$0.125</div><div class="metric-label">protocol fee on that fill, referrer = us</div><div class="metric-src">12.5% of premium, decoded from the OrderFilled event</div></div>
+      <div class="metric"><div class="metric-value num">352</div><div class="metric-label">live structures · 6 assets</div><div class="metric-src">read from the OptionBook at pitch time</div></div>
+      <div class="metric"><div class="metric-value num">1,048</div><div class="metric-label">tests, 5 adversarial review rounds</div><div class="metric-src">double-fill and stale-quote fences proven with mutants</div></div>
+    </div>
+    <p class="body in" style="margin-top:32px;">Every number the app shows is derived from the fill event and the raw order, never from the quote.</p>
+    <div class="notes">Show the position page for the real fill if there is time. If asked what broke: the SDK's own comment about which side the maker is on was backwards; we decoded production fills from Base bytes and pinned the real rule with tests.</div>
+  </div>
+
+  <!-- 11 · Market -->
+  <div class="slide bg-alt">
+    <span class="caption in">Market</span>
+    <h1 class="h1 in" style="margin-top:16px;">Bottom up, from where the money already is.</h1>
+    <div class="divider in"></div>
+    <div class="grid-3 in">
+      <div class="card"><p class="caption" style="color:var(--c-primary-lift);">TAM</p><div class="metric-value num" style="margin-top:12px;font-size:56px;">≈ $3.8T</div><p class="metric-label">crypto options volume per year, all venues</p><p class="metric-src">Deribit $1.875T in 2025 at ≈ 49% share → whole market ≈ $3.8T · derived</p></div>
+      <div class="card"><p class="caption" style="color:var(--c-primary-lift);">SAM</p><div class="metric-value num" style="margin-top:12px;font-size:56px;">≈ $650M</div><p class="metric-label">social-trading fee pool per year</p><p class="metric-src">fomo $18.3M + pump.fun $35.9M in the last 30 days, ×12 · DefiLlama, 6 Sep 2026</p></div>
+      <div class="card" style="border-color:var(--c-primary);"><p class="caption" style="color:var(--c-primary-lift);">SOM · year one</p><div class="metric-value num" style="margin-top:12px;font-size:56px;">referrer share</div><p class="metric-label">of every fill we route through the OptionBook</p><p class="metric-src">fee = min(0.06% notional, 12.5% premium), measured on chain; our split is set by Thetanuts (TBD)</p></div>
+    </div>
+    <p class="body in" style="margin-top:28px;">We do not need to move the options market onchain. We need a fraction of the people who already trade socially to try one <b style="color:var(--c-text);">defined-risk</b> trade.</p>
+    <div class="notes">Be honest about SOM: it is a formula, not a forecast, because the referrer split is Thetanuts' number. The pitch is that the social-trading pool alone is about $650M a year of fees between two apps, and none of it touches options.</div>
+  </div>
+
+  <!-- 12 · Competition -->
+  <div class="slide">
+    <span class="caption in">Competition</span>
+    <h1 class="h1 in" style="margin-top:16px;">Everyone has half of it.</h1>
+    <div class="divider in"></div>
+    <table class="cmp in">
+      <thead><tr><th style="width:280px;"></th><th>fomo</th><th>pump.fun</th><th>Base app</th><th>Deribit</th><th style="color:var(--c-primary-lift);">thesis.fun</th></tr></thead>
+      <tbody>
+        <tr><td>Social feed, follow, leaderboard</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">✗</td><td class="yes">✓</td></tr>
+        <tr><td>Options, not just spot</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td>Defined risk on every trade</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td>Track record verifiable on chain</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td></tr>
+        <tr class="us"><td>Social + options + self-custody</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td></tr>
+      </tbody>
+    </table>
+    <div class="notes">Give the others credit. fomo and pump.fun nailed distribution. Deribit nailed options. We are the only one that puts a defined-risk instrument inside a social feed with the wallet as identity.</div>
+  </div>
+
+  <!-- 13 · Business model -->
+  <div class="slide bg-alt">
+    <span class="caption in">How we earn</span>
+    <h1 class="h1 in" style="margin-top:16px;">The platform earns on trading fees. Nothing else, yet.</h1>
+    <div class="divider in"></div>
+    <div class="grid-2 in">
+      <div class="card"><p class="h3">Referrer fees, live today</p><p class="body" style="margin-top:12px;">Every quote and fill carries our referrer address. Thetanuts pays a share of the protocol fee per collateral token, claimable by us.</p><p class="metric-src">Seen on chain this morning: 0.124998 USDC fee on a 0.99999 USDC premium, referrer 0xd5E6…47dd.</p></div>
+      <div class="card"><p class="h3">Creator fees, roadmap</p><p class="body" style="margin-top:12px;">Attribution is already recorded on every fill made from a post. Paying the author is one ledger away.</p><p class="metric-src">Deliberately not shipped for a hackathon with real money.</p></div>
+    </div>
+    <div class="notes">If asked about the referrer split: it is set by the Thetanuts team per referrer and is zero until we are whitelisted. Say that plainly. It is a nice thing to say to a Thetanuts judge.</div>
+  </div>
+
+  <!-- 14 · What we did not finish -->
+  <div class="slide">
+    <span class="caption in">What we could not finish · the roadmap</span>
+    <h1 class="h1 in" style="margin-top:16px;">What is next, in order.</h1>
+    <div class="divider in"></div>
+    <div class="timeline in" style="max-width:1000px;">
+      <div class="tl done"><div class="dot"></div><p class="h3">Shipped: the MVP on mainnet</p><p class="small">Every liquid market, both sides, verified feed, share cards, the approval-gated agent, the first real fill.</p></div>
+      <div class="tl now"><div class="dot"></div><p class="h3">Next: creator payouts and recovery</p><p class="small">Pay the author of a thesis from the fees their post drives. A one-tap recovery for a fill whose record was lost mid-flight.</p></div>
+      <div class="tl"><div class="dot"></div><p class="h3">Then: every collateral, autonomous hedging</p><p class="small">cbBTC and WETH collateral once contract sizes are proven with real fills. Session-key execution so the agent can hedge as your account, never as its own wallet.</p></div>
+      <div class="tl"><div class="dot"></div><p class="h3">Later: native mobile and more venues</p><p class="small">A bottom-sheet ticket, push on settlement, and any options venue with a public order book.</p></div>
+    </div>
+    <div class="notes">Judges respect a roadmap that starts with what is not done. Lead with the honest gaps, each tied to a reason (real money, unproven sizing), then the ambition.</div>
+  </div>
+
+  <!-- 15 · Team + ask -->
+  <div class="slide bg-alt" style="justify-content:center;align-items:center;text-align:center;">
+    <span class="caption in">Team · the ask</span>
+    <h1 class="h1 in" style="margin-top:16px;">Two builders, one weekend, one real fill.</h1>
+    <div class="grid-2 in" style="margin-top:40px;max-width:900px;gap:24px;">
+      <div class="card"><p class="h3">Aaron Tan</p><p class="small" style="margin-top:6px;">Product, UI, Thetanuts integration</p></div>
+      <div class="card"><p class="h3">Lai Cheong Kian</p><p class="small" style="margin-top:6px;">AI agent track, wallet flows, Farcaster rail</p></div>
+    </div>
+    <p class="h3 in" style="margin-top:40px;max-width:1000px;color:var(--c-text-secondary);font-weight:500;">Competing for <b style="color:var(--c-text);">Best product built on the Thetanuts SDK</b> and <b style="color:var(--c-text);">AI × Options</b>.</p>
+    <div class="notes">One line each on who did what. Then the ask: the two Thetanuts tracks. If there is a Base or Coinbase judge in the room, add that the wallet is the identity and Coinbase Smart Wallet works out of the box.</div>
+  </div>
+
+  <!-- 16 · Close -->
+  <div class="slide" style="justify-content:center;align-items:center;text-align:center;">
+    <h1 class="hero in">thesis<span class="lift">.fun</span></h1>
+    <p class="h3 in" style="color:var(--c-text-secondary);margin-top:18px;font-weight:500;">Say it. Trade it. Real onchain options on Base.</p>
+    <div class="in" style="margin-top:44px;display:flex;flex-direction:column;gap:10px;">
+      <p class="body lift">nuts-web-kappa.vercel.app</p>
+      <p class="body muted">github.com/Ckayz/-nuts</p>
+    </div>
+    <div class="notes">Stop talking. Let them open the site on their phones.</div>
+  </div>
+
+  <div class="nav">
+    <button class="nav-btn" onclick="prev()">← Prev</button>
+    <span class="nav-counter"><span id="current">1</span> / <span id="total"></span></span>
+    <div class="nav-progress"><div class="nav-progress-fill" id="progress"></div></div>
+    <button class="nav-btn" onclick="next()">Next →</button>
+  </div>
+</div>
+<script>
+  let current = 0, notesVisible = false;
+  const slides = document.querySelectorAll('.slide'); const total = slides.length;
+  document.getElementById('total').textContent = total;
+  function show(i) { slides.forEach(s => s.classList.remove('active')); current = Math.max(0, Math.min(i, total - 1)); slides[current].classList.add('active'); document.getElementById('current').textContent = current + 1; document.getElementById('progress').style.width = ((current + 1) / total * 100) + '%'; document.querySelectorAll('.notes').forEach(n => n.classList.remove('visible')); const note = slides[current].querySelector('.notes'); if (note && notesVisible) note.classList.add('visible'); }
+  function next() { show(current + 1); } function prev() { show(current - 1); }
+  document.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); } if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); } if (e.key === 'n' || e.key === 'N') { notesVisible = !notesVisible; show(current); } });
+  document.getElementById('deck').addEventListener('click', (e) => { if (e.target.closest('.nav')) return; if (e.clientX > window.innerWidth / 2) next(); else prev(); });
+  show(0);
+</script>
+</body>
+</html>

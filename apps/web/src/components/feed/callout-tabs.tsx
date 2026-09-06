@@ -3,7 +3,7 @@
 import { useId, useState } from "react";
 import Link from "next/link";
 import type { RankedTheses } from "@/lib/page-data";
-import { TodoOwner } from "@/components/primitives";
+import { TodoOwner, TodoOwnerNote } from "@/components/primitives";
 import { CalloutPost } from "./callout-post";
 import { feedEmptyState } from "./empty-state";
 import { NewCalloutsBar } from "./new-callouts-bar";
@@ -81,7 +81,9 @@ export function CalloutTabs({ ranked, following, top, signedIn, databaseMode }: 
 				<div className="post-rows">{posts.map(thesis =>
 					<CalloutPost key={thesis.slug} thesis={thesis} signedIn={signedIn} databaseMode={databaseMode} />)}</div>
 			)}
-			<span className="note">Trending, ending and settled rules <TodoOwner /></span>
+			{/* CL-10 (2026-09-06 09:0x): the WORDS are the placeholder, so the whole note
+			    hides in production like the marker; the rule itself stays TODO-OWNER. */}
+			<TodoOwnerNote className="note">Trending, ending and settled rules</TodoOwnerNote>
 		</TabPanel>
 	</>;
 }

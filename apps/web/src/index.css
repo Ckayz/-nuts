@@ -180,6 +180,11 @@ em{font-style:normal}
   padding:0 13px;font-size:12.5px;border-radius:var(--r-chip)}
 .btn.out:hover{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn.block{width:100%}
+/* The connect dialog's wallet rows: icon and label on ONE centred row. Declared
+   unlayered so no layered utility can flip the display again (measured
+   2026-09-06 09:0x: the `block` utility had made these `display:block`). */
+.wallet-choice{display:flex;align-items:center;justify-content:center;gap:10px;width:100%}
+.wallet-choice img{display:block;flex:none}
 .btn.big{height:46px;font-size:15px;border-radius:var(--r-field)}
 .btn:disabled{opacity:.55}
 .pills{display:flex;gap:6px;flex-wrap:wrap}

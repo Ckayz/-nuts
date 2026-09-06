@@ -181,7 +181,10 @@ export function ConnectDialog({
 						<button
 							type="button"
 							key={connector.uid}
-							className="btn sec block wallet-choice"
+							// `block` is also a Tailwind utility (`display:block`) that beat `.btn`'s
+							// inline-flex here, so an icon sat on its own line above the label
+							// (owner 2026-09-06 09:0x, screenshot). `.wallet-choice` owns the row.
+							className="btn sec wallet-choice"
 							disabled={pending}
 							onClick={() => onSelect(connector)}
 						>

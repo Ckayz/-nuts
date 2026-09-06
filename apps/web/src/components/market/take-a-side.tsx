@@ -114,6 +114,40 @@ export function structureChanged(quoted: string | undefined, current: string | u
 	return quoted !== current;
 }
 
+/** What a quote belongs to: one structure, one side, one typed amount. */
+export interface QuotedFor {
+	readonly structureId: string;
+	readonly side: Side;
+	readonly budgetInput: string;
+}
+
+/**
+ * K3. Is the quote the panel is showing the quote the controls now describe?
+ *
+ * Both readers of this question used to ask it differently. `staleQuote` below
+ * compared the three fields inline; the amount field's `onBlur` asked nothing
+ * at all and requoted unconditionally — so a plain Tab out of the field, having
+ * changed nothing, fired a server round trip (measured on the probe harness at
+ * `6bcc513`: `{"before":0,"after":1}` for one blur). While that useless quote
+ * was in flight `locked` put the `disabled` attribute on the presets and on
+ * Trade, and a `disabled` control is not focusable: the Tab that left the field
+ * landed on `<body>` instead of on the first preset.
+ *
+ * Fails closed — an absent quote is never "current" — so the blur that has
+ * nothing to compare against still requotes, exactly as it did before.
+ *
+ * Pure, like `structureChanged` above and `sameRequest` below, so the rule can
+ * be pinned without a DOM harness.
+ */
+export function quoteIsCurrent(quoted: QuotedFor | null, current: QuotedFor): boolean {
+	if (quoted === null) return false;
+	return (
+		quoted.structureId === current.structureId &&
+		quoted.side === current.side &&
+		quoted.budgetInput === current.budgetInput
+	);
+}
+
 export type SendGuard =
 	| { readonly ok: true }
 	| { readonly ok: false; readonly action: "connect" | "switch" | "signIn"; readonly message: string };
@@ -154,6 +188,48 @@ export type TicketPhase =
 	| "recording"
 	| "confirmed"
 	| "failed";
+
+/**
+ * K3. The phases in which the ticket really cannot be used: money is moving, or
+ * is about to. Everything else a `useTransition` can be pending for is a quote.
+ */
+const HELD_FAST_PHASES: ReadonlySet<TicketPhase> = new Set<TicketPhase>([
+	"preparing",
+	"approving",
+	"filling",
+	"recording",
+]);
+
+/**
+ * K3. Is the ticket's pending transition one it comes back from on its own — a
+ * requote — rather than one the user's money is inside?
+ *
+ * It decides how "not right now" is expressed on the presets and on Trade: a
+ * requote leaves them focusable and `aria-busy`, everything else keeps the
+ * `disabled` attribute. That matters because a `disabled` control is not
+ * focusable, and the ticket's whole keyboard route runs through those five
+ * controls.
+ *
+ * It reads `pending` AND the phase rather than `phase === "quoting"` alone,
+ * because the two do not turn over together. Measured in Chrome on a db-mode
+ * build with the requote held 600 ms, Tab-ing through the presets as the answer
+ * landed — one frame in which `phase` was already `"idle"` while the transition
+ * was still pending put the attribute back on all five controls and the Tab
+ * fell to `<body>`:
+ *   tab 3: {"active":"button:$500","tabbable":[0,0,0,0,0]}
+ *   tab 4: {"active":"<body>","tabbable":["DISABLED","DISABLED","DISABLED","DISABLED","DISABLED"]}
+ * `"failed"` and `"confirmed"` are not held either: a transition still pending
+ * in those is one already unwinding, and the safe answer for a control that is
+ * about to be live again is to leave it reachable — the click handlers carry
+ * the refusal in every case.
+ *
+ * Pure, like `structureChanged`, `quoteIsCurrent` and `sameRequest`, so every
+ * phase can be pinned without waiting for a frame to happen.
+ */
+export function isQuoting(pending: boolean, phase: TicketPhase, hasSentFill: boolean): boolean {
+	if (!pending || hasSentFill) return false;
+	return !HELD_FAST_PHASES.has(phase);
+}
 
 /**
  * What the button says while the ticket is working. `idle` and `failed` are
@@ -407,7 +483,7 @@ export function TakeASide({
 	 */
 	const requoteSeq = useRef(0);
 	/** C5. The state the current quote belongs to; a quote for another structure, side or budget is not this panel's. */
-	const quotedFor = useRef<{ structureId: string; side: Side; budgetInput: string } | null>(
+	const quotedFor = useRef<QuotedFor | null>(
 		trade === undefined ? null : { structureId: trade.structureId, side: trade.quote.side, budgetInput: trade.quote.budgetInput },
 	);
 
@@ -479,9 +555,7 @@ export function TakeASide({
 	const staleQuote =
 		trade !== undefined &&
 		quotedFor.current !== null &&
-		(quotedFor.current.budgetInput !== budgetInput ||
-			quotedFor.current.side !== side ||
-			quotedFor.current.structureId !== trade.structureId);
+		!quoteIsCurrent(quotedFor.current, { structureId: trade.structureId, side, budgetInput });
 
 	const chooseSide = useCallback(
 		(next: Side) => {
@@ -889,6 +963,26 @@ export function TakeASide({
 	 * send; this is what stops the user being invited to try.
 	 */
 	const locked = busy || sent !== null;
+	/**
+	 * K3. True while a QUOTE — and nothing heavier — is in flight.
+	 *
+	 * `busy` cannot tell a requote from a preparation, and both used to put the
+	 * `disabled` attribute on the presets and on Trade. A preparation, an
+	 * approval, a fill and an unrecorded sent fill are states the ticket really
+	 * cannot be used in; a requote is a round trip after which the same controls
+	 * are live again. A `disabled` control is not focusable, so paying for the
+	 * requote with the tab order broke the money path's keyboard route —
+	 * measured on a db-mode production build at `6bcc513`, 1440px, Tab from the
+	 * amount field after typing a new amount:
+	 *   input:Amount in USDC → <body> → a:Write a post → button:About
+	 * i.e. the four presets and the Trade button were gone. Below they keep
+	 * their place and say "busy" in ARIA instead, and the click handlers carry
+	 * the refusal the attribute used to carry.
+	 *
+	 * `isQuoting` above is the rule, and its doc comment says why it is not
+	 * simply `phase === "quoting"`.
+	 */
+	const quoting = isQuoting(pending, phase, sent !== null);
 	// F20: a stale panel must not be signed for — the figures below belong to the
 	// previous amount. The requote happens on blur, so leaving the field clears
 	// this by itself.
@@ -896,6 +990,13 @@ export function TakeASide({
 	// the button is no longer a Trade button, and an unquotable or stale panel
 	// must not lock the user out of recording money that already moved.
 	const blocked = sent === null && trade !== undefined && (view === null || !view.executable || staleQuote);
+	/**
+	 * K3. Every reason a press on the primary button must do nothing, in one
+	 * place. It was the `disabled` attribute's expression verbatim; the button
+	 * below still sets `disabled` from it except while a quote is in flight,
+	 * and its handler returns on it either way.
+	 */
+	const tradeRefused = trade !== undefined && (busy || blocked || switching);
 	// TODO-OWNER: retry label. "Record the fill" is the wording the agent's own
 	// execution card already uses for this exact state.
 	const buttonLabel =
@@ -969,7 +1070,15 @@ export function TakeASide({
 						disabled={locked}
 						aria-label={`Amount in ${shown.collateralSymbol}`}
 						onChange={(event) => setBudgetInput(event.target.value)}
-						onBlur={() => requote(side, budgetInput)}
+						// K3. Leaving the field requotes only when the field says
+						// something the panel has not been quoted for. An unchanged
+						// blur used to fire a server round trip for a quote the panel
+						// already had, and every one of those cost the keyboard its
+						// place in the ticket (see `quoting` above).
+						onBlur={() => {
+							if (quoteIsCurrent(quotedFor.current, { structureId: trade.structureId, side, budgetInput })) return;
+							requote(side, budgetInput);
+						}}
 					/>
 				)}
 				<span className="unit">{shown.collateralSymbol}</span>
@@ -980,11 +1089,18 @@ export function TakeASide({
 						type="button"
 						className="pill"
 						key={v.raw}
-						disabled={locked}
+						// K3. A preparation, an approval, a fill or an unrecorded sent
+						// fill is a real `disabled`. A requote is not: the preset keeps
+						// its place in the tab order and says so in ARIA, and the
+						// handler below refuses the click the attribute used to refuse.
+						disabled={locked && !quoting}
+						aria-disabled={quoting ? true : undefined}
+						aria-busy={quoting ? true : undefined}
 						onClick={
 							trade === undefined
 								? undefined
 								: () => {
+										if (locked) return;
 										setBudgetInput(v.raw);
 										requote(side, v.raw);
 									}
@@ -1037,8 +1153,21 @@ export function TakeASide({
 			<button
 				type="button"
 				className="btn acc big block go"
-				disabled={trade !== undefined && (busy || blocked || switching)}
-				onClick={trade === undefined ? undefined : sign}
+				// K3. Same refusal as before — `busy || blocked || switching` — but
+				// while a quote is in flight it is expressed without leaving the tab
+				// order, and the handler carries it instead of the attribute. Nothing
+				// reaches `sign()` that could not reach it before.
+				disabled={tradeRefused && !quoting}
+				aria-disabled={tradeRefused && quoting ? true : undefined}
+				aria-busy={quoting ? true : undefined}
+				onClick={
+					trade === undefined
+						? undefined
+						: () => {
+								if (tradeRefused) return;
+								sign();
+							}
+				}
 			>
 				{buttonLabel}
 			</button>

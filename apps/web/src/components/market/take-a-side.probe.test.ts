@@ -777,3 +777,278 @@ describe("I-1: Bull and Bear on the ticket name the asset's direction", () => {
 		expect(calls.quotes.at(-1)).toMatchObject({ structureId: "s2", side: "bear", taker: "buy" });
 	});
 });
+
+// ------------------------------------- K3: the ticket's keyboard path
+
+/** The amount field. Present only with live wiring (`trade !== undefined`). */
+function amountField(h: ReturnType<typeof mount>) {
+	const hit = h.find((e) => e.type === "input")[0];
+	if (hit === undefined) throw new Error("no amount input");
+	return hit;
+}
+
+const pills = (h: ReturnType<typeof mount>) => h.find((e) => e.props.className === "pill");
+
+/** Type into the amount field, exactly as `onChange` receives it. */
+function type(h: ReturnType<typeof mount>, value: string): void {
+	(amountField(h).props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
+	h.flush();
+}
+
+/** Leave the amount field. */
+function blur(h: ReturnType<typeof mount>): void {
+	(amountField(h).props.onBlur as () => void)();
+	h.flush();
+}
+
+describe("K3: a blur that changes nothing must not requote", () => {
+	test("UNCHANGED_BLUR — tabbing out of an untouched amount field asks the server nothing", async () => {
+		reset();
+		const h = mountTicket();
+		await h.settle();
+		calls.quotes = [];
+
+		blur(h);
+		await h.settle();
+
+		// And nothing has been taken out of the keyboard's way for it.
+		expect({
+			quotes: calls.quotes,
+			pillsDisabled: pills(h).map((p) => p.props.disabled),
+			tradeDisabled: primary(h).props.disabled,
+		}).toEqual({ quotes: [], pillsDisabled: [false], tradeDisabled: false });
+	});
+
+	test("a blur after a CHANGED amount still requotes — the fix removes no quote the panel needs", async () => {
+		reset();
+		const h = mountTicket();
+		await h.settle();
+		calls.quotes = [];
+
+		type(h, "7");
+		blur(h);
+		await h.settle();
+
+		expect(calls.quotes).toEqual([{ structureId: "s1", side: "bull", taker: "buy", budgetInput: "7" }]);
+	});
+
+	test("a blur after the amount was typed back to what was quoted asks nothing either", async () => {
+		reset();
+		const h = mountTicket();
+		await h.settle();
+		calls.quotes = [];
+
+		type(h, "7");
+		type(h, "5");
+		blur(h);
+		await h.settle();
+
+		expect(calls.quotes).toEqual([]);
+	});
+});
+
+describe("K3: a requote in flight must not take the controls out of the tab order", () => {
+	test("QUOTE_IN_FLIGHT — the presets and Trade stay focusable and say they are busy", async () => {
+		reset();
+		const held = deferred<TicketQuoteView>();
+		replies.quote = () => held.promise;
+
+		const h = mountTicket();
+		await h.settle();
+		type(h, "7");
+		blur(h);
+
+		// The quote is in flight: one request out, no answer yet.
+		expect(calls.quotes.length).toBe(1);
+		const state = {
+			label: primary(h).text,
+			tradeDisabled: primary(h).props.disabled,
+			tradeAriaBusy: primary(h).props["aria-busy"],
+			tradeAriaDisabled: primary(h).props["aria-disabled"],
+			pillsDisabled: pills(h).map((p) => p.props.disabled),
+			pillsAriaBusy: pills(h).map((p) => p.props["aria-busy"]),
+			pillsAriaDisabled: pills(h).map((p) => p.props["aria-disabled"]),
+		};
+
+		// `mount().click` refuses a `disabled` element, so this line is itself the
+		// assertion that the button is reachable — and the counts after it are the
+		// assertion that reaching it changed nothing.
+		h.click(primary(h));
+		h.click(pills(h)[0] as NonNullable<ReturnType<typeof primary>>);
+
+		expect({
+			...state,
+			sends: calls.sends,
+			prepares: calls.prepares,
+			// The preset press must not have started a second quote either.
+			quotes: calls.quotes.length,
+		}).toEqual({
+			label: "Quoting…",
+			tradeDisabled: false,
+			tradeAriaBusy: true,
+			tradeAriaDisabled: true,
+			pillsDisabled: [false],
+			pillsAriaBusy: [true],
+			pillsAriaDisabled: [true],
+			sends: [],
+			prepares: [],
+			quotes: 1,
+		});
+
+		held.resolve(quoteView("bull", RAW_BUY, "BUY-A"));
+		await h.settle();
+		// And once the answer lands the ticket is usable again.
+		expect({ tradeDisabled: primary(h).props.disabled, pillsDisabled: pills(h).map((p) => p.props.disabled) }).toEqual({
+			tradeDisabled: false,
+			pillsDisabled: [false],
+		});
+	});
+
+	test("a PREPARATION in flight is still a real `disabled` — it is not a transient requote", async () => {
+		reset();
+		const held = deferred<PrepareResult>();
+		replies.prepare = () => held.promise;
+
+		const h = mountTicket();
+		h.click(primary(h));
+
+		expect({
+			tradeDisabled: primary(h).props.disabled,
+			pillsDisabled: pills(h).map((p) => p.props.disabled),
+			amountDisabled: amountField(h).props.disabled,
+		}).toEqual({ tradeDisabled: true, pillsDisabled: [true], amountDisabled: true });
+
+		held.resolve({ ok: false, code: "X", reason: "stop" });
+		await h.settle();
+	});
+});
+
+describe("K3: quoteIsCurrent", () => {
+	const at = (structureId: string, side: "bull" | "bear", budgetInput: string) => ({ structureId, side, budgetInput });
+
+	test("the same structure, side and amount is current; any difference is not", async () => {
+		const { quoteIsCurrent } = (await import("./take-a-side")) as unknown as {
+			quoteIsCurrent: (a: ReturnType<typeof at> | null, b: ReturnType<typeof at>) => boolean;
+		};
+		expect({
+			same: quoteIsCurrent(at("s1", "bull", "5"), at("s1", "bull", "5")),
+			otherBudget: quoteIsCurrent(at("s1", "bull", "5"), at("s1", "bull", "7")),
+			otherSide: quoteIsCurrent(at("s1", "bull", "5"), at("s1", "bear", "5")),
+			otherStructure: quoteIsCurrent(at("s1", "bull", "5"), at("s2", "bull", "5")),
+			// Fails closed: with nothing quoted, the blur must still requote.
+			nothingQuoted: quoteIsCurrent(null, at("s1", "bull", "5")),
+			// "" and "5" are different amounts, not both "empty".
+			emptyVsValue: quoteIsCurrent(at("s1", "bull", ""), at("s1", "bull", "5")),
+		}).toEqual({
+			same: true,
+			otherBudget: false,
+			otherSide: false,
+			otherStructure: false,
+			nothingQuoted: false,
+			emptyVsValue: false,
+		});
+	});
+});
+
+describe("K3: isQuoting — which pending transition may keep the controls focusable", () => {
+	const PHASES = ["idle", "quoting", "preparing", "approving", "filling", "recording", "confirmed", "failed"] as const;
+
+	test("every phase, both `pending` values, with and without a sent fill", async () => {
+		const { isQuoting } = (await import("./take-a-side")) as unknown as {
+			isQuoting: (pending: boolean, phase: (typeof PHASES)[number], hasSentFill: boolean) => boolean;
+		};
+		const table = (pending: boolean, hasSentFill: boolean) =>
+			Object.fromEntries(PHASES.map((phase) => [phase, isQuoting(pending, phase, hasSentFill)]));
+
+		expect({
+			// Nothing in flight: never "quoting", whatever the phase says.
+			notPending: table(false, false),
+			// A transition in flight. `idle` is in here on purpose: it is the frame
+			// in which a landed quote has already set the phase back while the
+			// transition is still pending, and treating it as held put the
+			// `disabled` attribute on all five controls for one frame (measured).
+			pending: table(true, false),
+			// A sent, unrecorded fill owns the ticket no matter what else is true.
+			pendingWithSentFill: table(true, true),
+		}).toEqual({
+			notPending: {
+				idle: false,
+				quoting: false,
+				preparing: false,
+				approving: false,
+				filling: false,
+				recording: false,
+				confirmed: false,
+				failed: false,
+			},
+			pending: {
+				idle: true,
+				quoting: true,
+				preparing: false,
+				approving: false,
+				filling: false,
+				recording: false,
+				confirmed: true,
+				failed: true,
+			},
+			pendingWithSentFill: {
+				idle: false,
+				quoting: false,
+				preparing: false,
+				approving: false,
+				filling: false,
+				recording: false,
+				confirmed: false,
+				failed: false,
+			},
+		});
+	});
+});
+
+describe("K3: the frame in which a landed quote meets a still-pending transition", () => {
+	test("QUOTE_LANDING — no control takes the `disabled` attribute back on the way out", async () => {
+		reset();
+		const held = deferred<TicketQuoteView>();
+		replies.quote = () => held.promise;
+
+		const h = mountTicket();
+		await h.settle();
+		type(h, "7");
+		blur(h);
+		const labelWhileInFlight = primary(h).text;
+
+		// Step the answer home one microtask at a time and render each frame. The
+		// component's own `setPhase("idle")` runs a whole tick before the
+		// transition's `isPending` clears, and rendering that gap is the only way
+		// to see the frame Chrome saw: measured on a db-mode build with the
+		// requote held 600 ms, Tab-ing through the presets as the answer landed
+		// went `button:$500` → `<body>` because all five controls were `disabled`
+		// again for exactly one frame.
+		const frames: Array<{ label: string; trade: unknown; pills: unknown[] }> = [];
+		held.resolve(quoteView("bull", RAW_BUY, "BUY-A"));
+		for (let i = 0; i < 8; i += 1) {
+			await Promise.resolve();
+			h.flush();
+			frames.push({ label: primary(h).text, trade: primary(h).props.disabled, pills: pills(h).map((p) => p.props.disabled) });
+		}
+		await h.settle();
+
+		expect({
+			labelWhileInFlight,
+			// The gap really was rendered: the phase is back to `idle` — the button
+			// reads "Trade" again — in the very first frame after the answer, a
+			// tick before the transition's `isPending` clears. Without this line
+			// the rest of the assertion could pass vacuously.
+			firstFrameAfterLanding: frames[0]?.label,
+			everDisabled: frames.some((f) => f.trade === true || f.pills.some((d) => d === true)),
+			finalTrade: primary(h).props.disabled,
+			finalPills: pills(h).map((p) => p.props.disabled),
+		}).toEqual({
+			labelWhileInFlight: "Quoting…",
+			firstFrameAfterLanding: "Trade",
+			everDisabled: false,
+			finalTrade: false,
+			finalPills: [false],
+		});
+	});
+});
